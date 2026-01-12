@@ -1413,7 +1413,7 @@
         }
         
         function updateStats() {
-            const nodes = Object.values(nodesData);
+            const nodes = Object.values(nodesData).filter(n => !n.isVirtualRoot);
             document.getElementById('total-nodes').textContent = nodes.length;
             document.getElementById('online-nodes').textContent = nodes.filter(n => n.isOnline).length;
             
