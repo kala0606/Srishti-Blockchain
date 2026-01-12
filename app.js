@@ -130,39 +130,12 @@ class SrishtiApp {
      */
     async createNode(name, parentId = null) {
         try {
-            // Generate key pair
+            // Generate key pair FIRST
             this.keyPair = await window.SrishtiKeys.generateKeyPair();
             this.publicKeyBase64 = await window.SrishtiKeys.exportPublicKeyBase64(this.keyPair.publicKey);
             this.nodeId = await window.SrishtiKeys.generateNodeId(this.keyPair.publicKey);
             
-            // Create node join event
-            const joinEvent = window.SrishtiEvent.createNodeJoin({
-                nodeId: this.nodeId,
-                name: name,
-                parentId: parentId,
-                publicKey: this.publicKeyBase64
-            });
-            
-            // Get participation proof
-            const participationProof = this.consensus.createParticipationProof(this.nodeId) || {
-                nodeId: this.nodeId,
-                score: 0.5,
-                timestamp: Date.now()
-            };
-            
-            // Create block
-            const latestBlock = this.chain.getLatestBlock();
-            const newBlock = new window.SrishtiBlock({
-                index: this.chain.getLength(),
-                previousHash: latestBlock.hash,
-                data: joinEvent,
-                proposer: parentId || 'genesis',
-                participationProof: participationProof
-            });
-            
-            await newBlock.computeHash();
-            
-            // Save keys first (before network initialization)
+            // Save keys first
             const privateKeyBase64 = await window.SrishtiKeys.exportPrivateKeyBase64(this.keyPair.privateKey);
             await this.storage.saveKeys(this.nodeId, {
                 publicKey: this.publicKeyBase64,
@@ -177,25 +150,57 @@ class SrishtiApp {
             
             this.currentUser = { id: this.nodeId, name: name };
             
-            // Initialize network if not already initialized
+            // Initialize network FIRST and sync with existing peers
             if (!this.network) {
                 await this.initNetwork();
             }
             
-            // Add block to chain and broadcast (proposeBlock handles both)
+            // Wait for initial sync if there are peers
+            if (this.network && this.network.signaling) {
+                console.log('⏳ Waiting for initial peer sync...');
+                await this.waitForInitialSync();
+            }
+            
+            // NOW create the join block (after syncing, so we have the correct chain state)
+            const joinEvent = window.SrishtiEvent.createNodeJoin({
+                nodeId: this.nodeId,
+                name: name,
+                parentId: parentId,
+                publicKey: this.publicKeyBase64
+            });
+            
+            // Get participation proof
+            const participationProof = this.consensus.createParticipationProof(this.nodeId) || {
+                nodeId: this.nodeId,
+                score: 0.5,
+                timestamp: Date.now()
+            };
+            
+            // Create block on top of the (potentially synced) chain
+            const latestBlock = this.chain.getLatestBlock();
+            console.log(`📦 Creating block at index ${this.chain.getLength()} (after sync)`);
+            
+            const newBlock = new window.SrishtiBlock({
+                index: this.chain.getLength(),
+                previousHash: latestBlock.hash,
+                data: joinEvent,
+                proposer: parentId || 'genesis',
+                participationProof: participationProof
+            });
+            
+            await newBlock.computeHash();
+            
+            // Add block to chain and broadcast
             if (this.network) {
                 await this.network.proposeBlock(newBlock);
                 
                 // If we joined under a parent, attempt to connect to them
                 if (parentId) {
-                    // Wait a moment for network to be fully initialized
                     setTimeout(async () => {
-                        // Get parent's public key from the chain
                         const parentNode = this.chain.buildNodeMap()[parentId];
                         if (parentNode && parentNode.publicKey) {
                             console.log(`🔗 Adding pending connection to parent: ${parentId}`);
                             this.network.addPendingConnection(parentId, parentNode.publicKey);
-                            // Also try immediately if signaling is ready
                             if (this.network.signaling && this.network.signaling.isConnected()) {
                                 await this.network.attemptConnection(parentId, parentNode.publicKey);
                             }
@@ -217,6 +222,48 @@ class SrishtiApp {
             console.error('Failed to create node:', error);
             throw error;
         }
+    }
+    
+    /**
+     * Wait for initial sync with peers (with timeout)
+     */
+    async waitForInitialSync() {
+        return new Promise((resolve) => {
+            const startTime = Date.now();
+            const timeout = 3000; // 3 second timeout
+            
+            const checkSync = () => {
+                // If we've synced (chain has more than genesis) or no peers available
+                const peerCount = this.network.peers?.size || 0;
+                const chainLength = this.chain.getLength();
+                const elapsed = Date.now() - startTime;
+                
+                if (elapsed >= timeout) {
+                    console.log(`⏰ Sync timeout after ${timeout}ms. Chain length: ${chainLength}, Peers: ${peerCount}`);
+                    resolve();
+                    return;
+                }
+                
+                // If we have peers and chain has been updated beyond genesis
+                if (peerCount > 0 && chainLength > 1) {
+                    console.log(`✅ Initial sync complete. Chain length: ${chainLength}`);
+                    resolve();
+                    return;
+                }
+                
+                // If no peers connected yet, keep waiting
+                if (peerCount === 0 && elapsed < timeout) {
+                    setTimeout(checkSync, 200);
+                    return;
+                }
+                
+                // We have peers but chain is still at genesis - wait a bit more for sync
+                setTimeout(checkSync, 200);
+            };
+            
+            // Start checking after a short delay for signaling to register
+            setTimeout(checkSync, 500);
+        });
     }
     
     /**

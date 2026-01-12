@@ -408,21 +408,44 @@ class Network {
             this.syncing = true;
             
             const receivedBlocks = message.blocks;
-            if (receivedBlocks.length === 0) {
-                console.log(`📭 No blocks to sync`);
+            if (!receivedBlocks || receivedBlocks.length === 0) {
+                console.log(`📭 No blocks received`);
                 return;
             }
             
-            // Validate and replace chain
-            await this.chain.replaceChain(receivedBlocks);
+            const ourLength = this.chain.getLength();
+            const theirLength = receivedBlocks.length;
             
-            // Save to storage
-            await this.saveChain();
+            console.log(`📊 Chain comparison: ours=${ourLength}, theirs=${theirLength}`);
             
-            // Notify listeners
-            this.onChainUpdate(this.chain);
-            
-            console.log(`✅ Synced chain from ${peerId}: ${receivedBlocks.length} blocks`);
+            // If their chain is longer, replace ours
+            if (theirLength > ourLength) {
+                console.log(`📥 Their chain is longer, replacing ours...`);
+                await this.chain.replaceChain(receivedBlocks);
+                await this.saveChain();
+                this.onChainUpdate(this.chain);
+                console.log(`✅ Chain replaced with ${theirLength} blocks from ${peerId}`);
+            } 
+            // If same length, use deterministic tie-breaker (earlier genesis timestamp wins)
+            else if (theirLength === ourLength && theirLength > 1) {
+                const ourGenesis = this.chain.blocks[0];
+                const theirGenesis = receivedBlocks[0];
+                
+                // Compare genesis timestamps (earlier wins) or hash as tie-breaker
+                if (theirGenesis.timestamp < ourGenesis.timestamp ||
+                    (theirGenesis.timestamp === ourGenesis.timestamp && 
+                     theirGenesis.hash < ourGenesis.hash)) {
+                    console.log(`📥 Their chain has earlier genesis, replacing ours...`);
+                    await this.chain.replaceChain(receivedBlocks);
+                    await this.saveChain();
+                    this.onChainUpdate(this.chain);
+                    console.log(`✅ Chain replaced (earlier genesis) with ${theirLength} blocks from ${peerId}`);
+                } else {
+                    console.log(`📭 Our chain wins tie-breaker, keeping ours`);
+                }
+            } else {
+                console.log(`📭 Our chain is longer or equal, keeping ours`);
+            }
         } catch (error) {
             console.error(`Sync failed from ${peerId}:`, error);
         } finally {
@@ -494,13 +517,14 @@ class Network {
             return;
         }
         
+        // Always request full chain to compare and merge
         const request = window.SrishtiProtocol.createSyncRequest({
-            fromIndex: this.chain.getLength(),
+            fromIndex: 0,  // Request entire chain for comparison
             chainLength: this.chain.getLength(),
             latestHash: this.chain.getLatestBlock()?.hash || null
         });
         
-        console.log(`📤 Sending SYNC_REQUEST to ${peerId}:`, { chainLength: this.chain.getLength() });
+        console.log(`📤 Sending SYNC_REQUEST to ${peerId}:`, { ourChainLength: this.chain.getLength() });
         const sent = connection.send(request);
         console.log(`📤 SYNC_REQUEST sent: ${sent}`);
     }
