@@ -91,13 +91,17 @@ class Network {
                 onIceCandidate: (data) => this.handleSignalingIceCandidate(data),
                 onPeerConnected: (peers) => {
                     console.log(`📡 Available peers: ${peers.length}`, peers);
-                    // When we get the peer list, try to connect to ALL available peers
-                    // This ensures both parent and child try to connect
+                    // When we get the peer list, try to connect to available peers
+                    // But only initiate if our nodeId is "lower" to avoid glare (both sides offering)
                     for (const peerId of peers) {
                         if (!this.peers.has(peerId) && !this.pendingOffers.has(peerId)) {
-                            console.log(`🔌 Attempting connection to available peer: ${peerId}`);
-                            // We don't have their public key yet, but we can still send an offer
-                            this.attemptConnection(peerId, null);
+                            // Only initiate connection if our nodeId is lower (to avoid both sides offering)
+                            if (this.nodeId < peerId) {
+                                console.log(`🔌 Initiating connection to peer: ${peerId} (we have lower ID)`);
+                                this.attemptConnection(peerId, null);
+                            } else {
+                                console.log(`⏳ Waiting for peer ${peerId} to initiate (they have lower ID)`);
+                            }
                         }
                     }
                 }
@@ -124,6 +128,23 @@ class Network {
             return;
         }
         
+        // Handle glare: if we also sent an offer to this peer, the peer with higher ID should back off
+        if (this.pendingOffers.has(fromNodeId)) {
+            if (this.nodeId > fromNodeId) {
+                // We have higher ID, so we back off - close our pending offer and accept theirs
+                console.log(`🔄 Glare detected with ${fromNodeId} - we back off (higher ID)`);
+                const ourConnection = this.pendingOffers.get(fromNodeId);
+                if (ourConnection) {
+                    ourConnection.close();
+                }
+                this.pendingOffers.delete(fromNodeId);
+            } else {
+                // We have lower ID, so we win - ignore their offer
+                console.log(`🔄 Glare detected with ${fromNodeId} - they should back off (we have lower ID)`);
+                return;
+            }
+        }
+        
         try {
             console.log(`📝 Creating answer for ${fromNodeId}...`);
             
@@ -132,7 +153,11 @@ class Network {
                 onMessage: (message, peerId) => this.handleMessage(message, peerId),
                 onConnectionStateChange: (state) => {
                     console.log(`📶 Connection state from ${fromNodeId}: ${state}`);
-                    if (state === 'disconnected' || state === 'failed') {
+                    if (state === 'data_channel_open') {
+                        console.log(`🎉 Data channel open with ${fromNodeId}! Syncing...`);
+                        this.requestSync(fromNodeId);
+                    } else if (state === 'data_channel_closed' || state === 'data_channel_error' || 
+                               state === 'disconnected' || state === 'failed') {
                         this.disconnectPeer(fromNodeId);
                     }
                 },
@@ -157,11 +182,10 @@ class Network {
                 this.signaling.sendAnswer(fromNodeId, answer);
             }
             
-            console.log(`✅ Connected to ${fromNodeId} (as answerer)`);
-            
-            // Request chain sync from the peer
-            console.log(`🔄 Requesting chain sync from ${fromNodeId}...`);
-            await this.requestSync(fromNodeId);
+            console.log(`✅ WebRTC connection established with ${fromNodeId} (as answerer)`);
+            console.log(`⏳ Waiting for data channel to open before sync...`);
+            // Don't request sync here - wait for data channel to open
+            // The sync will be triggered by onConnectionStateChange when state is 'connected'
         } catch (error) {
             console.error(`❌ Failed to handle offer from ${fromNodeId}:`, error);
         }
@@ -192,11 +216,9 @@ class Network {
                 this.peers.set(fromNodeId, connection);
             }
             
-            console.log(`✅ Connected to ${fromNodeId} (as offerer)`);
-            
-            // Request chain sync from the peer
-            console.log(`🔄 Requesting chain sync from ${fromNodeId}...`);
-            await this.requestSync(fromNodeId);
+            console.log(`✅ WebRTC connection established with ${fromNodeId} (as offerer)`);
+            console.log(`⏳ Waiting for data channel to open before sync...`);
+            // Don't request sync here - wait for data channel to open
         } catch (error) {
             console.error(`❌ Failed to handle answer from ${fromNodeId}:`, error);
             this.pendingOffers.delete(fromNodeId);
@@ -613,11 +635,13 @@ class Network {
                 onMessage: (message, peerId) => this.handleMessage(message, peerId),
                 onConnectionStateChange: (state) => {
                     console.log(`📶 Connection state to ${nodeId}: ${state}`);
-                    if (state === 'connected' || state === 'completed') {
+                    if (state === 'data_channel_open') {
                         this.pendingOffers.delete(nodeId);
                         this.pendingConnections.delete(nodeId);
-                        console.log(`✅ WebRTC connected to ${nodeId}!`);
-                    } else if (state === 'disconnected' || state === 'failed') {
+                        console.log(`🎉 Data channel open with ${nodeId}! Syncing...`);
+                        this.requestSync(nodeId);
+                    } else if (state === 'data_channel_closed' || state === 'data_channel_error' ||
+                               state === 'disconnected' || state === 'failed') {
                         this.pendingOffers.delete(nodeId);
                         this.disconnectPeer(nodeId);
                     }

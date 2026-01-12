@@ -114,21 +114,21 @@ class PeerConnection {
      */
     setupDataChannel() {
         this.dataChannel.onopen = () => {
-            console.log('📡 Data channel opened');
+            console.log('📡 Data channel opened - ready to send/receive');
             this.connected = true;
-            this.onConnectionStateChange('connected');
+            this.onConnectionStateChange('data_channel_open');
         };
         
         this.dataChannel.onclose = () => {
             console.log('📡 Data channel closed');
             this.connected = false;
-            this.onConnectionStateChange('disconnected');
+            this.onConnectionStateChange('data_channel_closed');
         };
         
         this.dataChannel.onerror = (error) => {
             console.error('📡 Data channel error:', error);
             this.connected = false;
-            this.onConnectionStateChange('error');
+            this.onConnectionStateChange('data_channel_error');
         };
         
         this.dataChannel.onmessage = (event) => {
