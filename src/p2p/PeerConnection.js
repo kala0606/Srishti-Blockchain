@@ -188,8 +188,10 @@ class PeerConnection {
      * @returns {boolean} - Success status
      */
     send(message) {
+        console.log(`📤 PeerConnection.send called, connected=${this.connected}, dataChannel=${this.dataChannel?.readyState}`);
+        
         if (!this.connected || !this.dataChannel || this.dataChannel.readyState !== 'open') {
-            console.warn('Cannot send: data channel not open');
+            console.warn(`Cannot send: connected=${this.connected}, dataChannel=${this.dataChannel?.readyState}`);
             return false;
         }
         
@@ -200,6 +202,7 @@ class PeerConnection {
             }
             
             const serialized = window.SrishtiProtocol.serialize(message);
+            console.log(`📤 Sending via data channel: ${message.type}`);
             this.dataChannel.send(serialized);
             return true;
         } catch (error) {

@@ -214,8 +214,10 @@ class Network {
             // Add to peers if not already there
             if (!this.peers.has(fromNodeId)) {
                 this.peers.set(fromNodeId, connection);
+                console.log(`➕ Added ${fromNodeId} to peers map`);
             }
             
+            console.log(`📊 Current peers:`, Array.from(this.peers.keys()));
             console.log(`✅ WebRTC connection established with ${fromNodeId} (as offerer)`);
             console.log(`⏳ Waiting for data channel to open before sync...`);
             // Don't request sync here - wait for data channel to open
@@ -325,6 +327,8 @@ class Network {
      * @param {string} peerId - Peer's node ID
      */
     async handleMessage(message, peerId) {
+        console.log(`📨 Received message from ${peerId}:`, message.type);
+        
         if (!window.SrishtiProtocol) return;
         
         switch (message.type) {
@@ -368,11 +372,18 @@ class Network {
      * Handle SYNC_REQUEST
      */
     async handleSyncRequest(message, peerId) {
+        console.log(`📥 Received SYNC_REQUEST from ${peerId}:`, message);
+        
         const connection = this.peers.get(peerId);
-        if (!connection) return;
+        if (!connection) {
+            console.log(`❌ No connection for ${peerId} to send response`);
+            return;
+        }
         
         const fromIndex = message.fromIndex || 0;
         const blocks = this.chain.blocks.slice(fromIndex);
+        
+        console.log(`📤 Sending SYNC_RESPONSE to ${peerId}: ${blocks.length} blocks`);
         
         const response = window.SrishtiProtocol.createSyncResponse({
             blocks: blocks.map(b => b.toJSON()),
@@ -386,13 +397,21 @@ class Network {
      * Handle SYNC_RESPONSE
      */
     async handleSyncResponse(message, peerId) {
-        if (this.syncing) return; // Avoid concurrent syncs
+        console.log(`📥 Received SYNC_RESPONSE from ${peerId}: ${message.blocks?.length || 0} blocks`);
+        
+        if (this.syncing) {
+            console.log(`⏳ Already syncing, ignoring response`);
+            return;
+        }
         
         try {
             this.syncing = true;
             
             const receivedBlocks = message.blocks;
-            if (receivedBlocks.length === 0) return;
+            if (receivedBlocks.length === 0) {
+                console.log(`📭 No blocks to sync`);
+                return;
+            }
             
             // Validate and replace chain
             await this.chain.replaceChain(receivedBlocks);
@@ -461,8 +480,19 @@ class Network {
      * @param {string} peerId - Peer's node ID
      */
     async requestSync(peerId) {
+        console.log(`📤 requestSync called for ${peerId}`);
+        
         const connection = this.peers.get(peerId);
-        if (!connection) return;
+        if (!connection) {
+            console.log(`❌ No connection found for ${peerId} in peers map`);
+            console.log(`📊 Current peers:`, Array.from(this.peers.keys()));
+            return;
+        }
+        
+        if (!connection.isConnected()) {
+            console.log(`❌ Connection to ${peerId} is not open`);
+            return;
+        }
         
         const request = window.SrishtiProtocol.createSyncRequest({
             fromIndex: this.chain.getLength(),
@@ -470,7 +500,9 @@ class Network {
             latestHash: this.chain.getLatestBlock()?.hash || null
         });
         
-        connection.send(request);
+        console.log(`📤 Sending SYNC_REQUEST to ${peerId}:`, { chainLength: this.chain.getLength() });
+        const sent = connection.send(request);
+        console.log(`📤 SYNC_REQUEST sent: ${sent}`);
     }
     
     /**
