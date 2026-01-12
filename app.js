@@ -188,11 +188,21 @@ class SrishtiApp {
                 
                 // If we joined under a parent, attempt to connect to them
                 if (parentId) {
-                    // Get parent's public key from the chain
-                    const parentNode = this.chain.buildNodeMap()[parentId];
-                    if (parentNode && parentNode.publicKey) {
-                        this.network.addPendingConnection(parentId, parentNode.publicKey);
-                    }
+                    // Wait a moment for network to be fully initialized
+                    setTimeout(async () => {
+                        // Get parent's public key from the chain
+                        const parentNode = this.chain.buildNodeMap()[parentId];
+                        if (parentNode && parentNode.publicKey) {
+                            console.log(`🔗 Adding pending connection to parent: ${parentId}`);
+                            this.network.addPendingConnection(parentId, parentNode.publicKey);
+                            // Also try immediately if signaling is ready
+                            if (this.network.signaling && this.network.signaling.isConnected()) {
+                                await this.network.attemptConnection(parentId, parentNode.publicKey);
+                            }
+                        } else {
+                            console.warn(`⚠️ Parent node ${parentId} not found in chain`);
+                        }
+                    }, 1000);
                 }
             } else {
                 // If no network, just add to chain locally

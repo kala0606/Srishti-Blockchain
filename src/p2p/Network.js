@@ -91,6 +91,14 @@ class Network {
                 onIceCandidate: (data) => this.handleSignalingIceCandidate(data),
                 onPeerConnected: (peers) => {
                     console.log(`📡 Available peers: ${peers.length}`);
+                    // When we get the peer list, try to connect to any pending connections
+                    for (const peerId of peers) {
+                        if (this.pendingConnections.has(peerId)) {
+                            const info = this.pendingConnections.get(peerId);
+                            console.log(`🔌 Found pending connection to ${peerId}, attempting...`);
+                            this.attemptConnection(peerId, info.publicKey);
+                        }
+                    }
                 }
             });
             
@@ -131,6 +139,7 @@ class Network {
             
             const answer = await connection.initAsAnswerer(offer);
             this.peers.set(fromNodeId, connection);
+            this.pendingConnections.delete(fromNodeId); // Remove from pending
             
             // Send answer via signaling
             if (this.signaling) {
@@ -138,6 +147,9 @@ class Network {
             }
             
             console.log(`✅ Connected to ${fromNodeId} (as answerer)`);
+            
+            // Request chain sync from the peer
+            await this.requestSync(fromNodeId);
         } catch (error) {
             console.error(`Failed to handle offer from ${fromNodeId}:`, error);
         }
@@ -158,7 +170,17 @@ class Network {
         try {
             await connection.setRemoteAnswer(answer);
             this.pendingOffers.delete(fromNodeId);
+            this.pendingConnections.delete(fromNodeId); // Remove from pending
+            
+            // Add to peers if not already there
+            if (!this.peers.has(fromNodeId)) {
+                this.peers.set(fromNodeId, connection);
+            }
+            
             console.log(`✅ Connected to ${fromNodeId} (as offerer)`);
+            
+            // Request chain sync from the peer
+            await this.requestSync(fromNodeId);
         } catch (error) {
             console.error(`Failed to handle answer from ${fromNodeId}:`, error);
             this.pendingOffers.delete(fromNodeId);
@@ -505,22 +527,35 @@ class Network {
      * @param {string} publicKey - Node's public key (base64)
      */
     addPendingConnection(nodeId, publicKey) {
+        if (this.peers.has(nodeId)) {
+            console.log(`⏭️ Already connected to ${nodeId}`);
+            return;
+        }
+        
         this.pendingConnections.set(nodeId, {
             publicKey: publicKey,
             timestamp: Date.now()
         });
         console.log(`📝 Added pending connection to ${nodeId}`);
         
-        // Attempt connection immediately
-        this.attemptConnection(nodeId, publicKey);
+        // Attempt connection immediately if signaling is ready
+        if (this.signaling && this.signaling.isConnected()) {
+            this.attemptConnection(nodeId, publicKey);
+        } else {
+            console.log(`⏳ Signaling not ready, will connect when available`);
+        }
     }
     
     /**
      * Attempt all pending connections
      */
     async attemptPendingConnections() {
+        if (!this.signaling || !this.signaling.isConnected()) {
+            return; // Wait for signaling to be ready
+        }
+        
         for (const [nodeId, info] of this.pendingConnections.entries()) {
-            if (!this.peers.has(nodeId)) {
+            if (!this.peers.has(nodeId) && !this.pendingOffers.has(nodeId)) {
                 await this.attemptConnection(nodeId, info.publicKey);
             }
         }
