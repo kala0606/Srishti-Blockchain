@@ -17,6 +17,7 @@ class PeerConnection {
         this.nodeId = options.nodeId;
         this.onMessage = options.onMessage || (() => {});
         this.onConnectionStateChange = options.onConnectionStateChange || (() => {});
+        this.onIceCandidate = options.onIceCandidate || (() => {});
         
         this.pc = null;
         this.dataChannel = null;
@@ -156,8 +157,8 @@ class PeerConnection {
         // Handle ICE candidates
         this.pc.onicecandidate = (event) => {
             if (event.candidate) {
-                // ICE candidate available - can be sent to peer via signaling
-                // For now, we'll handle this in the Network class
+                // Send ICE candidate to peer via signaling
+                this.onIceCandidate(event.candidate);
             }
         };
         

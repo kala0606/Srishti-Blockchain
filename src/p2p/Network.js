@@ -21,10 +21,15 @@ class Network {
         this.chain = options.chain;
         this.storage = options.storage;
         this.onChainUpdate = options.onChainUpdate || (() => {});
+        this.signalingServerUrl = options.signalingServerUrl || null;
         
         this.peers = new Map(); // Map<nodeId, PeerConnection>
         this.peerInfo = new Map(); // Map<nodeId, {publicKey, chainLength, latestHash}>
+        this.pendingConnections = new Map(); // Map<nodeId, {publicKey, timestamp}> - Nodes we want to connect to
+        this.pendingOffers = new Map(); // Map<nodeId, PeerConnection> - Connections waiting for answer
+        this.pendingAnswers = new Map(); // Map<nodeId, {answer, connection}> - Answers waiting to be sent
         
+        this.signaling = null;
         this.syncing = false;
         this.heartbeatInterval = null;
         this.syncInterval = null;
@@ -51,13 +56,125 @@ class Network {
             await this.saveChain();
         }
         
+        // Initialize signaling client if URL provided
+        if (this.signalingServerUrl) {
+            await this.initSignaling();
+        }
+        
         // Start heartbeat
         this.startHeartbeat();
         
         // Start periodic sync
         this.startSync();
         
+        // Attempt pending connections (nodes we want to connect to)
+        this.attemptPendingConnections();
+        
         console.log('🌐 Network initialized');
+    }
+    
+    /**
+     * Initialize signaling client
+     */
+    async initSignaling() {
+        if (!window.SrishtiSignalingClient) {
+            console.warn('SignalingClient not loaded, P2P connections will not work');
+            return;
+        }
+        
+        try {
+            this.signaling = new window.SrishtiSignalingClient({
+                serverUrl: this.signalingServerUrl,
+                nodeId: this.nodeId,
+                onOffer: (data) => this.handleSignalingOffer(data),
+                onAnswer: (data) => this.handleSignalingAnswer(data),
+                onIceCandidate: (data) => this.handleSignalingIceCandidate(data),
+                onPeerConnected: (peers) => {
+                    console.log(`📡 Available peers: ${peers.length}`);
+                }
+            });
+            
+            await this.signaling.connect();
+            console.log('✅ Signaling client connected');
+        } catch (error) {
+            console.warn('⚠️ Failed to connect to signaling server:', error);
+            this.signaling = null;
+        }
+    }
+    
+    /**
+     * Handle signaling offer
+     */
+    async handleSignalingOffer(data) {
+        const { fromNodeId, offer } = data;
+        
+        if (this.peers.has(fromNodeId)) {
+            console.log(`Already connected to ${fromNodeId}`);
+            return;
+        }
+        
+        try {
+            const connection = new window.SrishtiPeerConnection({
+                nodeId: this.nodeId,
+                onMessage: (message, peerId) => this.handleMessage(message, peerId),
+                onConnectionStateChange: (state) => {
+                    if (state === 'disconnected' || state === 'failed') {
+                        this.disconnectPeer(fromNodeId);
+                    }
+                },
+                onIceCandidate: (candidate) => {
+                    if (this.signaling) {
+                        this.signaling.sendIceCandidate(fromNodeId, candidate);
+                    }
+                }
+            });
+            
+            const answer = await connection.initAsAnswerer(offer);
+            this.peers.set(fromNodeId, connection);
+            
+            // Send answer via signaling
+            if (this.signaling) {
+                this.signaling.sendAnswer(fromNodeId, answer);
+            }
+            
+            console.log(`✅ Connected to ${fromNodeId} (as answerer)`);
+        } catch (error) {
+            console.error(`Failed to handle offer from ${fromNodeId}:`, error);
+        }
+    }
+    
+    /**
+     * Handle signaling answer
+     */
+    async handleSignalingAnswer(data) {
+        const { fromNodeId, answer } = data;
+        
+        const connection = this.pendingOffers.get(fromNodeId);
+        if (!connection) {
+            console.warn(`No pending offer for ${fromNodeId}`);
+            return;
+        }
+        
+        try {
+            await connection.setRemoteAnswer(answer);
+            this.pendingOffers.delete(fromNodeId);
+            console.log(`✅ Connected to ${fromNodeId} (as offerer)`);
+        } catch (error) {
+            console.error(`Failed to handle answer from ${fromNodeId}:`, error);
+            this.pendingOffers.delete(fromNodeId);
+        }
+    }
+    
+    /**
+     * Handle signaling ICE candidate
+     */
+    async handleSignalingIceCandidate(data) {
+        const { fromNodeId, candidate } = data;
+        
+        const connection = this.peers.get(fromNodeId);
+        if (connection) {
+            await connection.addIceCandidate(candidate);
+        }
     }
     
     /**
@@ -376,7 +493,90 @@ class Network {
                     await this.requestSync(peerId);
                 }
             }
+            
+            // Also attempt pending connections periodically
+            this.attemptPendingConnections();
         }, 60000); // Every minute
+    }
+    
+    /**
+     * Add a pending connection (a node we want to connect to)
+     * @param {string} nodeId - Node ID to connect to
+     * @param {string} publicKey - Node's public key (base64)
+     */
+    addPendingConnection(nodeId, publicKey) {
+        this.pendingConnections.set(nodeId, {
+            publicKey: publicKey,
+            timestamp: Date.now()
+        });
+        console.log(`📝 Added pending connection to ${nodeId}`);
+        
+        // Attempt connection immediately
+        this.attemptConnection(nodeId, publicKey);
+    }
+    
+    /**
+     * Attempt all pending connections
+     */
+    async attemptPendingConnections() {
+        for (const [nodeId, info] of this.pendingConnections.entries()) {
+            if (!this.peers.has(nodeId)) {
+                await this.attemptConnection(nodeId, info.publicKey);
+            }
+        }
+    }
+    
+    /**
+     * Attempt to connect to a specific node
+     * @param {string} nodeId - Node ID to connect to
+     * @param {string} publicKey - Node's public key
+     */
+    async attemptConnection(nodeId, publicKey) {
+        if (this.peers.has(nodeId) || this.pendingOffers.has(nodeId)) {
+            return; // Already connected or connecting
+        }
+        
+        if (!this.signaling || !this.signaling.isConnected()) {
+            console.log(`🔌 Cannot connect to ${nodeId}: signaling server not connected`);
+            return;
+        }
+        
+        if (!window.SrishtiPeerConnection) {
+            console.error('PeerConnection not loaded');
+            return;
+        }
+        
+        try {
+            const connection = new window.SrishtiPeerConnection({
+                nodeId: this.nodeId,
+                onMessage: (message, peerId) => this.handleMessage(message, peerId),
+                onConnectionStateChange: (state) => {
+                    if (state === 'connected' || state === 'completed') {
+                        this.pendingOffers.delete(nodeId);
+                    } else if (state === 'disconnected' || state === 'failed') {
+                        this.pendingOffers.delete(nodeId);
+                        this.disconnectPeer(nodeId);
+                    }
+                },
+                onIceCandidate: (candidate) => {
+                    if (this.signaling) {
+                        this.signaling.sendIceCandidate(nodeId, candidate);
+                    }
+                }
+            });
+            
+            // Create offer
+            const offer = await connection.initAsOfferer();
+            this.pendingOffers.set(nodeId, connection);
+            
+            // Send offer via signaling
+            this.signaling.sendOffer(nodeId, offer);
+            
+            console.log(`🔌 Sent offer to ${nodeId}`);
+        } catch (error) {
+            console.error(`Failed to connect to ${nodeId}:`, error);
+            this.pendingOffers.delete(nodeId);
+        }
     }
     
     /**
@@ -406,12 +606,17 @@ class Network {
             clearInterval(this.syncInterval);
         }
         
+        if (this.signaling) {
+            this.signaling.disconnect();
+        }
+        
         for (const [peerId, connection] of this.peers.entries()) {
             connection.close();
         }
         
         this.peers.clear();
         this.peerInfo.clear();
+        this.pendingOffers.clear();
     }
 }
 

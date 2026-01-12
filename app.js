@@ -99,11 +99,19 @@ class SrishtiApp {
         }
         
         try {
+            // Get signaling server URL (default to localhost for development)
+            // In production, this should be your Fly.io deployment URL
+            const signalingUrl = window.SRISHTI_SIGNALING_URL || 
+                                 (window.location.protocol === 'https:' 
+                                     ? 'wss://srishti-signaling.fly.dev' 
+                                     : 'ws://localhost:8080');
+            
             this.network = new window.SrishtiNetwork({
                 nodeId: this.nodeId,
                 publicKey: this.keyPair.publicKey,
                 chain: this.chain,
                 storage: this.storage,
+                signalingServerUrl: signalingUrl,
                 onChainUpdate: () => {
                     this.adapter.onChainUpdate();
                     this.updatePresence(this.nodeId, { isOnline: true, lastSeen: Date.now() });
@@ -177,6 +185,15 @@ class SrishtiApp {
             // Add block to chain and broadcast (proposeBlock handles both)
             if (this.network) {
                 await this.network.proposeBlock(newBlock);
+                
+                // If we joined under a parent, attempt to connect to them
+                if (parentId) {
+                    // Get parent's public key from the chain
+                    const parentNode = this.chain.buildNodeMap()[parentId];
+                    if (parentNode && parentNode.publicKey) {
+                        this.network.addPendingConnection(parentId, parentNode.publicKey);
+                    }
+                }
             } else {
                 // If no network, just add to chain locally
                 await this.chain.addBlock(newBlock);
