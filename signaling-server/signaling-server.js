@@ -5,10 +5,27 @@
  * between peers. Deployed on Fly.io for P2P blockchain networking.
  */
 
+const http = require('http');
 const WebSocket = require('ws');
 
 const PORT = process.env.PORT || 8080;
-const wss = new WebSocket.Server({ port: PORT });
+
+// Create HTTP server with health check endpoint
+const server = http.createServer((req, res) => {
+    // Health check endpoint
+    if (req.url === '/' && req.method === 'GET') {
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end('Srishti Signaling Server - OK');
+        return;
+    }
+    
+    // Reject non-WebSocket requests
+    res.writeHead(426, { 'Upgrade': 'websocket' });
+    res.end('Upgrade required');
+});
+
+// Create WebSocket server attached to HTTP server
+const wss = new WebSocket.Server({ server });
 
 console.log(`🚀 Srishti Signaling Server started on port ${PORT}`);
 
@@ -190,13 +207,19 @@ wss.on('error', (error) => {
     console.error('Server error:', error);
 });
 
+// Start HTTP server
+server.listen(PORT, () => {
+    console.log(`✅ HTTP server listening on port ${PORT}`);
+    console.log(`✅ WebSocket server ready. Connect to ws://localhost:${PORT}`);
+});
+
 // Graceful shutdown
 process.on('SIGTERM', () => {
     console.log('SIGTERM received, closing server...');
     wss.close(() => {
-        console.log('Server closed');
-        process.exit(0);
+        server.close(() => {
+            console.log('Server closed');
+            process.exit(0);
+        });
     });
 });
-
-console.log(`✅ Signaling server ready. Connect to ws://localhost:${PORT}`);
