@@ -1,8 +1,8 @@
 /**
- * Srishti Blockchain - QR Code Scanner
+ * Srishti Blockchain - QR Code Scanner (Blockchain-compatible)
  * 
  * Uses html5-qrcode library for camera-based QR scanning.
- * Allows users to scan QR codes to join another node's tree.
+ * Parses blockchain QR codes and extracts node IDs.
  */
 
 class QRScanner {
@@ -15,7 +15,7 @@ class QRScanner {
     
     /**
      * Initialize the scanner
-     * @param {Function} onScan - Callback when QR is successfully scanned
+     * @param {Function} onScan - Callback when QR is successfully scanned (receives nodeId)
      */
     init(onScan) {
         this.onScanCallback = onScan;
@@ -55,7 +55,7 @@ class QRScanner {
             </div>
         `;
         
-        // Add styles
+        // Add styles (same as original)
         const styles = document.createElement('style');
         styles.textContent = `
             #qr-scanner-modal {
@@ -66,7 +66,7 @@ class QRScanner {
                 width: 100%;
                 height: 100%;
                 z-index: 2000;
-                font-family: 'Segoe UI', sans-serif;
+                font-family: 'Outfit', sans-serif;
             }
             
             #qr-scanner-modal.active {
@@ -145,23 +145,6 @@ class QRScanner {
                 object-fit: cover;
             }
             
-            /* Scanning animation overlay */
-            .scanner-viewport::after {
-                content: '';
-                position: absolute;
-                top: 0;
-                left: 0;
-                right: 0;
-                height: 3px;
-                background: linear-gradient(90deg, transparent, #FFD700, transparent);
-                animation: scanLine 2s linear infinite;
-            }
-            
-            @keyframes scanLine {
-                0% { top: 0; }
-                100% { top: 100%; }
-            }
-            
             .scanner-actions {
                 display: flex;
                 gap: 10px;
@@ -192,38 +175,9 @@ class QRScanner {
                 border: 2px solid #FFD700;
             }
             
-            .scanner-btn.secondary:hover {
-                background: rgba(255, 215, 0, 0.1);
-            }
-            
             .scanner-hint {
                 color: #666;
                 font-size: 0.85em;
-            }
-            
-            .scanner-hint p {
-                margin: 0;
-            }
-            
-            /* Success animation */
-            .scanner-success {
-                position: absolute;
-                top: 0;
-                left: 0;
-                right: 0;
-                bottom: 0;
-                background: rgba(0, 255, 0, 0.2);
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                font-size: 60px;
-                animation: successPulse 0.5s ease;
-            }
-            
-            @keyframes successPulse {
-                0% { transform: scale(0); opacity: 0; }
-                50% { transform: scale(1.2); }
-                100% { transform: scale(1); opacity: 1; }
             }
         `;
         
@@ -234,7 +188,6 @@ class QRScanner {
         modal.querySelector('.scanner-close').addEventListener('click', () => this.close());
         modal.querySelector('.scanner-backdrop').addEventListener('click', () => this.close());
         modal.querySelector('#scanner-cancel-btn').addEventListener('click', () => this.close());
-        modal.querySelector('#scanner-flip-btn').addEventListener('click', () => this.flipCamera());
         
         return modal;
     }
@@ -246,9 +199,7 @@ class QRScanner {
         const modal = this.createScannerModal();
         modal.classList.add('active');
         
-        // Wait for modal to be visible
         await new Promise(resolve => setTimeout(resolve, 100));
-        
         await this.startScanning();
     }
     
@@ -270,7 +221,6 @@ class QRScanner {
     async startScanning() {
         if (this.isScanning) return;
         
-        // Check if html5-qrcode is loaded
         if (typeof Html5Qrcode === 'undefined') {
             console.error('Html5Qrcode library not loaded');
             this.showError('Scanner library not available');
@@ -287,11 +237,11 @@ class QRScanner {
             };
             
             await this.scanner.start(
-                { facingMode: 'environment' }, // Prefer back camera
+                { facingMode: 'environment' },
                 config,
                 (decodedText) => this.onQRCodeScanned(decodedText),
                 (errorMessage) => {
-                    // Ignore scan errors (happens when no QR in view)
+                    // Ignore scan errors
                 }
             );
             
@@ -321,63 +271,58 @@ class QRScanner {
     }
     
     /**
-     * Flip between front and back camera
-     */
-    async flipCamera() {
-        if (!this.scanner || !this.isScanning) return;
-        
-        try {
-            await this.stopScanning();
-            
-            // Toggle camera
-            const currentFacing = this.scanner.getRunningTrackCameraCapabilities?.()?.facingMode || 'environment';
-            const newFacing = currentFacing === 'environment' ? 'user' : 'environment';
-            
-            await this.scanner.start(
-                { facingMode: newFacing },
-                { fps: 10, qrbox: { width: 200, height: 200 } },
-                (decodedText) => this.onQRCodeScanned(decodedText),
-                () => {}
-            );
-            
-            this.isScanning = true;
-        } catch (error) {
-            console.error('Error flipping camera:', error);
-            // Try to restart with default
-            await this.startScanning();
-        }
-    }
-    
-    /**
      * Handle successful QR code scan
-     * @param {string} decodedText - The decoded QR content
+     * @param {string} decodedText - The decoded QR content (URL or JSON)
      */
     async onQRCodeScanned(decodedText) {
         console.log('🎯 QR Code scanned:', decodedText);
         
-        // Show success animation
         this.showSuccess();
-        
-        // Stop scanning
         await this.stopScanning();
         
-        // Parse the URL to get the join parameter
         try {
-            const url = new URL(decodedText);
-            const parentId = url.searchParams.get('join');
-            
-            if (parentId) {
-                // Valid Srishti invite
-                setTimeout(() => {
-                    this.close();
-                    if (this.onScanCallback) {
-                        this.onScanCallback(parentId);
+            // Try to parse as URL first
+            try {
+                const url = new URL(decodedText);
+                const joinParam = url.searchParams.get('join');
+                
+                if (joinParam) {
+                    // Parse blockchain QR code
+                    if (window.SrishtiQRCode) {
+                        const connectionInfo = window.SrishtiQRCode.parseFromUrl(joinParam);
+                        if (connectionInfo && connectionInfo.nodeId) {
+                            setTimeout(() => {
+                                this.close();
+                                if (this.onScanCallback) {
+                                    this.onScanCallback(connectionInfo.nodeId);
+                                }
+                            }, 1000);
+                            return;
+                        }
                     }
-                }, 1000);
-            } else {
-                this.showError('Invalid QR code. Not a Srishti invite.');
-                setTimeout(() => this.startScanning(), 2000);
+                }
+            } catch (e) {
+                // Not a URL, try JSON
             }
+            
+            // Try to parse as JSON (blockchain QR format)
+            if (window.SrishtiQRCode) {
+                const connectionInfo = window.SrishtiQRCode.parseFromJSON(decodedText);
+                if (connectionInfo && connectionInfo.nodeId) {
+                    setTimeout(() => {
+                        this.close();
+                        if (this.onScanCallback) {
+                            this.onScanCallback(connectionInfo.nodeId);
+                        }
+                    }, 1000);
+                    return;
+                }
+            }
+            
+            // Invalid QR code
+            this.showError('Invalid QR code. Not a Srishti invite.');
+            setTimeout(() => this.startScanning(), 2000);
+            
         } catch (error) {
             this.showError('Invalid QR code format.');
             setTimeout(() => this.startScanning(), 2000);
@@ -385,7 +330,7 @@ class QRScanner {
     }
     
     /**
-     * Show success animation in viewport
+     * Show success animation
      */
     showSuccess() {
         const viewport = document.getElementById(this.scannerContainerId);
@@ -394,6 +339,19 @@ class QRScanner {
         const success = document.createElement('div');
         success.className = 'scanner-success';
         success.textContent = '✓';
+        success.style.cssText = `
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 255, 0, 0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 60px;
+            animation: successPulse 0.5s ease;
+        `;
         viewport.appendChild(success);
         
         setTimeout(() => success.remove(), 1500);
@@ -401,7 +359,6 @@ class QRScanner {
     
     /**
      * Show error message
-     * @param {string} message 
      */
     showError(message) {
         const viewport = document.getElementById(this.scannerContainerId);
@@ -424,19 +381,6 @@ class QRScanner {
         viewport.appendChild(error);
         
         setTimeout(() => error.remove(), 3000);
-    }
-    
-    /**
-     * Check if camera is available
-     * @returns {Promise<boolean>}
-     */
-    static async isCameraAvailable() {
-        try {
-            const devices = await navigator.mediaDevices.enumerateDevices();
-            return devices.some(device => device.kind === 'videoinput');
-        } catch (error) {
-            return false;
-        }
     }
 }
 

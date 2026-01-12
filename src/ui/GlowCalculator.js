@@ -1,10 +1,8 @@
 /**
  * Srishti Blockchain - Glow Calculator
  * 
- * Calculates the "lit" glow intensity for nodes based on:
- * 1. Online Presence (40%) - Currently viewing the app
- * 2. Recent Activity (30%) - Time since last interaction (decays over 24h)
- * 3. Onboarding Success (30%) - Number of people they've recruited
+ * Ported from Firebase version to work with blockchain.
+ * Calculates the "lit" glow intensity for nodes based on participation.
  */
 
 class GlowCalculator {
@@ -26,7 +24,7 @@ class GlowCalculator {
     
     /**
      * Calculate the composite glow score for a node
-     * @param {Object} node - Node data from Firebase
+     * @param {Object} node - Node data
      * @returns {Object} - Glow properties including intensity, color, and pulse
      */
     calculateGlow(node) {
@@ -91,7 +89,6 @@ class GlowCalculator {
         }
         
         // Exponential decay over 24 hours
-        // After 24 hours, score approaches 0
         const decayFactor = Math.exp(-timeSince / (this.ACTIVITY_DECAY_MS / 3));
         
         return Math.max(0, Math.min(1, decayFactor));
@@ -110,7 +107,6 @@ class GlowCalculator {
         }
         
         // Logarithmic scaling so first few children matter most
-        // 1 child = 0.3, 3 children = 0.6, 10+ children = 1.0
         const normalized = Math.log10(childCount + 1) / Math.log10(this.MAX_CHILDREN_FOR_FULL_GLOW + 1);
         
         return Math.min(1, normalized);
@@ -208,40 +204,11 @@ class GlowCalculator {
             }
         };
     }
-    
-    /**
-     * Apply glow to a Three.js mesh
-     * @param {THREE.Mesh} mesh - The mesh to apply glow to
-     * @param {Object} glow - Glow properties from calculateGlow
-     * @param {number} time - Current animation time for pulse effect
-     */
-    applyGlowToMesh(mesh, glow, time = 0) {
-        if (!mesh || !mesh.material) return;
-        
-        const color = this.rgbToHex(glow.color);
-        
-        // Set base color
-        mesh.material.color.setHex(color);
-        
-        // Set emissive glow
-        mesh.material.emissive.setHex(color);
-        
-        // Pulse effect for online nodes
-        let emissiveIntensity = glow.emissive;
-        if (glow.pulse) {
-            const pulse = Math.sin(time * glow.pulseSpeed) * 0.3 + 0.7;
-            emissiveIntensity *= pulse;
-        }
-        mesh.material.emissiveIntensity = emissiveIntensity;
-        
-        // Scale based on children
-        const targetScale = glow.scale;
-        mesh.scale.lerp(
-            new THREE.Vector3(targetScale, targetScale, targetScale),
-            0.1
-        );
-    }
 }
 
-// Create global instance
-window.SrishtiGlow = new GlowCalculator();
+// Export
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = GlowCalculator;
+} else {
+    window.SrishtiGlow = new GlowCalculator();
+}
