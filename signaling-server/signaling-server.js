@@ -71,13 +71,24 @@ wss.on('connection', (ws, req) => {
                         pendingOffers.delete(nodeId);
                     }
                     
-                    // Send list of other nodes
+                    // Send list of other nodes to the new peer
                     const otherNodes = Array.from(nodes.keys()).filter(id => id !== nodeId);
                     ws.send(JSON.stringify({
                         type: 'registered',
                         nodeId: nodeId,
                         peers: otherNodes
                     }));
+                    
+                    // Notify ALL existing peers that a new peer has joined
+                    for (const [existingNodeId, existingWs] of nodes.entries()) {
+                        if (existingNodeId !== nodeId && existingWs.readyState === WebSocket.OPEN) {
+                            existingWs.send(JSON.stringify({
+                                type: 'peer_joined',
+                                nodeId: nodeId
+                            }));
+                            console.log(`📢 Notified ${existingNodeId} about new peer ${nodeId}`);
+                        }
+                    }
                     break;
                     
                 case 'offer':

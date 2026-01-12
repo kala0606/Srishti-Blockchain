@@ -106,6 +106,14 @@ class SignalingClient {
                 }
                 break;
                 
+            case 'peer_joined':
+                console.log(`🆕 New peer joined: ${data.nodeId}`);
+                if (this.onPeerConnected) {
+                    // Notify about new peer (as single-element array)
+                    this.onPeerConnected([data.nodeId]);
+                }
+                break;
+                
             case 'offer':
                 console.log(`📥 Received offer from ${data.fromNodeId}`);
                 if (this.onOffer) {
