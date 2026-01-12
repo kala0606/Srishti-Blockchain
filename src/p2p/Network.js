@@ -381,16 +381,19 @@ class Network {
         }
         
         const fromIndex = message.fromIndex || 0;
+        const totalBlocks = this.chain.getLength();
         const blocks = this.chain.blocks.slice(fromIndex);
         
+        console.log(`📊 Our chain has ${totalBlocks} blocks, sending ${blocks.length} (from index ${fromIndex})`);
         console.log(`📤 Sending SYNC_RESPONSE to ${peerId}: ${blocks.length} blocks`);
         
         const response = window.SrishtiProtocol.createSyncResponse({
             blocks: blocks.map(b => b.toJSON()),
-            chainLength: this.chain.getLength()
+            chainLength: totalBlocks
         });
         
-        connection.send(response);
+        const sent = connection.send(response);
+        console.log(`📤 SYNC_RESPONSE sent: ${sent}`);
     }
     
     /**
@@ -535,9 +538,18 @@ class Network {
      * @param {string} excludePeerId - Peer ID to exclude
      */
     broadcast(message, excludePeerId = null) {
+        console.log(`📢 Broadcasting ${message.type} to ${this.peers.size} peers (excluding ${excludePeerId || 'none'})`);
+        
         for (const [peerId, connection] of this.peers.entries()) {
-            if (peerId !== excludePeerId && connection.isConnected()) {
-                connection.send(message);
+            if (peerId !== excludePeerId) {
+                const isConnected = connection.isConnected();
+                console.log(`📤 Broadcasting to ${peerId}: connected=${isConnected}`);
+                if (isConnected) {
+                    const sent = connection.send(message);
+                    console.log(`📤 Broadcast to ${peerId}: sent=${sent}`);
+                } else {
+                    console.log(`⏭️ Skipping ${peerId} - not connected`);
+                }
             }
         }
     }
