@@ -90,13 +90,14 @@ class Network {
                 onAnswer: (data) => this.handleSignalingAnswer(data),
                 onIceCandidate: (data) => this.handleSignalingIceCandidate(data),
                 onPeerConnected: (peers) => {
-                    console.log(`📡 Available peers: ${peers.length}`);
-                    // When we get the peer list, try to connect to any pending connections
+                    console.log(`📡 Available peers: ${peers.length}`, peers);
+                    // When we get the peer list, try to connect to ALL available peers
+                    // This ensures both parent and child try to connect
                     for (const peerId of peers) {
-                        if (this.pendingConnections.has(peerId)) {
-                            const info = this.pendingConnections.get(peerId);
-                            console.log(`🔌 Found pending connection to ${peerId}, attempting...`);
-                            this.attemptConnection(peerId, info.publicKey);
+                        if (!this.peers.has(peerId) && !this.pendingOffers.has(peerId)) {
+                            console.log(`🔌 Attempting connection to available peer: ${peerId}`);
+                            // We don't have their public key yet, but we can still send an offer
+                            this.attemptConnection(peerId, null);
                         }
                     }
                 }
@@ -116,42 +117,53 @@ class Network {
     async handleSignalingOffer(data) {
         const { fromNodeId, offer } = data;
         
+        console.log(`📥 Received WebRTC offer from ${fromNodeId}`);
+        
         if (this.peers.has(fromNodeId)) {
-            console.log(`Already connected to ${fromNodeId}`);
+            console.log(`⏭️ Already connected to ${fromNodeId}`);
             return;
         }
         
         try {
+            console.log(`📝 Creating answer for ${fromNodeId}...`);
+            
             const connection = new window.SrishtiPeerConnection({
                 nodeId: this.nodeId,
                 onMessage: (message, peerId) => this.handleMessage(message, peerId),
                 onConnectionStateChange: (state) => {
+                    console.log(`📶 Connection state from ${fromNodeId}: ${state}`);
                     if (state === 'disconnected' || state === 'failed') {
                         this.disconnectPeer(fromNodeId);
                     }
                 },
                 onIceCandidate: (candidate) => {
-                    if (this.signaling) {
+                    if (this.signaling && candidate) {
+                        console.log(`🧊 Sending ICE candidate to ${fromNodeId}`);
                         this.signaling.sendIceCandidate(fromNodeId, candidate);
                     }
                 }
             });
             
+            // Set remote node ID
+            connection.remoteNodeId = fromNodeId;
+            
             const answer = await connection.initAsAnswerer(offer);
             this.peers.set(fromNodeId, connection);
-            this.pendingConnections.delete(fromNodeId); // Remove from pending
+            this.pendingConnections.delete(fromNodeId);
             
             // Send answer via signaling
             if (this.signaling) {
+                console.log(`📤 Sending answer to ${fromNodeId}...`);
                 this.signaling.sendAnswer(fromNodeId, answer);
             }
             
             console.log(`✅ Connected to ${fromNodeId} (as answerer)`);
             
             // Request chain sync from the peer
+            console.log(`🔄 Requesting chain sync from ${fromNodeId}...`);
             await this.requestSync(fromNodeId);
         } catch (error) {
-            console.error(`Failed to handle offer from ${fromNodeId}:`, error);
+            console.error(`❌ Failed to handle offer from ${fromNodeId}:`, error);
         }
     }
     
@@ -161,16 +173,19 @@ class Network {
     async handleSignalingAnswer(data) {
         const { fromNodeId, answer } = data;
         
+        console.log(`📥 Received WebRTC answer from ${fromNodeId}`);
+        
         const connection = this.pendingOffers.get(fromNodeId);
         if (!connection) {
-            console.warn(`No pending offer for ${fromNodeId}`);
+            console.warn(`⚠️ No pending offer for ${fromNodeId}`);
             return;
         }
         
         try {
+            console.log(`📝 Setting remote answer from ${fromNodeId}...`);
             await connection.setRemoteAnswer(answer);
             this.pendingOffers.delete(fromNodeId);
-            this.pendingConnections.delete(fromNodeId); // Remove from pending
+            this.pendingConnections.delete(fromNodeId);
             
             // Add to peers if not already there
             if (!this.peers.has(fromNodeId)) {
@@ -180,9 +195,10 @@ class Network {
             console.log(`✅ Connected to ${fromNodeId} (as offerer)`);
             
             // Request chain sync from the peer
+            console.log(`🔄 Requesting chain sync from ${fromNodeId}...`);
             await this.requestSync(fromNodeId);
         } catch (error) {
-            console.error(`Failed to handle answer from ${fromNodeId}:`, error);
+            console.error(`❌ Failed to handle answer from ${fromNodeId}:`, error);
             this.pendingOffers.delete(fromNodeId);
         }
     }
@@ -567,47 +583,66 @@ class Network {
      * @param {string} publicKey - Node's public key
      */
     async attemptConnection(nodeId, publicKey) {
-        if (this.peers.has(nodeId) || this.pendingOffers.has(nodeId)) {
-            return; // Already connected or connecting
+        console.log(`🔄 attemptConnection called for ${nodeId}`);
+        
+        if (this.peers.has(nodeId)) {
+            console.log(`⏭️ Already connected to ${nodeId}`);
+            return;
+        }
+        
+        if (this.pendingOffers.has(nodeId)) {
+            console.log(`⏭️ Already have pending offer to ${nodeId}`);
+            return;
         }
         
         if (!this.signaling || !this.signaling.isConnected()) {
-            console.log(`🔌 Cannot connect to ${nodeId}: signaling server not connected`);
+            console.log(`⏳ Cannot connect to ${nodeId}: signaling not ready`);
             return;
         }
         
         if (!window.SrishtiPeerConnection) {
-            console.error('PeerConnection not loaded');
+            console.error('❌ PeerConnection not loaded');
             return;
         }
+        
+        console.log(`🔌 Creating WebRTC connection to ${nodeId}...`);
         
         try {
             const connection = new window.SrishtiPeerConnection({
                 nodeId: this.nodeId,
                 onMessage: (message, peerId) => this.handleMessage(message, peerId),
                 onConnectionStateChange: (state) => {
+                    console.log(`📶 Connection state to ${nodeId}: ${state}`);
                     if (state === 'connected' || state === 'completed') {
                         this.pendingOffers.delete(nodeId);
+                        this.pendingConnections.delete(nodeId);
+                        console.log(`✅ WebRTC connected to ${nodeId}!`);
                     } else if (state === 'disconnected' || state === 'failed') {
                         this.pendingOffers.delete(nodeId);
                         this.disconnectPeer(nodeId);
                     }
                 },
                 onIceCandidate: (candidate) => {
-                    if (this.signaling) {
+                    if (this.signaling && candidate) {
+                        console.log(`🧊 Sending ICE candidate to ${nodeId}`);
                         this.signaling.sendIceCandidate(nodeId, candidate);
                     }
                 }
             });
             
+            // Set remote node ID for message handling
+            connection.remoteNodeId = nodeId;
+            
             // Create offer
+            console.log(`📝 Creating WebRTC offer for ${nodeId}...`);
             const offer = await connection.initAsOfferer();
             this.pendingOffers.set(nodeId, connection);
             
             // Send offer via signaling
+            console.log(`📤 Sending offer to ${nodeId} via signaling...`);
             this.signaling.sendOffer(nodeId, offer);
             
-            console.log(`🔌 Sent offer to ${nodeId}`);
+            console.log(`✅ Offer sent to ${nodeId}`);
         } catch (error) {
             console.error(`Failed to connect to ${nodeId}:`, error);
             this.pendingOffers.delete(nodeId);
