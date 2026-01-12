@@ -1,0 +1,1630 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Srishti Blockchain - Join the Timeline</title>
+    
+    <!-- External Libraries -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    
+    <!-- Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+    
+    <!-- QR Code Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    
+    <!-- Srishti Modules -->
+    <script src="firebase-config.js"></script>
+    <script src="presence.js"></script>
+    <script src="glow-calculator.js"></script>
+    <script src="qr-generator.js"></script>
+    <script src="qr-scanner.js"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;400;500;600;700&display=swap');
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            overflow: hidden;
+            font-family: 'Rajdhani', sans-serif;
+            background: #0a0a12;
+        }
+
+        #container {
+            width: 100vw;
+            height: 100vh;
+        }
+
+        /* Onboarding Modal */
+        #onboarding-modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(ellipse at center, rgba(0,0,30,0.95) 0%, rgba(0,0,10,0.98) 100%);
+            justify-content: center;
+            align-items: center;
+            backdrop-filter: blur(10px);
+        }
+        
+        #onboarding-modal.active {
+            display: flex;
+        }
+
+        .onboarding-content {
+            background: linear-gradient(145deg, rgba(0,0,50,0.9), rgba(0,0,30,0.95));
+            border: 2px solid #FFD700;
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 450px;
+            width: 90%;
+            color: #fff;
+            text-align: center;
+            box-shadow: 
+                0 0 60px rgba(255, 215, 0, 0.15),
+                inset 0 0 100px rgba(0, 0, 50, 0.5);
+            animation: modalAppear 0.5s ease;
+        }
+        
+        @keyframes modalAppear {
+            from {
+                opacity: 0;
+                transform: scale(0.8) translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1) translateY(0);
+            }
+        }
+
+        .onboarding-logo {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 2.5em;
+            font-weight: 900;
+            background: linear-gradient(135deg, #FFD700, #FFA500, #FFD700);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 10px;
+            text-shadow: 0 0 30px rgba(255, 215, 0, 0.3);
+        }
+
+        .onboarding-tagline {
+            color: #888;
+            font-size: 1em;
+            margin-bottom: 30px;
+            letter-spacing: 2px;
+        }
+
+        .onboarding-input-group {
+            margin-bottom: 25px;
+        }
+
+        .onboarding-input-group label {
+            display: block;
+            color: #FFD700;
+            font-size: 0.9em;
+            margin-bottom: 8px;
+            text-align: left;
+            letter-spacing: 1px;
+        }
+
+        .onboarding-input {
+            width: 100%;
+            padding: 15px 20px;
+            background: rgba(0, 0, 0, 0.5);
+            border: 2px solid rgba(255, 215, 0, 0.3);
+            border-radius: 12px;
+            color: #fff;
+            font-size: 1.1em;
+            font-family: 'Rajdhani', sans-serif;
+            transition: all 0.3s;
+        }
+
+        .onboarding-input:focus {
+            outline: none;
+            border-color: #FFD700;
+            box-shadow: 0 0 20px rgba(255, 215, 0, 0.2);
+        }
+
+        .onboarding-input::placeholder {
+            color: #555;
+        }
+
+        .onboarding-btn {
+            background: linear-gradient(145deg, #FFD700, #FFA500);
+            color: #000033;
+            border: none;
+            padding: 15px 40px;
+            border-radius: 30px;
+            font-weight: 700;
+            font-size: 1.1em;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-family: 'Rajdhani', sans-serif;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        .onboarding-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 30px rgba(255, 215, 0, 0.5);
+        }
+
+        .onboarding-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .join-info {
+            background: rgba(255, 215, 0, 0.1);
+            border: 1px solid rgba(255, 215, 0, 0.3);
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 25px;
+        }
+
+        .join-info p {
+            color: #FFD700;
+            margin: 0;
+            font-size: 0.95em;
+        }
+
+        .join-info .parent-name {
+            font-weight: 700;
+            font-size: 1.2em;
+        }
+
+        /* Floating Action Buttons */
+        .fab-container {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            z-index: 500;
+        }
+
+        .fab {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            border: 2px solid #FFD700;
+            background: linear-gradient(145deg, rgba(0,0,50,0.9), rgba(0,0,30,0.95));
+            color: #FFD700;
+            font-size: 24px;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+        }
+
+        .fab:hover {
+            transform: scale(1.1);
+            background: linear-gradient(145deg, #FFD700, #FFA500);
+            color: #000033;
+            box-shadow: 0 0 30px rgba(255, 215, 0, 0.4);
+        }
+
+        .fab.primary {
+            width: 70px;
+            height: 70px;
+            background: linear-gradient(145deg, #FFD700, #FFA500);
+            color: #000033;
+            font-size: 28px;
+        }
+
+        .fab.primary:hover {
+            box-shadow: 0 0 40px rgba(255, 215, 0, 0.6);
+        }
+
+        /* QR Modal */
+        #qr-modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.9);
+            justify-content: center;
+            align-items: center;
+            backdrop-filter: blur(10px);
+        }
+
+        #qr-modal.active {
+            display: flex;
+        }
+
+        .qr-content {
+            background: linear-gradient(145deg, rgba(0,0,50,0.95), rgba(0,0,30,0.98));
+            border: 2px solid #FFD700;
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 400px;
+            width: 90%;
+            color: #fff;
+            text-align: center;
+            box-shadow: 0 0 60px rgba(255, 215, 0, 0.2);
+            animation: modalAppear 0.4s ease;
+        }
+
+        .qr-close {
+            position: absolute;
+            top: 15px;
+            right: 20px;
+            color: #FFD700;
+            font-size: 32px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: none;
+            border: none;
+        }
+
+        .qr-close:hover {
+            color: #fff;
+            transform: rotate(90deg);
+        }
+
+        .qr-title {
+            font-family: 'Orbitron', sans-serif;
+            color: #FFD700;
+            margin: 0 0 10px 0;
+            font-size: 1.5em;
+        }
+
+        .qr-subtitle {
+            color: #888;
+            margin: 0 0 25px 0;
+            font-size: 0.9em;
+        }
+
+        #qr-display {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 25px;
+            min-height: 240px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #qr-display canvas,
+        #qr-display img {
+            border-radius: 10px;
+        }
+
+        .qr-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .qr-btn {
+            background: transparent;
+            color: #FFD700;
+            border: 2px solid #FFD700;
+            padding: 12px 20px;
+            border-radius: 25px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-family: 'Rajdhani', sans-serif;
+            font-size: 0.95em;
+        }
+
+        .qr-btn:hover {
+            background: rgba(255, 215, 0, 0.1);
+            transform: scale(1.05);
+        }
+
+        .qr-btn.primary {
+            background: linear-gradient(145deg, #FFD700, #FFA500);
+            color: #000033;
+            border: none;
+        }
+
+        /* Node Info Modal */
+        #node-modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.85);
+            justify-content: center;
+            align-items: center;
+            backdrop-filter: blur(5px);
+        }
+
+        #node-modal.active {
+            display: flex;
+        }
+
+        .node-content {
+            background: linear-gradient(145deg, #000033, #000022);
+            border: 2px solid #FFD700;
+            border-radius: 15px;
+            padding: 30px;
+            max-width: 500px;
+            width: 90%;
+            color: #fff;
+            position: relative;
+            box-shadow: 0 0 40px rgba(255, 215, 0, 0.3);
+            text-align: center;
+        }
+
+        .node-close {
+            position: absolute;
+            top: 10px;
+            right: 15px;
+            color: #FFD700;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: none;
+            border: none;
+        }
+
+        .node-close:hover {
+            color: #fff;
+            transform: rotate(90deg);
+        }
+
+        .node-avatar {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            background: linear-gradient(145deg, #FFD700, #FFA500);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 40px;
+            color: #000033;
+            margin: 0 auto 20px;
+            box-shadow: 0 0 30px rgba(255, 215, 0, 0.4);
+        }
+
+        .node-name {
+            color: #FFD700;
+            margin: 0 0 5px 0;
+            font-size: 1.8em;
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        .node-stats {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            margin: 20px 0;
+        }
+
+        .node-stat {
+            text-align: center;
+        }
+
+        .node-stat-value {
+            font-size: 2em;
+            font-weight: 700;
+            color: #FFD700;
+        }
+
+        .node-stat-label {
+            font-size: 0.85em;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .node-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.9em;
+        }
+
+        .node-status.online {
+            background: rgba(0, 255, 100, 0.2);
+            color: #00ff64;
+        }
+
+        .node-status.offline {
+            background: rgba(255, 255, 255, 0.1);
+            color: #888;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: currentColor;
+        }
+
+        .node-status.online .status-dot {
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        /* Stats Bar */
+        .stats-bar {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            display: flex;
+            gap: 20px;
+            z-index: 100;
+        }
+
+        .stat-item {
+            background: rgba(0, 0, 30, 0.8);
+            border: 1px solid rgba(255, 215, 0, 0.3);
+            border-radius: 10px;
+            padding: 10px 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            backdrop-filter: blur(10px);
+        }
+
+        .stat-icon {
+            font-size: 1.2em;
+        }
+
+        .stat-value {
+            color: #FFD700;
+            font-weight: 700;
+            font-size: 1.2em;
+        }
+
+        .stat-label {
+            color: #666;
+            font-size: 0.8em;
+        }
+
+        /* Your Node Indicator */
+        .your-node-indicator {
+            position: fixed;
+            bottom: 30px;
+            left: 30px;
+            background: rgba(0, 0, 30, 0.9);
+            border: 2px solid #FFD700;
+            border-radius: 15px;
+            padding: 15px 20px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            z-index: 100;
+            backdrop-filter: blur(10px);
+        }
+
+        .your-node-avatar {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: linear-gradient(145deg, #FFD700, #FFA500);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            color: #000033;
+            font-weight: bold;
+        }
+
+        .your-node-info h3 {
+            color: #FFD700;
+            margin: 0 0 3px 0;
+            font-size: 1.1em;
+        }
+
+        .your-node-info p {
+            color: #888;
+            margin: 0;
+            font-size: 0.85em;
+        }
+
+        /* Loading State */
+        #loading {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #0a0a12;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+        }
+
+        .loading-logo {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 3em;
+            font-weight: 900;
+            background: linear-gradient(135deg, #FFD700, #FFA500);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 30px;
+            animation: glow 2s ease-in-out infinite;
+        }
+
+        @keyframes glow {
+            0%, 100% { filter: drop-shadow(0 0 10px rgba(255, 215, 0, 0.3)); }
+            50% { filter: drop-shadow(0 0 30px rgba(255, 215, 0, 0.6)); }
+        }
+
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 3px solid rgba(255, 215, 0, 0.2);
+            border-top-color: #FFD700;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            color: #666;
+            margin-top: 20px;
+            font-size: 0.9em;
+        }
+
+        /* Welcome Animation for new nodes */
+        .welcome-burst {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 2000;
+        }
+
+        .welcome-text {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 3em;
+            color: #FFD700;
+            text-shadow: 0 0 30px rgba(255, 215, 0, 0.8);
+            animation: welcomeAppear 2s ease forwards;
+        }
+
+        @keyframes welcomeAppear {
+            0% { opacity: 0; transform: scale(0.5); }
+            20% { opacity: 1; transform: scale(1.2); }
+            40% { transform: scale(1); }
+            80% { opacity: 1; }
+            100% { opacity: 0; transform: scale(1.5); }
+        }
+    </style>
+</head>
+
+<body>
+    <div id="container"></div>
+    
+    <!-- Loading Screen -->
+    <div id="loading">
+        <div class="loading-logo">SRISHTI</div>
+        <div class="loading-spinner"></div>
+        <p class="loading-text">Connecting to the timeline...</p>
+    </div>
+
+    <!-- Onboarding Modal -->
+    <div id="onboarding-modal">
+        <div class="onboarding-content">
+            <div class="onboarding-logo">SRISHTI</div>
+            <p class="onboarding-tagline">JOIN THE BLOCKCHAIN TIMELINE</p>
+            
+            <div id="join-parent-info" class="join-info" style="display: none;">
+                <p>You're joining as a node under</p>
+                <p class="parent-name" id="parent-name-display">...</p>
+            </div>
+            
+            <div class="onboarding-input-group">
+                <label for="user-name">YOUR NAME</label>
+                <input type="text" id="user-name" class="onboarding-input" 
+                    placeholder="Enter your name to join" maxlength="30" autocomplete="off">
+            </div>
+            
+            <button id="join-btn" class="onboarding-btn" disabled>
+                Enter the Timeline
+            </button>
+        </div>
+    </div>
+
+    <!-- QR Code Modal -->
+    <div id="qr-modal">
+        <div class="qr-content" style="position: relative;">
+            <button class="qr-close">&times;</button>
+            <h2 class="qr-title">Your Invite QR</h2>
+            <p class="qr-subtitle">Others can scan this to join as your node</p>
+            <div id="qr-display"></div>
+            <div class="qr-actions">
+                <button id="share-qr-btn" class="qr-btn primary">📤 Share</button>
+                <button id="copy-link-btn" class="qr-btn">📋 Copy Link</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Node Info Modal -->
+    <div id="node-modal">
+        <div class="node-content">
+            <button class="node-close">&times;</button>
+            <div class="node-avatar" id="node-avatar">?</div>
+            <h2 class="node-name" id="node-name">Node Name</h2>
+            <div class="node-status" id="node-status">
+                <span class="status-dot"></span>
+                <span id="node-status-text">Offline</span>
+            </div>
+            <div class="node-stats">
+                <div class="node-stat">
+                    <div class="node-stat-value" id="node-children">0</div>
+                    <div class="node-stat-label">Recruited</div>
+                </div>
+                <div class="node-stat">
+                    <div class="node-stat-value" id="node-joined">-</div>
+                    <div class="node-stat-label">Joined</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stats Bar -->
+    <div class="stats-bar">
+        <div class="stat-item">
+            <span class="stat-icon">🌐</span>
+            <span class="stat-value" id="total-nodes">0</span>
+            <span class="stat-label">nodes</span>
+        </div>
+        <div class="stat-item">
+            <span class="stat-icon">🟢</span>
+            <span class="stat-value" id="online-nodes">0</span>
+            <span class="stat-label">online</span>
+        </div>
+    </div>
+
+    <!-- Your Node Indicator -->
+    <div class="your-node-indicator" id="your-node-indicator" style="display: none;">
+        <div class="your-node-avatar" id="your-avatar">?</div>
+        <div class="your-node-info">
+            <h3 id="your-name">Your Node</h3>
+            <p id="your-children">0 recruits</p>
+        </div>
+    </div>
+
+    <!-- Floating Action Buttons -->
+    <div class="fab-container">
+        <button class="fab" id="scan-fab" title="Scan QR Code">📷</button>
+        <button class="fab primary" id="qr-fab" title="Show Your QR">⬡</button>
+    </div>
+
+    <script>
+        // ============================================
+        // Simplex Noise Implementation
+        // ============================================
+        class SimplexNoise {
+            constructor(seed = Math.random()) {
+                this.p = new Uint8Array(256);
+                this.perm = new Uint8Array(512);
+                this.permMod12 = new Uint8Array(512);
+                
+                for (let i = 0; i < 256; i++) {
+                    this.p[i] = i;
+                }
+                
+                let n, q;
+                for (let i = 255; i > 0; i--) {
+                    seed = (seed * 16807) % 2147483647;
+                    n = seed % (i + 1);
+                    q = this.p[i];
+                    this.p[i] = this.p[n];
+                    this.p[n] = q;
+                }
+                
+                for (let i = 0; i < 512; i++) {
+                    this.perm[i] = this.p[i & 255];
+                    this.permMod12[i] = this.perm[i] % 12;
+                }
+                
+                this.grad3 = new Float32Array([
+                    1,1,0, -1,1,0, 1,-1,0, -1,-1,0,
+                    1,0,1, -1,0,1, 1,0,-1, -1,0,-1,
+                    0,1,1, 0,-1,1, 0,1,-1, 0,-1,-1
+                ]);
+                
+                this.F3 = 1.0 / 3.0;
+                this.G3 = 1.0 / 6.0;
+            }
+            
+            noise3D(x, y, z) {
+                const { perm, permMod12, grad3, F3, G3 } = this;
+                let n0, n1, n2, n3;
+                
+                const s = (x + y + z) * F3;
+                const i = Math.floor(x + s);
+                const j = Math.floor(y + s);
+                const k = Math.floor(z + s);
+                
+                const t = (i + j + k) * G3;
+                const X0 = i - t;
+                const Y0 = j - t;
+                const Z0 = k - t;
+                const x0 = x - X0;
+                const y0 = y - Y0;
+                const z0 = z - Z0;
+                
+                let i1, j1, k1, i2, j2, k2;
+                
+                if (x0 >= y0) {
+                    if (y0 >= z0) { i1=1; j1=0; k1=0; i2=1; j2=1; k2=0; }
+                    else if (x0 >= z0) { i1=1; j1=0; k1=0; i2=1; j2=0; k2=1; }
+                    else { i1=0; j1=0; k1=1; i2=1; j2=0; k2=1; }
+                } else {
+                    if (y0 < z0) { i1=0; j1=0; k1=1; i2=0; j2=1; k2=1; }
+                    else if (x0 < z0) { i1=0; j1=1; k1=0; i2=0; j2=1; k2=1; }
+                    else { i1=0; j1=1; k1=0; i2=1; j2=1; k2=0; }
+                }
+                
+                const x1 = x0 - i1 + G3;
+                const y1 = y0 - j1 + G3;
+                const z1 = z0 - k1 + G3;
+                const x2 = x0 - i2 + 2.0 * G3;
+                const y2 = y0 - j2 + 2.0 * G3;
+                const z2 = z0 - k2 + 2.0 * G3;
+                const x3 = x0 - 1.0 + 3.0 * G3;
+                const y3 = y0 - 1.0 + 3.0 * G3;
+                const z3 = z0 - 1.0 + 3.0 * G3;
+                
+                const ii = i & 255;
+                const jj = j & 255;
+                const kk = k & 255;
+                
+                let t0 = 0.6 - x0*x0 - y0*y0 - z0*z0;
+                if (t0 < 0) n0 = 0.0;
+                else {
+                    const gi0 = permMod12[ii + perm[jj + perm[kk]]] * 3;
+                    t0 *= t0;
+                    n0 = t0 * t0 * (grad3[gi0] * x0 + grad3[gi0+1] * y0 + grad3[gi0+2] * z0);
+                }
+                
+                let t1 = 0.6 - x1*x1 - y1*y1 - z1*z1;
+                if (t1 < 0) n1 = 0.0;
+                else {
+                    const gi1 = permMod12[ii + i1 + perm[jj + j1 + perm[kk + k1]]] * 3;
+                    t1 *= t1;
+                    n1 = t1 * t1 * (grad3[gi1] * x1 + grad3[gi1+1] * y1 + grad3[gi1+2] * z1);
+                }
+                
+                let t2 = 0.6 - x2*x2 - y2*y2 - z2*z2;
+                if (t2 < 0) n2 = 0.0;
+                else {
+                    const gi2 = permMod12[ii + i2 + perm[jj + j2 + perm[kk + k2]]] * 3;
+                    t2 *= t2;
+                    n2 = t2 * t2 * (grad3[gi2] * x2 + grad3[gi2+1] * y2 + grad3[gi2+2] * z2);
+                }
+                
+                let t3 = 0.6 - x3*x3 - y3*y3 - z3*z3;
+                if (t3 < 0) n3 = 0.0;
+                else {
+                    const gi3 = permMod12[ii + 1 + perm[jj + 1 + perm[kk + 1]]] * 3;
+                    t3 *= t3;
+                    n3 = t3 * t3 * (grad3[gi3] * x3 + grad3[gi3+1] * y3 + grad3[gi3+2] * z3);
+                }
+                
+                return 32.0 * (n0 + n1 + n2 + n3);
+            }
+        }
+        
+        const noise = new SimplexNoise(Math.random() * 10000);
+        let noiseTime = 0;
+
+        // ============================================
+        // Application State
+        // ============================================
+        let currentUser = null;
+        let nodesData = {};
+        let nodeMeshes = [];
+        let nodeDataMap = new Map();
+        let unsubscribeNodes = null;
+
+        // ============================================
+        // Three.js Setup
+        // ============================================
+        const container = document.getElementById('container');
+        const scene = new THREE.Scene();
+        
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 10000);
+        camera.position.set(0, 0, 800);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setClearColor(0x0a0a12);
+        container.appendChild(renderer.domElement);
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.03;
+        controls.rotateSpeed = 0.2;
+        controls.zoomSpeed = 0.4;
+        controls.panSpeed = 0.3;
+        controls.minDistance = 150;
+        controls.maxDistance = 2000;
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.2);
+        scene.add(ambientLight);
+
+        const pointLight1 = new THREE.PointLight(0xFFD700, 0.8, 2000);
+        pointLight1.position.set(500, 500, 500);
+        scene.add(pointLight1);
+
+        const pointLight2 = new THREE.PointLight(0x4444ff, 0.4, 2000);
+        pointLight2.position.set(-500, -500, 500);
+        scene.add(pointLight2);
+
+        // Starfield
+        const starGeometry = new THREE.BufferGeometry();
+        const starCount = 1500;
+        const starPositions = new Float32Array(starCount * 3);
+        for (let i = 0; i < starCount * 3; i += 3) {
+            starPositions[i] = (Math.random() - 0.5) * 4000;
+            starPositions[i + 1] = (Math.random() - 0.5) * 4000;
+            starPositions[i + 2] = (Math.random() - 0.5) * 4000;
+        }
+        starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+        const starMaterial = new THREE.PointsMaterial({ color: 0x333344, size: 2, transparent: true, opacity: 0.6 });
+        const stars = new THREE.Points(starGeometry, starMaterial);
+        scene.add(stars);
+
+        // Main group for nodes
+        const mainGroup = new THREE.Group();
+        scene.add(mainGroup);
+
+        // Hover label
+        let hoverLabel = null;
+        
+        function createLabelSprite(text) {
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.width = 512;
+            canvas.height = 128;
+            
+            context.clearRect(0, 0, canvas.width, canvas.height);
+            context.font = 'bold 36px Rajdhani, sans-serif';
+            const textWidth = context.measureText(text).width;
+            
+            const padding = 30;
+            const rectWidth = Math.min(textWidth + padding * 2, canvas.width - 20);
+            const rectHeight = 60;
+            const rectX = (canvas.width - rectWidth) / 2;
+            const rectY = (canvas.height - rectHeight) / 2;
+            
+            context.fillStyle = 'rgba(0, 0, 30, 0.95)';
+            context.strokeStyle = '#FFD700';
+            context.lineWidth = 3;
+            
+            const radius = 15;
+            context.beginPath();
+            context.moveTo(rectX + radius, rectY);
+            context.lineTo(rectX + rectWidth - radius, rectY);
+            context.quadraticCurveTo(rectX + rectWidth, rectY, rectX + rectWidth, rectY + radius);
+            context.lineTo(rectX + rectWidth, rectY + rectHeight - radius);
+            context.quadraticCurveTo(rectX + rectWidth, rectY + rectHeight, rectX + rectWidth - radius, rectY + rectHeight);
+            context.lineTo(rectX + radius, rectY + rectHeight);
+            context.quadraticCurveTo(rectX, rectY + rectHeight, rectX, rectY + rectHeight - radius);
+            context.lineTo(rectX, rectY + radius);
+            context.quadraticCurveTo(rectX, rectY, rectX + radius, rectY);
+            context.closePath();
+            context.fill();
+            context.stroke();
+            
+            context.fillStyle = '#ffffff';
+            context.textAlign = 'center';
+            context.textBaseline = 'middle';
+            context.fillText(text, canvas.width / 2, canvas.height / 2);
+            
+            const texture = new THREE.CanvasTexture(canvas);
+            const material = new THREE.SpriteMaterial({ 
+                map: texture, 
+                transparent: true,
+                depthTest: false
+            });
+            
+            const sprite = new THREE.Sprite(material);
+            sprite.scale.set(120, 30, 1);
+            sprite.visible = false;
+            
+            return sprite;
+        }
+        
+        function updateLabelText(sprite, text) {
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.width = 512;
+            canvas.height = 128;
+            
+            context.clearRect(0, 0, canvas.width, canvas.height);
+            context.font = 'bold 36px Rajdhani, sans-serif';
+            const textWidth = context.measureText(text).width;
+            
+            const padding = 30;
+            const rectWidth = Math.min(textWidth + padding * 2, canvas.width - 20);
+            const rectHeight = 60;
+            const rectX = (canvas.width - rectWidth) / 2;
+            const rectY = (canvas.height - rectHeight) / 2;
+            
+            context.fillStyle = 'rgba(0, 0, 30, 0.95)';
+            context.strokeStyle = '#FFD700';
+            context.lineWidth = 3;
+            
+            const radius = 15;
+            context.beginPath();
+            context.moveTo(rectX + radius, rectY);
+            context.lineTo(rectX + rectWidth - radius, rectY);
+            context.quadraticCurveTo(rectX + rectWidth, rectY, rectX + rectWidth, rectY + radius);
+            context.lineTo(rectX + rectWidth, rectY + rectHeight - radius);
+            context.quadraticCurveTo(rectX + rectWidth, rectY + rectHeight, rectX + rectWidth - radius, rectY + rectHeight);
+            context.lineTo(rectX + radius, rectY + rectHeight);
+            context.quadraticCurveTo(rectX, rectY + rectHeight, rectX, rectY + rectHeight - radius);
+            context.lineTo(rectX, rectY + radius);
+            context.quadraticCurveTo(rectX, rectY, rectX + radius, rectY);
+            context.closePath();
+            context.fill();
+            context.stroke();
+            
+            context.fillStyle = '#ffffff';
+            context.textAlign = 'center';
+            context.textBaseline = 'middle';
+            context.fillText(text, canvas.width / 2, canvas.height / 2);
+            
+            sprite.material.map.dispose();
+            sprite.material.map = new THREE.CanvasTexture(canvas);
+            sprite.material.map.needsUpdate = true;
+        }
+        
+        hoverLabel = createLabelSprite('');
+        scene.add(hoverLabel);
+
+        // Link objects storage
+        let linkObjects = [];
+
+        // ============================================
+        // Visualization Functions
+        // ============================================
+        
+        function buildVisualization(hierarchyData) {
+            // Clear existing
+            while (mainGroup.children.length > 0) {
+                mainGroup.remove(mainGroup.children[0]);
+            }
+            nodeMeshes = [];
+            nodeDataMap.clear();
+            linkObjects = [];
+            
+            if (!hierarchyData) {
+                return;
+            }
+            
+            const root = d3.hierarchy(hierarchyData);
+            const links = root.links();
+            const nodes = root.descendants();
+            
+            // Layout
+            const treeLayout = d3.tree().size([2 * Math.PI, 500]);
+            treeLayout(root);
+            
+            // Position nodes
+            nodes.forEach((d, i) => {
+                const angle = d.x;
+                const radius = d.y * 1.2;
+                const height = (d.depth - root.height / 2) * 120;
+                
+                d.x3d = radius * Math.cos(angle);
+                d.y3d = height;
+                d.z3d = radius * Math.sin(angle);
+                
+                d.x = d.x3d;
+                d.y = d.y3d;
+                d.z = d.z3d;
+                
+                d.baseX = d.x;
+                d.baseY = d.y;
+                d.baseZ = d.z;
+                d.noiseOffsetX = i * 100;
+                d.noiseOffsetY = i * 100 + 1000;
+                d.noiseOffsetZ = i * 100 + 2000;
+                d.orbitRadius = d.children ? 15 : 25 + Math.random() * 15;
+                d.orbitSpeed = 0.2 + Math.random() * 0.3;
+            });
+            
+            // Create links
+            const linkMaterial = new THREE.LineBasicMaterial({
+                color: 0xFFD700,
+                transparent: true,
+                opacity: 0.3
+            });
+            
+            links.forEach(link => {
+                const geometry = new THREE.BufferGeometry();
+                const positions = new Float32Array(6);
+                geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                
+                const line = new THREE.Line(geometry, linkMaterial.clone());
+                mainGroup.add(line);
+                linkObjects.push({ line, source: link.source, target: link.target });
+            });
+            
+            // Create node meshes
+            nodes.forEach(d => {
+                const nodeInfo = d.data;
+                const isCurrentUser = currentUser && nodeInfo.id === currentUser.id;
+                const geometry = new THREE.SphereGeometry(isCurrentUser ? 20 : 15, 32, 32);
+                
+                // Calculate glow
+                const glow = window.SrishtiGlow ? window.SrishtiGlow.calculateGlow(nodeInfo) : { intensity: 0.2, color: { r: 60, g: 60, b: 80 } };
+                const color = window.SrishtiGlow ? window.SrishtiGlow.rgbToHex(glow.color) : 0x3c3c50;
+                
+                const material = new THREE.MeshPhongMaterial({
+                    color: color,
+                    emissive: color,
+                    emissiveIntensity: glow.emissive || 0.2,
+                    shininess: 80,
+                    transparent: true,
+                    opacity: 0.95
+                });
+                
+                const mesh = new THREE.Mesh(geometry, material);
+                mesh.position.set(d.x3d, d.y3d, d.z3d);
+                mesh.userData = { 
+                    nodeData: nodeInfo, 
+                    hierarchyNode: d,
+                    isCurrentUser: isCurrentUser,
+                    glow: glow
+                };
+                
+                d.mesh = mesh;
+                mainGroup.add(mesh);
+                nodeMeshes.push(mesh);
+                nodeDataMap.set(mesh, d);
+                
+                // Add corona for high-glow nodes
+                if (glow.intensity > 0.6) {
+                    const coronaGeometry = new THREE.SphereGeometry(isCurrentUser ? 25 : 20, 16, 16);
+                    const coronaMaterial = new THREE.MeshBasicMaterial({
+                        color: color,
+                        transparent: true,
+                        opacity: 0.15
+                    });
+                    const corona = new THREE.Mesh(coronaGeometry, coronaMaterial);
+                    mesh.add(corona);
+                }
+            });
+            
+            // Store for animation
+            window.srishtiNodes = nodes;
+            window.srishtiLinks = linkObjects;
+        }
+        
+        function updateNodeGlows() {
+            if (!window.SrishtiGlow) return;
+            
+            nodeMeshes.forEach(mesh => {
+                const nodeInfo = mesh.userData.nodeData;
+                if (!nodeInfo) return;
+                
+                // Get fresh data from nodesData
+                const freshData = nodesData[nodeInfo.id];
+                if (freshData) {
+                    const glow = window.SrishtiGlow.calculateGlow(freshData);
+                    mesh.userData.glow = glow;
+                    
+                    const color = window.SrishtiGlow.rgbToHex(glow.color);
+                    mesh.material.color.setHex(color);
+                    mesh.material.emissive.setHex(color);
+                    mesh.material.emissiveIntensity = glow.emissive;
+                }
+            });
+        }
+        
+        // ============================================
+        // Animation
+        // ============================================
+        
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        let hoveredMesh = null;
+        let animationTime = 0;
+        
+        function onMouseMove(event) {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+        }
+        
+        function onClick(event) {
+            if (event.target.closest('.fab-container') || 
+                event.target.closest('#qr-modal') || 
+                event.target.closest('#node-modal') ||
+                event.target.closest('#onboarding-modal')) {
+                return;
+            }
+            
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(nodeMeshes);
+            
+            if (intersects.length > 0) {
+                const mesh = intersects[0].object;
+                const nodeInfo = mesh.userData.nodeData;
+                if (nodeInfo) {
+                    showNodeModal(nodeInfo);
+                }
+            }
+        }
+        
+        window.addEventListener('mousemove', onMouseMove);
+        window.addEventListener('click', onClick);
+        
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            animationTime += 0.016;
+            noiseTime += 0.002;
+            
+            // Animate nodes
+            if (window.srishtiNodes) {
+                window.srishtiNodes.forEach(d => {
+                    if (!d.parent) {
+                        d.x = 0;
+                        d.y = 0;
+                        d.z = 0;
+                        if (d.mesh) d.mesh.position.set(0, 0, 0);
+                        return;
+                    }
+                    
+                    const t = noiseTime * d.orbitSpeed;
+                    const noiseX = noise.noise3D(d.noiseOffsetX * 0.01, t, 0);
+                    const noiseY = noise.noise3D(d.noiseOffsetY * 0.01, t, 0);
+                    const noiseZ = noise.noise3D(d.noiseOffsetZ * 0.01, t, 0);
+                    
+                    const offsetX = noiseX * d.orbitRadius;
+                    const offsetY = noiseY * d.orbitRadius;
+                    const offsetZ = noiseZ * d.orbitRadius;
+                    
+                    const targetX = d.baseX + offsetX;
+                    const targetY = d.baseY + offsetY;
+                    const targetZ = d.baseZ + offsetZ;
+                    
+                    const smoothing = 0.03;
+                    d.x += (targetX - d.x) * smoothing;
+                    d.y += (targetY - d.y) * smoothing;
+                    d.z += (targetZ - d.z) * smoothing;
+                    
+                    if (d.mesh) {
+                        d.mesh.position.set(d.x, d.y, d.z);
+                        
+                        // Pulse effect for online nodes
+                        const glow = d.mesh.userData.glow;
+                        if (glow && glow.pulse) {
+                            const pulse = Math.sin(animationTime * glow.pulseSpeed * 2) * 0.2 + 0.8;
+                            d.mesh.material.emissiveIntensity = glow.emissive * pulse;
+                        }
+                    }
+                });
+            }
+            
+            // Update links
+            if (window.srishtiLinks) {
+                window.srishtiLinks.forEach(({ line, source, target }) => {
+                    const positions = line.geometry.attributes.position.array;
+                    positions[0] = source.x;
+                    positions[1] = source.y;
+                    positions[2] = source.z;
+                    positions[3] = target.x;
+                    positions[4] = target.y;
+                    positions[5] = target.z;
+                    line.geometry.attributes.position.needsUpdate = true;
+                    
+                    // Glow links between online nodes
+                    const sourceOnline = source.data && source.data.isOnline;
+                    const targetOnline = target.data && target.data.isOnline;
+                    if (sourceOnline && targetOnline) {
+                        line.material.opacity = 0.6;
+                    } else if (sourceOnline || targetOnline) {
+                        line.material.opacity = 0.4;
+                    } else {
+                        line.material.opacity = 0.2;
+                    }
+                });
+            }
+            
+            // Hover detection
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(nodeMeshes);
+            
+            if (hoveredMesh && (!intersects.length || intersects[0].object !== hoveredMesh)) {
+                hoveredMesh.scale.set(1, 1, 1);
+                hoveredMesh = null;
+                hoverLabel.visible = false;
+                document.body.style.cursor = 'default';
+            }
+            
+            if (intersects.length > 0) {
+                const mesh = intersects[0].object;
+                if (mesh !== hoveredMesh) {
+                    hoveredMesh = mesh;
+                    mesh.scale.set(1.2, 1.2, 1.2);
+                    
+                    const nodeData = mesh.userData.nodeData;
+                    if (nodeData) {
+                        updateLabelText(hoverLabel, nodeData.name || 'Unknown');
+                        hoverLabel.visible = true;
+                    }
+                    document.body.style.cursor = 'pointer';
+                }
+                
+                const worldPos = new THREE.Vector3();
+                mesh.getWorldPosition(worldPos);
+                hoverLabel.position.copy(worldPos);
+                hoverLabel.position.y += 35;
+            }
+            
+            stars.rotation.y += 0.0001;
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        
+        // ============================================
+        // UI Functions
+        // ============================================
+        
+        function showOnboardingModal(parentId = null) {
+            const modal = document.getElementById('onboarding-modal');
+            const joinInfo = document.getElementById('join-parent-info');
+            const parentDisplay = document.getElementById('parent-name-display');
+            const joinBtn = document.getElementById('join-btn');
+            const nameInput = document.getElementById('user-name');
+            
+            // Check if joining under a parent
+            if (parentId && nodesData[parentId]) {
+                joinInfo.style.display = 'block';
+                parentDisplay.textContent = nodesData[parentId].name || 'A node';
+            } else {
+                joinInfo.style.display = 'none';
+            }
+            
+            // Store parent ID for later
+            modal.dataset.parentId = parentId || '';
+            
+            // Enable/disable button based on input
+            nameInput.value = '';
+            joinBtn.disabled = true;
+            
+            nameInput.oninput = () => {
+                joinBtn.disabled = nameInput.value.trim().length < 2;
+            };
+            
+            joinBtn.onclick = async () => {
+                const name = nameInput.value.trim();
+                if (name.length < 2) return;
+                
+                joinBtn.disabled = true;
+                joinBtn.textContent = 'Joining...';
+                
+                await joinNetwork(name, modal.dataset.parentId || null);
+            };
+            
+            modal.classList.add('active');
+            setTimeout(() => nameInput.focus(), 100);
+        }
+        
+        function hideOnboardingModal() {
+            document.getElementById('onboarding-modal').classList.remove('active');
+        }
+        
+        function showQRModal() {
+            const modal = document.getElementById('qr-modal');
+            modal.classList.add('active');
+            
+            // Generate QR
+            if (window.SrishtiQR && currentUser) {
+                window.SrishtiQR.init(currentUser.id);
+                window.SrishtiQR.generateQR('qr-display');
+            }
+        }
+        
+        function hideQRModal() {
+            document.getElementById('qr-modal').classList.remove('active');
+        }
+        
+        function showNodeModal(nodeData) {
+            const modal = document.getElementById('node-modal');
+            
+            document.getElementById('node-avatar').textContent = (nodeData.name || '?')[0].toUpperCase();
+            document.getElementById('node-name').textContent = nodeData.name || 'Unknown';
+            document.getElementById('node-children').textContent = nodeData.childCount || 0;
+            
+            const statusEl = document.getElementById('node-status');
+            const statusText = document.getElementById('node-status-text');
+            if (nodeData.isOnline) {
+                statusEl.className = 'node-status online';
+                statusText.textContent = 'Online';
+            } else {
+                statusEl.className = 'node-status offline';
+                statusText.textContent = 'Offline';
+            }
+            
+            // Format join date
+            if (nodeData.createdAt) {
+                const date = new Date(nodeData.createdAt);
+                const now = new Date();
+                const diffMs = now - date;
+                const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                
+                if (diffDays === 0) {
+                    document.getElementById('node-joined').textContent = 'Today';
+                } else if (diffDays === 1) {
+                    document.getElementById('node-joined').textContent = 'Yesterday';
+                } else if (diffDays < 30) {
+                    document.getElementById('node-joined').textContent = `${diffDays}d ago`;
+                } else {
+                    document.getElementById('node-joined').textContent = date.toLocaleDateString();
+                }
+            } else {
+                document.getElementById('node-joined').textContent = '-';
+            }
+            
+            modal.classList.add('active');
+        }
+        
+        function hideNodeModal() {
+            document.getElementById('node-modal').classList.remove('active');
+        }
+        
+        function updateStats() {
+            const nodes = Object.values(nodesData);
+            document.getElementById('total-nodes').textContent = nodes.length;
+            document.getElementById('online-nodes').textContent = nodes.filter(n => n.isOnline).length;
+            
+            // Update your node indicator
+            if (currentUser) {
+                const indicator = document.getElementById('your-node-indicator');
+                const freshData = nodesData[currentUser.id];
+                if (freshData) {
+                    document.getElementById('your-avatar').textContent = (freshData.name || '?')[0].toUpperCase();
+                    document.getElementById('your-name').textContent = freshData.name;
+                    document.getElementById('your-children').textContent = `${freshData.childCount || 0} recruits`;
+                    indicator.style.display = 'flex';
+                }
+            }
+        }
+        
+        function showWelcome(name) {
+            const burst = document.createElement('div');
+            burst.className = 'welcome-burst';
+            burst.innerHTML = `<div class="welcome-text">Welcome, ${name}!</div>`;
+            document.body.appendChild(burst);
+            
+            setTimeout(() => burst.remove(), 2500);
+        }
+        
+        // ============================================
+        // Network Functions
+        // ============================================
+        
+        async function joinNetwork(name, parentId) {
+            try {
+                const nodeId = await window.SrishtiFirebase.createNode({
+                    name: name,
+                    parentId: parentId
+                });
+                
+                currentUser = { id: nodeId, name: name };
+                
+                // Save to localStorage
+                localStorage.setItem('srishti_node_id', nodeId);
+                localStorage.setItem('srishti_node_name', name);
+                
+                // Initialize presence
+                if (window.SrishtiPresence) {
+                    window.SrishtiPresence.init(nodeId);
+                }
+                
+                // Initialize QR
+                if (window.SrishtiQR) {
+                    window.SrishtiQR.init(nodeId);
+                }
+                
+                // Clear join param from URL
+                window.SrishtiQR && window.SrishtiQR.constructor.clearJoinFromUrl();
+                
+                hideOnboardingModal();
+                showWelcome(name);
+                
+                console.log('✅ Joined network as:', name, nodeId);
+                
+            } catch (error) {
+                console.error('Failed to join network:', error);
+                alert('Failed to join. Please try again.');
+                document.getElementById('join-btn').disabled = false;
+                document.getElementById('join-btn').textContent = 'Enter the Timeline';
+            }
+        }
+        
+        async function handleScannedQR(parentId) {
+            // Verify parent exists
+            const parentExists = await window.SrishtiFirebase.nodeExists(parentId);
+            if (!parentExists) {
+                alert('Invalid QR code. The node does not exist.');
+                return;
+            }
+            
+            // If already in network, just show info
+            if (currentUser) {
+                const parentData = nodesData[parentId];
+                alert(`This is ${parentData?.name || 'a node'}'s invite QR. You're already in the network!`);
+                return;
+            }
+            
+            // Show onboarding with parent
+            showOnboardingModal(parentId);
+        }
+        
+        // ============================================
+        // Initialization
+        // ============================================
+        
+        async function init() {
+            // Initialize Firebase
+            const firebaseReady = window.SrishtiFirebase && window.SrishtiFirebase.init();
+            
+            if (!firebaseReady) {
+                console.warn('Firebase not configured. Running in demo mode.');
+                document.getElementById('loading').innerHTML = `
+                    <div class="loading-logo">SRISHTI</div>
+                    <p style="color: #FFD700; margin-top: 20px;">⚠️ Firebase not configured</p>
+                    <p style="color: #888; font-size: 0.9em;">Edit firebase-config.js with your credentials</p>
+                `;
+                return;
+            }
+            
+            // Check for join parameter in URL
+            const joinParentId = window.SrishtiQR ? window.SrishtiQR.constructor.parseJoinFromUrl() : null;
+            
+            // Check for existing user
+            const savedNodeId = localStorage.getItem('srishti_node_id');
+            const savedNodeName = localStorage.getItem('srishti_node_name');
+            
+            // Subscribe to nodes
+            unsubscribeNodes = window.SrishtiFirebase.subscribeToNodes((nodes) => {
+                nodesData = nodes;
+                updateStats();
+                
+                // Build visualization
+                const hierarchy = window.SrishtiFirebase.buildHierarchy(nodes);
+                buildVisualization(hierarchy);
+                
+                // Update glows periodically
+                updateNodeGlows();
+            });
+            
+            // Wait a moment for initial data
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Hide loading
+            document.getElementById('loading').style.display = 'none';
+            
+            // Check if returning user
+            if (savedNodeId && nodesData[savedNodeId]) {
+                currentUser = { id: savedNodeId, name: savedNodeName };
+                
+                // Re-init presence
+                if (window.SrishtiPresence) {
+                    window.SrishtiPresence.init(savedNodeId);
+                }
+                
+                // Init QR
+                if (window.SrishtiQR) {
+                    window.SrishtiQR.init(savedNodeId);
+                }
+                
+                // If they came from a QR link but are already in network
+                if (joinParentId) {
+                    window.SrishtiQR && window.SrishtiQR.constructor.clearJoinFromUrl();
+                }
+                
+            } else if (joinParentId) {
+                // New user joining via QR
+                showOnboardingModal(joinParentId);
+            } else {
+                // New user, no parent (root node)
+                showOnboardingModal(null);
+            }
+            
+            // Start animation
+            animate();
+            
+            // Update glows every 5 seconds
+            setInterval(updateNodeGlows, 5000);
+        }
+        
+        // ============================================
+        // Event Listeners
+        // ============================================
+        
+        // FAB buttons
+        document.getElementById('qr-fab').addEventListener('click', showQRModal);
+        document.getElementById('scan-fab').addEventListener('click', () => {
+            if (window.SrishtiScanner) {
+                window.SrishtiScanner.init(handleScannedQR);
+                window.SrishtiScanner.open();
+            }
+        });
+        
+        // QR Modal buttons
+        document.querySelector('#qr-modal .qr-close').addEventListener('click', hideQRModal);
+        document.getElementById('share-qr-btn').addEventListener('click', () => {
+            window.SrishtiQR && window.SrishtiQR.shareQR();
+        });
+        document.getElementById('copy-link-btn').addEventListener('click', () => {
+            const url = window.SrishtiQR && window.SrishtiQR.generateInviteUrl();
+            if (url) {
+                window.SrishtiQR.copyToClipboard(url);
+            }
+        });
+        
+        // Node Modal
+        document.querySelector('#node-modal .node-close').addEventListener('click', hideNodeModal);
+        document.getElementById('node-modal').addEventListener('click', (e) => {
+            if (e.target.id === 'node-modal') hideNodeModal();
+        });
+        
+        // QR Modal backdrop
+        document.getElementById('qr-modal').addEventListener('click', (e) => {
+            if (e.target.id === 'qr-modal') hideQRModal();
+        });
+        
+        // Window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+        
+        // Start
+        init();
+    </script>
+</body>
+
+</html>
