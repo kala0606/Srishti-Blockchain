@@ -235,39 +235,46 @@ class SrishtiApp {
     async waitForInitialSync() {
         return new Promise((resolve) => {
             const startTime = Date.now();
-            const timeout = 3000; // 3 second timeout
+            const shortTimeout = 3000; // 3 seconds if no peers available
+            const longTimeout = 8000;  // 8 seconds if peers ARE available (wait for P2P)
             
             const checkSync = () => {
-                // If we've synced (chain has more than genesis) or no peers available
-                const peerCount = this.network.peers?.size || 0;
+                const connectedPeers = this.network.peers?.size || 0;
+                const availablePeers = this.network.signaling?.availablePeers?.length || 0;
+                const pendingConnections = this.network.pendingConnections?.size || 0;
                 const chainLength = this.chain.getLength();
                 const elapsed = Date.now() - startTime;
                 
-                if (elapsed >= timeout) {
-                    console.log(`⏰ Sync timeout after ${timeout}ms. Chain length: ${chainLength}, Peers: ${peerCount}`);
-                    resolve();
-                    return;
-                }
+                // Determine timeout based on whether peers exist
+                const hasKnownPeers = availablePeers > 0 || pendingConnections > 0;
+                const timeout = hasKnownPeers ? longTimeout : shortTimeout;
                 
-                // If we have peers and chain has been updated beyond genesis
-                if (peerCount > 0 && chainLength > 1) {
+                console.log(`🔄 Sync check: elapsed=${elapsed}ms, connected=${connectedPeers}, available=${availablePeers}, chain=${chainLength}`);
+                
+                // If we have connected peers and chain has been updated beyond genesis - success!
+                if (connectedPeers > 0 && chainLength > 1) {
                     console.log(`✅ Initial sync complete. Chain length: ${chainLength}`);
                     resolve();
                     return;
                 }
                 
-                // If no peers connected yet, keep waiting
-                if (peerCount === 0 && elapsed < timeout) {
-                    setTimeout(checkSync, 200);
+                // If timeout reached
+                if (elapsed >= timeout) {
+                    if (hasKnownPeers && connectedPeers === 0) {
+                        console.log(`⏰ Sync timeout - peers available but P2P connection not established`);
+                    } else {
+                        console.log(`⏰ Sync timeout after ${timeout}ms. Chain: ${chainLength}, Connected: ${connectedPeers}`);
+                    }
+                    resolve();
                     return;
                 }
                 
-                // We have peers but chain is still at genesis - wait a bit more for sync
-                setTimeout(checkSync, 200);
+                // Keep waiting
+                setTimeout(checkSync, 300);
             };
             
-            // Start checking after a short delay for signaling to register
-            setTimeout(checkSync, 500);
+            // Start checking after signaling has time to register
+            setTimeout(checkSync, 800);
         });
     }
     

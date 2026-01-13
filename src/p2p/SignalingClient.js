@@ -23,12 +23,14 @@ class SignalingClient {
         this.onAnswer = options.onAnswer || (() => {});
         this.onIceCandidate = options.onIceCandidate || (() => {});
         this.onPeerConnected = options.onPeerConnected || (() => {});
+        this.onPeerJoined = options.onPeerJoined || (() => {});
         
         this.ws = null;
         this.connected = false;
         this.reconnectAttempts = 0;
         this.maxReconnectAttempts = 10;
         this.reconnectDelay = 3000;
+        this.availablePeers = []; // Track known peers from signaling
     }
     
     /**
@@ -101,6 +103,7 @@ class SignalingClient {
                 
             case 'registered':
                 console.log(`✅ Registered with signaling server. Peers: ${data.peers.length}`);
+                this.availablePeers = data.peers || [];
                 if (this.onPeerConnected) {
                     this.onPeerConnected(data.peers);
                 }
@@ -108,8 +111,14 @@ class SignalingClient {
                 
             case 'peer_joined':
                 console.log(`🆕 New peer joined: ${data.nodeId}`);
+                // Add to available peers if not already there
+                if (!this.availablePeers.includes(data.nodeId)) {
+                    this.availablePeers.push(data.nodeId);
+                }
+                if (this.onPeerJoined) {
+                    this.onPeerJoined(data.nodeId);
+                }
                 if (this.onPeerConnected) {
-                    // Notify about new peer (as single-element array)
                     this.onPeerConnected([data.nodeId]);
                 }
                 break;
