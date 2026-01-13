@@ -1,6 +1,6 @@
 # Srishti Blockchain
 
-An experimental JavaScript-based blockchain that treats **time and participation** as the core units of value. Srishti implements a decentralized, immutable shared timeline using cryptographic timestamping and peer-to-peer consensus, exploring alternatives to money-centric systems of trust and coordination.
+A decentralized, browser-based blockchain that treats **time and participation** as the core units of value. Built with pure JavaScript, WebRTC for peer-to-peer networking, and a beautiful 3D visualization.
 
 ## Philosophy
 
@@ -11,162 +11,116 @@ Srishti challenges the assumption that blockchain value must be monetary. Instea
 - **Connection** - The social graph of who invited whom
 - **Trust through Participation** - Consensus based on consistent, honest participation
 
+## Features
+
+- **True P2P** - Direct browser-to-browser connections via WebRTC
+- **3D Visualization** - Interactive Three.js network graph
+- **QR Code Invites** - Scan to join the network
+- **Recovery Phrases** - 12-word seed phrase backup
+- **No Central Server** - Signaling server only for initial discovery, all data is P2P
+
 ## Architecture
 
-### Core Components
-
 ```
-src/
-├── core/
-│   ├── Hasher.js              # SHA-256 hashing
-│   ├── Event.js               # Event types (NODE_JOIN, ATTEST, etc.)
-│   ├── Block.js               # Block structure with hash chain
-│   └── Chain.js               # Chain management and validation
-│
-├── crypto/
-│   └── Keys.js                # Ed25519 key generation and signing
-│
-├── storage/
-│   └── IndexedDBStore.js      # Persistent chain storage
-│
-├── p2p/
-│   ├── Protocol.js            # P2P message protocol
-│   ├── PeerConnection.js      # WebRTC peer connections
-│   └── Network.js             # Network management and sync
-│
-├── consensus/
-│   └── ProofOfParticipation.js # Proof of Participation consensus
-│
-├── discovery/
-│   └── QRCode.js              # QR code-based peer discovery
-│
-└── ui/
-    ├── BlockchainAdapter.js   # Firebase-compatible adapter
-    └── GlowCalculator.js      # Participation-based glow system
+├── index.html                 # Main app with 3D visualization
+├── app.js                     # Application logic
+├── src/
+│   ├── core/                  # Blockchain primitives
+│   │   ├── Block.js           # Block structure
+│   │   ├── Chain.js           # Chain management
+│   │   ├── Event.js           # Event types (NODE_JOIN, etc.)
+│   │   └── Hasher.js          # SHA-256 hashing
+│   ├── crypto/
+│   │   ├── Keys.js            # Ed25519 key generation
+│   │   └── Recovery.js        # Seed phrase system
+│   ├── p2p/
+│   │   ├── Network.js         # P2P network & sync
+│   │   ├── PeerConnection.js  # WebRTC connections
+│   │   ├── Protocol.js        # Message protocol
+│   │   └── SignalingClient.js # Signaling server client
+│   ├── consensus/
+│   │   └── ProofOfParticipation.js
+│   ├── discovery/
+│   │   └── QRCode.js          # QR code generation
+│   ├── storage/
+│   │   └── IndexedDBStore.js  # Local chain storage
+│   └── ui/
+│       ├── BlockchainAdapter.js
+│       └── GlowCalculator.js
+└── signaling-server/          # WebSocket signaling (Fly.io)
+    ├── signaling-server.js
+    ├── Dockerfile
+    └── fly.toml
 ```
-
-### Key Features
-
-1. **True P2P** - No central server, direct browser-to-browser connections via WebRTC
-2. **Local Storage** - Each node stores the full chain in IndexedDB
-3. **Cryptographic Integrity** - SHA-256 hash chain ensures immutability
-4. **Proof of Participation** - Consensus based on participation scores (glow system)
-5. **QR-Based Onboarding** - Scan QR codes to join and connect to peers
 
 ## Getting Started
 
-### Prerequisites
-
-- Modern browser with Web Crypto API support (HTTPS required for production)
-- IndexedDB support
-- WebRTC support (for P2P networking)
-
-### Development
-
-1. Clone the repository
-2. Open `test-core.html` in a browser to test core components
-3. Serve locally (required for IndexedDB):
+### Run Locally
 
 ```bash
-# Using Python
-python -m http.server 8000
-
-# Using Node.js
+# Serve the app (HTTPS recommended for WebRTC)
 npx serve .
 
-# Using PHP
-php -S localhost:8000
+# Or with Python
+python -m http.server 8000
 ```
 
-Then visit `http://localhost:8000/test-core.html`
+Visit `http://localhost:8000`
 
-### Core Components Test
+### Deploy Signaling Server
 
-The `test-core.html` file tests:
-- Blockchain creation and validation
-- Block addition and hash chain integrity
-- Storage (IndexedDB)
-- Cryptographic keys (Ed25519)
+The signaling server is deployed on Fly.io:
 
-## Current Status
+```bash
+cd signaling-server
+fly deploy
+```
 
-✅ **Completed:**
-- Core blockchain (Block, Chain, Event, Hasher)
-- Cryptographic keys (Ed25519)
-- IndexedDB storage
-- P2P protocol definition
-- WebRTC peer connections
-- Network layer (sync, propagation)
-- Proof of Participation consensus
-- QR code discovery
-- Blockchain adapter (Firebase-compatible)
-- Glow calculator (ported)
+Current deployment: `wss://srishti-signaling.fly.dev`
 
-🚧 **In Progress:**
-- Full P2P network integration
-- UI migration from Firebase to blockchain
+## How It Works
 
-📋 **Planned:**
-- Full mesh network
-- Presence tracking via P2P
-- Recovery phrases stored in chain
-- Three.js visualization integration
+1. **Join** - Create a node or scan someone's QR code
+2. **Connect** - WebRTC establishes direct P2P connections
+3. **Sync** - Chains are synchronized across all peers
+4. **Participate** - Your presence contributes to consensus
 
-## Design Decisions
+### Chain Sync
 
-### Why IndexedDB?
-- Can store GBs of data (chains grow over time)
-- Fast queries by hash, index, timestamp
-- Survives browser restarts
-- Async API doesn't block UI
-
-### Why WebRTC?
-- Direct browser-to-browser connections
-- No central server needed
-- Built into browsers
-- Supports data channels for messaging
-
-### Why Ed25519?
-- Fast signing and verification
-- Small keys (32 bytes)
-- Good security properties
-- Supported by Web Crypto API
-
-### Why Proof of Participation?
-- Aligns with Srishti's philosophy (time/participation as value)
-- Your existing glow system informs consensus
-- No wasteful mining
-- Rewards consistent, honest participation
+- Longest valid chain wins
+- Unique NODE_JOIN events are merged across divergent chains
+- All nodes eventually converge to the same chain state
 
 ## Technical Stack
 
-| Component | Technology | Why |
-|-----------|-----------|-----|
-| **Blockchain** | Native JS + Web Crypto API | No dependencies, works everywhere |
-| **Storage** | IndexedDB | Unlimited storage, async |
-| **P2P Networking** | WebRTC + WebSockets (for signaling) | Direct browser-to-browser |
-| **Cryptography** | Web Crypto API (Ed25519, SHA-256) | Native browser APIs |
-| **Discovery** | QR codes + optional signaling server | Easy onboarding |
-| **UI** | Three.js (your existing code) | Keep what works |
+| Component | Technology |
+|-----------|------------|
+| Blockchain | Native JS + Web Crypto API |
+| Storage | IndexedDB |
+| P2P | WebRTC Data Channels |
+| Signaling | WebSocket (Fly.io) |
+| Crypto | Ed25519, SHA-256 |
+| Visualization | Three.js |
 
-## Migration from Firebase
+## Debug Commands
 
-The `BlockchainAdapter` provides a Firebase-compatible interface, allowing your existing UI code to work with minimal changes:
+Open browser console:
 
 ```javascript
-// Instead of:
-window.SrishtiFirebase.subscribeToNodes((nodes) => { ... });
+// View chain info
+SrishtiApp.getChainInfo()
 
-// Use:
-blockchainAdapter.subscribeToNodes((nodes) => { ... });
+// Check connected peers
+SrishtiApp.network.peers.size
+
+// View all nodes
+SrishtiApp.getNodes()
 ```
-
-The adapter translates blockchain events into the same node structure your UI expects.
 
 ## License
 
-[Your License Here]
+MIT
 
 ---
 
-**Built for the Srishti Blockchain project** 🌟
+**Built for exploring decentralized coordination beyond money** 🌟
