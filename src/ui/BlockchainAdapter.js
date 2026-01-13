@@ -67,7 +67,10 @@ class BlockchainAdapter {
         const nodes = this.nodeCache;
         const nodesArray = Object.values(nodes);
         
+        console.log(`🌳 buildHierarchy called with ${nodesArray.length} nodes`);
+        
         if (nodesArray.length === 0) {
+            console.log('🌳 No nodes to build hierarchy');
             return null;
         }
         
@@ -155,8 +158,12 @@ class BlockchainAdapter {
         }
         this.listeners.get('nodes').push({ id: listenerId, callback });
         
+        console.log(`📝 New subscriber added, total listeners: ${this.listeners.get('nodes').length}`);
+        
         // Call immediately with current nodes
-        callback(this.getAllNodes());
+        const currentNodes = this.getAllNodes();
+        console.log(`📝 Calling subscriber immediately with ${Object.keys(currentNodes).length} nodes`);
+        callback(currentNodes);
         
         // Return unsubscribe function
         return () => {
@@ -176,6 +183,7 @@ class BlockchainAdapter {
     notifyListeners() {
         const nodes = this.getAllNodes();
         const callbacks = this.listeners.get('nodes') || [];
+        console.log(`📣 Notifying ${callbacks.length} listeners with ${Object.keys(nodes).length} nodes`);
         callbacks.forEach(({ callback }) => {
             try {
                 callback(nodes);
@@ -213,8 +221,13 @@ class BlockchainAdapter {
      * Handle chain update (called when chain changes)
      */
     onChainUpdate() {
+        console.log('🔄 BlockchainAdapter.onChainUpdate called');
+        
         // Update node cache
         this.updateNodeCache();
+        
+        console.log('📊 Node cache updated:', Object.keys(this.nodeCache).length, 'nodes');
+        console.log('📊 Nodes:', Object.values(this.nodeCache).map(n => n.name));
         
         // Notify listeners
         this.notifyListeners();

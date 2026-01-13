@@ -1780,6 +1780,8 @@
         
         function updateStats() {
             const nodes = Object.values(nodesData).filter(n => !n.isVirtualRoot);
+            console.log(`📊 updateStats: ${nodes.length} nodes, currentUser:`, currentUser);
+            
             document.getElementById('total-nodes').textContent = nodes.length;
             document.getElementById('online-nodes').textContent = nodes.filter(n => n.isOnline).length;
             
@@ -1787,12 +1789,17 @@
             if (currentUser) {
                 const indicator = document.getElementById('your-node-indicator');
                 const freshData = nodesData[currentUser.id];
+                console.log(`📊 User data for ${currentUser.id}:`, freshData);
                 if (freshData) {
                     document.getElementById('your-avatar').textContent = (freshData.name || '?')[0].toUpperCase();
                     document.getElementById('your-name').textContent = freshData.name;
                     document.getElementById('your-children').textContent = `${freshData.childCount || 0} recruits`;
                     indicator.style.display = 'flex';
+                } else {
+                    console.log(`⚠️ No data found for currentUser ${currentUser.id} in nodesData`);
                 }
+            } else {
+                console.log(`⚠️ currentUser is not set`);
             }
         }
         
@@ -1906,11 +1913,13 @@
             
             // Subscribe to nodes (same interface as Firebase!)
             unsubscribeNodes = window.SrishtiApp.subscribeToNodes((nodes) => {
+                console.log(`🔔 Node update received: ${Object.keys(nodes).length} nodes`);
                 nodesData = nodes;
                 updateStats();
                 
                 // Build visualization
                 const hierarchy = window.SrishtiApp.buildHierarchy();
+                console.log(`🌳 Hierarchy built:`, hierarchy ? 'has data' : 'null');
                 buildVisualization(hierarchy);
                 
                 // Update glows periodically
