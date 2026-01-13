@@ -509,12 +509,26 @@ class Network {
         });
         
         // Notify the UI about this peer's online status
-        // The onChainUpdate callback will update the adapter's presence cache
         if (this.onPresenceUpdate) {
             this.onPresenceUpdate(peerId, {
                 isOnline: message.isOnline,
                 lastSeen: message.timestamp
             });
+        }
+        
+        // If the heartbeat includes info about other nodes, update them too
+        if (message.knownOnline && Array.isArray(message.knownOnline)) {
+            for (const nodeId of message.knownOnline) {
+                if (nodeId !== this.nodeId && !this.peerInfo.has(nodeId)) {
+                    // We learned about another online node through gossip
+                    if (this.onPresenceUpdate) {
+                        this.onPresenceUpdate(nodeId, {
+                            isOnline: true,
+                            lastSeen: Date.now()
+                        });
+                    }
+                }
+            }
         }
     }
     
@@ -667,9 +681,18 @@ class Network {
         }
         
         this.heartbeatInterval = setInterval(() => {
+            // Collect list of nodes we know are online (including ourselves and connected peers)
+            const knownOnline = [this.nodeId];
+            for (const [peerId, info] of this.peerInfo.entries()) {
+                if (info.isOnline) {
+                    knownOnline.push(peerId);
+                }
+            }
+            
             const heartbeat = window.SrishtiProtocol.createHeartbeat({
                 nodeId: this.nodeId,
-                isOnline: true
+                isOnline: true,
+                knownOnline: knownOnline
             });
             
             this.broadcast(heartbeat);

@@ -101,7 +101,8 @@ class Protocol {
             type: this.MESSAGE_TYPES.HEARTBEAT,
             timestamp: Date.now(),
             nodeId: info.nodeId,
-            isOnline: info.isOnline !== undefined ? info.isOnline : true
+            isOnline: info.isOnline !== undefined ? info.isOnline : true,
+            knownOnline: info.knownOnline || [] // List of nodes this peer knows are online
         };
     }
     
