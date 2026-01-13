@@ -54,13 +54,11 @@ class QRCodeDiscovery {
     generateQRData(connectionInfo = null) {
         const info = connectionInfo || this.generateConnectionInfo();
         
-        // Create URL-friendly format
+        // SIMPLIFIED: Only include nodeId for smaller QR code
+        // Public key can be retrieved via signaling server when connecting
         const qrData = {
-            type: 'srishti-invite',
-            version: '1.0',
-            nodeId: info.nodeId,
-            publicKey: info.publicKey,
-            timestamp: info.timestamp
+            t: 's',  // type: srishti (shortened)
+            n: info.nodeId  // nodeId (shortened key)
         };
         
         return JSON.stringify(qrData);
@@ -72,26 +70,44 @@ class QRCodeDiscovery {
      * @returns {string} - URL with encoded connection info
      */
     generateQRUrl(connectionInfo = null) {
-        const qrData = this.generateQRData(connectionInfo);
+        // Use simplified format: just the nodeId in URL
+        const info = connectionInfo || this.generateConnectionInfo();
         
-        // Encode as base64 for URL
-        const encoded = btoa(qrData);
-        
-        // Create URL
+        // Create URL with just nodeId (much shorter = simpler QR)
         const baseUrl = window.location.origin + window.location.pathname;
-        return `${baseUrl}?join=${encoded}`;
+        return `${baseUrl}?join=${info.nodeId}`;
     }
     
     /**
      * Parse QR code data from URL parameter
-     * @param {string} encodedData - Base64 encoded data from URL
+     * @param {string} encodedData - nodeId directly or base64 encoded data from URL
      * @returns {Object|null} - Parsed connection info
      */
     static parseFromUrl(encodedData) {
         try {
+            // New simplified format: just nodeId directly
+            if (encodedData.startsWith('node_')) {
+                return {
+                    nodeId: encodedData,
+                    publicKey: null,  // Will be fetched via signaling
+                    timestamp: Date.now()
+                };
+            }
+            
+            // Legacy format: base64 encoded JSON
             const decoded = atob(encodedData);
             const data = JSON.parse(decoded);
             
+            // Handle new compact format
+            if (data.t === 's' && data.n) {
+                return {
+                    nodeId: data.n,
+                    publicKey: null,
+                    timestamp: Date.now()
+                };
+            }
+            
+            // Handle old format
             if (data.type === 'srishti-invite' && data.nodeId) {
                 return {
                     nodeId: data.nodeId,
@@ -116,6 +132,16 @@ class QRCodeDiscovery {
         try {
             const data = JSON.parse(jsonString);
             
+            // Handle new compact format
+            if (data.t === 's' && data.n) {
+                return {
+                    nodeId: data.n,
+                    publicKey: null,
+                    timestamp: Date.now()
+                };
+            }
+            
+            // Handle old format
             if (data.type === 'srishti-invite' && data.nodeId) {
                 return {
                     nodeId: data.nodeId,
@@ -211,7 +237,7 @@ class QRCodeDiscovery {
                     height: mergedOptions.height,
                     colorDark: '#FFD700',
                     colorLight: '#000022',
-                    correctLevel: QRCode.CorrectLevel.M
+                    correctLevel: QRCode.CorrectLevel.L  // Lower = simpler QR, easier to scan
                 });
                 return container;
             } catch (e) {

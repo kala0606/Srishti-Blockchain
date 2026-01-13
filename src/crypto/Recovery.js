@@ -55,10 +55,17 @@ class Recovery {
             bytes[i] = binary.charCodeAt(i);
         }
         
-        // Use first 12 bytes to generate 12 words
+        // PKCS8 Ed25519 private key format:
+        // First 16 bytes are ASN.1 header (same for all keys)
+        // Actual key material starts at byte 16
+        // Skip the header to get unique bytes for each key
+        const KEY_HEADER_LENGTH = 16;
+        const keyStart = Math.min(KEY_HEADER_LENGTH, bytes.length - 12);
+        
+        // Use 12 bytes from the actual key material (not header)
         const words = [];
         for (let i = 0; i < 12; i++) {
-            const byteIndex = i % bytes.length;
+            const byteIndex = keyStart + i;
             const wordIndex = bytes[byteIndex] % this.WORD_LIST.length;
             words.push(this.WORD_LIST[wordIndex]);
         }
