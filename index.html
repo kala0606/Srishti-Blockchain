@@ -1336,6 +1336,8 @@
         // ============================================
         
         function buildVisualization(hierarchyData) {
+            console.log(`🎨 buildVisualization called with:`, hierarchyData);
+            
             // Clear existing
             while (mainGroup.children.length > 0) {
                 mainGroup.remove(mainGroup.children[0]);
@@ -1345,12 +1347,15 @@
             linkObjects = [];
             
             if (!hierarchyData) {
+                console.log(`🎨 No hierarchy data, returning`);
                 return;
             }
             
             const root = d3.hierarchy(hierarchyData);
             const links = root.links();
             const nodes = root.descendants();
+            
+            console.log(`🎨 Creating ${nodes.length} spheres, ${links.length} links`);
             
             // Layout
             const treeLayout = d3.tree().size([2 * Math.PI, 500]);
@@ -1799,6 +1804,7 @@
                 document.getElementById('your-name').textContent = displayName;
                 document.getElementById('your-children').textContent = `${childCount} recruits`;
                 indicator.style.display = 'flex';
+                console.log(`✅ Profile indicator set to visible for ${displayName}`);
                 
                 if (!freshData) {
                     console.log(`⚠️ Node ${currentUser.id} not in chain yet, using localStorage data`);
