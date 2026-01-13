@@ -425,10 +425,22 @@ class Network {
             // If their chain is longer, replace ours
             if (theirLength > ourLength) {
                 console.log(`📥 Their chain is longer, replacing ours...`);
+                
+                // IMPORTANT: Save our current nodes BEFORE replacing chain
+                // We might have unique nodes they don't have
+                const ourOldBlocks = this.chain.toJSON();
+                
                 await this.chain.replaceChain(receivedBlocks);
+                
+                // Ensure our local node is in the chain (for returning users)
+                await this.ensureLocalNodeInChain();
+                
+                // Merge back any unique nodes we had
+                await this.mergeUniqueNodes(ourOldBlocks, 'self');
+                
                 await this.saveChain();
                 this.onChainUpdate(this.chain);
-                console.log(`✅ Chain replaced with ${theirLength} blocks from ${peerId}`);
+                console.log(`✅ Chain replaced with ${this.chain.getLength()} blocks from ${peerId}`);
             } 
             // If same length, use deterministic tie-breaker (earlier genesis timestamp wins)
             else if (theirLength === ourLength && theirLength > 1) {
@@ -440,10 +452,18 @@ class Network {
                     (theirGenesis.timestamp === ourGenesis.timestamp && 
                      theirGenesis.hash < ourGenesis.hash)) {
                     console.log(`📥 Their chain has earlier genesis, replacing ours...`);
+                    
+                    // IMPORTANT: Save our current nodes BEFORE replacing chain
+                    // We'll need to merge them back after adopting their chain
+                    const ourOldBlocks = this.chain.toJSON();
+                    
                     await this.chain.replaceChain(receivedBlocks);
                     
                     // Check if our node's join block is in the new chain
                     await this.ensureLocalNodeInChain();
+                    
+                    // Now merge back any nodes we had that they didn't have
+                    await this.mergeUniqueNodes(ourOldBlocks, 'self');
                     
                     await this.saveChain();
                     this.onChainUpdate(this.chain);

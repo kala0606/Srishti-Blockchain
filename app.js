@@ -40,9 +40,10 @@ class SrishtiApp {
                 await this.chain.replaceChain(blocks);
                 console.log(`✅ Chain loaded: ${blocks.length} blocks`);
             } else {
-                await this.chain.createGenesisBlock();
-                await this.saveChain();
-                console.log('✅ Genesis block created');
+                // DON'T create genesis yet - wait to sync with peers first
+                // This ensures all devices converge on the same genesis
+                console.log('📝 No local chain - will sync or create genesis during node creation');
+                this.needsGenesis = true;
             }
             
             // Initialize consensus
@@ -163,6 +164,14 @@ class SrishtiApp {
             if (this.network && this.network.signaling) {
                 console.log('⏳ Waiting for initial peer sync...');
                 await this.waitForInitialSync();
+            }
+            
+            // If we still need genesis (no chain synced from peers), create it now
+            if (this.needsGenesis && this.chain.getLength() === 0) {
+                console.log('🌱 No peers found - creating genesis block as first node');
+                await this.chain.createGenesisBlock();
+                await this.saveChain();
+                this.needsGenesis = false;
             }
             
             // Generate recovery phrase and hash it
@@ -330,6 +339,38 @@ class SrishtiApp {
      */
     nodeExists(nodeId) {
         return this.adapter.nodeExists(nodeId);
+    }
+    
+    /**
+     * Debug: Get chain info for verification
+     * Call from console: SrishtiApp.getChainInfo()
+     */
+    getChainInfo() {
+        const genesis = this.chain.blocks[0];
+        const latest = this.chain.getLatestBlock();
+        const nodes = this.chain.buildNodeMap();
+        const nodeNames = Object.values(nodes).map(n => n.name);
+        
+        const info = {
+            chainLength: this.chain.getLength(),
+            genesisHash: genesis?.hash?.substring(0, 16) + '...',
+            genesisTimestamp: genesis?.timestamp,
+            latestHash: latest?.hash?.substring(0, 16) + '...',
+            nodeCount: Object.keys(nodes).length,
+            nodeNames: nodeNames,
+            myNodeId: this.nodeId
+        };
+        
+        console.log('📊 Chain Info:', info);
+        console.table([
+            { key: 'Chain Length', value: info.chainLength },
+            { key: 'Genesis Hash', value: info.genesisHash },
+            { key: 'Genesis Time', value: new Date(info.genesisTimestamp).toISOString() },
+            { key: 'Node Count', value: info.nodeCount },
+            { key: 'Nodes', value: info.nodeNames.join(', ') }
+        ]);
+        
+        return info;
     }
 }
 
