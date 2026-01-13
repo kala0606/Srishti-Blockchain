@@ -496,10 +496,42 @@ class Network {
         
         try {
             const block = window.SrishtiBlock.fromJSON(message.block);
+            const expectedIndex = this.chain.getLength();
             
-            // Validate block
+            // Validate block structure
             if (!block.isValid()) {
-                console.warn(`Invalid block from ${peerId}`);
+                console.warn(`Invalid block structure from ${peerId}`);
+                return;
+            }
+            
+            // Check block index
+            if (block.index < expectedIndex) {
+                // Block is behind our chain - check if it has a NODE_JOIN we don't have
+                console.log(`📦 Block ${block.index} from ${peerId} is behind our chain (we have ${expectedIndex})`);
+                
+                // Extract any unique nodes from this block
+                if (block.data && block.data.type === 'NODE_JOIN') {
+                    const nodeMap = this.chain.buildNodeMap();
+                    if (!nodeMap[block.data.nodeId]) {
+                        console.log(`🆕 Block contains node ${block.data.nodeId} we don't have, merging...`);
+                        await this.mergeUniqueNodes([message.block], peerId);
+                    }
+                }
+                return;
+            }
+            
+            if (block.index > expectedIndex) {
+                // Block is ahead - we're missing blocks, request sync
+                console.log(`📦 Block ${block.index} from ${peerId} is ahead of our chain (we have ${expectedIndex}), syncing...`);
+                await this.requestSync(peerId);
+                return;
+            }
+            
+            // Block index matches - verify previous hash
+            const latestBlock = this.chain.getLatestBlock();
+            if (latestBlock && block.previousHash !== latestBlock.hash) {
+                console.warn(`Block ${block.index} has wrong previousHash, requesting sync`);
+                await this.requestSync(peerId);
                 return;
             }
             
@@ -515,9 +547,11 @@ class Network {
             // Notify listeners
             this.onChainUpdate(this.chain);
             
-            console.log(`✅ New block received from ${peerId}`);
+            console.log(`✅ New block ${block.index} received from ${peerId}`);
         } catch (error) {
             console.error(`Failed to add block from ${peerId}:`, error);
+            // On any error, try to sync with this peer
+            await this.requestSync(peerId);
         }
     }
     
