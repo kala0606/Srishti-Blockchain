@@ -440,11 +440,18 @@ class Network {
                      theirGenesis.hash < ourGenesis.hash)) {
                     console.log(`📥 Their chain has earlier genesis, replacing ours...`);
                     await this.chain.replaceChain(receivedBlocks);
+                    
+                    // Check if our node's join block is in the new chain
+                    await this.ensureLocalNodeInChain();
+                    
                     await this.saveChain();
                     this.onChainUpdate(this.chain);
-                    console.log(`✅ Chain replaced (earlier genesis) with ${theirLength} blocks from ${peerId}`);
+                    console.log(`✅ Chain replaced (earlier genesis) with ${this.chain.getLength()} blocks from ${peerId}`);
                 } else {
                     console.log(`📭 Our chain wins tie-breaker, keeping ours`);
+                    
+                    // But check if THEIR node is in our chain - if not, we should add it!
+                    // (This handles the case where we win but they have a valid node too)
                 }
             } else {
                 console.log(`📭 Our chain is longer or equal, keeping ours`);
@@ -586,6 +593,59 @@ class Network {
     async saveChain() {
         const blocks = this.chain.toJSON();
         await this.storage.saveBlocks(blocks);
+    }
+    
+    /**
+     * Ensure our local node is in the chain after a chain replacement
+     * If not, add our join block to the end
+     */
+    async ensureLocalNodeInChain() {
+        if (!this.nodeId) return;
+        
+        // Check if our node is in the chain
+        const nodeMap = this.chain.buildNodeMap();
+        if (nodeMap[this.nodeId]) {
+            console.log(`✅ Our node ${this.nodeId} is in the chain`);
+            return;
+        }
+        
+        console.log(`⚠️ Our node ${this.nodeId} not in chain, re-adding join block...`);
+        
+        // Get our node info from localStorage
+        const nodeName = localStorage.getItem('srishti_node_name');
+        const publicKey = localStorage.getItem('srishti_public_key');
+        
+        if (!nodeName || !publicKey) {
+            console.error('Cannot re-add node: missing localStorage data');
+            return;
+        }
+        
+        // Create a new join event
+        const joinEvent = window.SrishtiEvent.createNodeJoin({
+            nodeId: this.nodeId,
+            name: nodeName,
+            parentId: null, // Re-joining as root (could be improved)
+            publicKey: publicKey
+        });
+        
+        // Create and add the block
+        const latestBlock = this.chain.getLatestBlock();
+        const newBlock = new window.SrishtiBlock({
+            index: this.chain.getLength(),
+            previousHash: latestBlock.hash,
+            data: joinEvent,
+            proposer: this.nodeId,
+            participationProof: { nodeId: this.nodeId, score: 0.5, timestamp: Date.now() }
+        });
+        
+        await newBlock.computeHash();
+        await this.chain.addBlock(newBlock);
+        
+        // Broadcast our re-join to peers
+        const message = window.SrishtiProtocol.createNewBlock(newBlock.toJSON());
+        this.broadcast(message);
+        
+        console.log(`✅ Re-added our node to chain at index ${newBlock.index}`);
     }
     
     /**
