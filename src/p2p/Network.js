@@ -451,11 +451,15 @@ class Network {
                 } else {
                     console.log(`📭 Our chain wins tie-breaker, keeping ours`);
                     
-                    // But check if THEIR node is in our chain - if not, we should add it!
-                    // (This handles the case where we win but they have a valid node too)
+                    // Merge unique NODE_JOIN events from their chain that we don't have
+                    await this.mergeUniqueNodes(receivedBlocks, peerId);
                 }
             } else {
                 console.log(`📭 Our chain is longer or equal, keeping ours`);
+                
+                // Even though our chain is longer, check if they have unique nodes we're missing
+                // This handles the case where chains diverged and we need to include all valid nodes
+                await this.mergeUniqueNodes(receivedBlocks, peerId);
             }
         } catch (error) {
             console.error(`Sync failed from ${peerId}:`, error);
@@ -617,6 +621,94 @@ class Network {
     async saveChain() {
         const blocks = this.chain.toJSON();
         await this.storage.saveBlocks(blocks);
+    }
+    
+    /**
+     * Merge unique NODE_JOIN events from peer's chain that we don't have
+     * This handles the case where chains diverged and both have valid nodes
+     * @param {Array} receivedBlocks - Blocks from peer's chain
+     * @param {string} peerId - Peer's node ID
+     */
+    async mergeUniqueNodes(receivedBlocks, peerId) {
+        if (!receivedBlocks || receivedBlocks.length === 0) return;
+        
+        try {
+            // Build map of nodes we already have
+            const ourNodeMap = this.chain.buildNodeMap();
+            const ourNodeIds = new Set(Object.keys(ourNodeMap));
+            
+            console.log(`🔀 Checking for unique nodes from ${peerId}. Our nodes:`, Array.from(ourNodeIds));
+            
+            // Find NODE_JOIN events in their chain that we don't have
+            const missingJoins = [];
+            
+            for (const blockData of receivedBlocks) {
+                const eventData = blockData.data;
+                
+                // Check if this is a NODE_JOIN event
+                if (eventData && eventData.type === 'NODE_JOIN') {
+                    const nodeId = eventData.nodeId;
+                    
+                    // If we don't have this node, add it to missing list
+                    if (!ourNodeIds.has(nodeId)) {
+                        console.log(`🆕 Found missing node: ${eventData.name} (${nodeId})`);
+                        missingJoins.push(eventData);
+                    }
+                }
+            }
+            
+            if (missingJoins.length === 0) {
+                console.log(`✅ No missing nodes to merge from ${peerId}`);
+                return;
+            }
+            
+            console.log(`🔀 Merging ${missingJoins.length} unique nodes from ${peerId}`);
+            
+            // Add each missing node as a new block
+            for (const joinEvent of missingJoins) {
+                // Update timestamp to now (it's being added to our chain now)
+                const updatedJoinEvent = {
+                    ...joinEvent,
+                    timestamp: Date.now(),
+                    // Reset parentId if it points to a node we don't have
+                    parentId: joinEvent.parentId && ourNodeIds.has(joinEvent.parentId) 
+                        ? joinEvent.parentId 
+                        : null
+                };
+                
+                const latestBlock = this.chain.getLatestBlock();
+                const newBlock = new window.SrishtiBlock({
+                    index: this.chain.getLength(),
+                    previousHash: latestBlock.hash,
+                    data: updatedJoinEvent,
+                    proposer: peerId,
+                    participationProof: { nodeId: joinEvent.nodeId, score: 0.5, timestamp: Date.now() }
+                });
+                
+                await newBlock.computeHash();
+                await this.chain.addBlock(newBlock);
+                
+                // Add to our known nodes for next iteration
+                ourNodeIds.add(joinEvent.nodeId);
+                
+                // Broadcast the new block to other peers (exclude the peer we got it from)
+                const newBlockMessage = window.SrishtiProtocol.createNewBlock(newBlock.toJSON());
+                this.broadcast(newBlockMessage, peerId);
+                
+                console.log(`✅ Added missing node ${joinEvent.name} (${joinEvent.nodeId}) at index ${newBlock.index}`);
+            }
+            
+            // Save updated chain
+            await this.saveChain();
+            
+            // Notify UI of chain update
+            this.onChainUpdate(this.chain);
+            
+            console.log(`✅ Merged ${missingJoins.length} nodes from ${peerId}, chain now has ${this.chain.getLength()} blocks`);
+            
+        } catch (error) {
+            console.error(`Failed to merge nodes from ${peerId}:`, error);
+        }
     }
     
     /**
