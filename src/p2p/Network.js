@@ -21,6 +21,7 @@ class Network {
         this.chain = options.chain;
         this.storage = options.storage;
         this.onChainUpdate = options.onChainUpdate || (() => {});
+        this.onPresenceUpdate = options.onPresenceUpdate || null;
         this.signalingServerUrl = options.signalingServerUrl || null;
         
         this.peers = new Map(); // Map<nodeId, PeerConnection>
@@ -506,6 +507,15 @@ class Network {
             lastSeen: message.timestamp,
             isOnline: message.isOnline
         });
+        
+        // Notify the UI about this peer's online status
+        // The onChainUpdate callback will update the adapter's presence cache
+        if (this.onPresenceUpdate) {
+            this.onPresenceUpdate(peerId, {
+                isOnline: message.isOnline,
+                lastSeen: message.timestamp
+            });
+        }
     }
     
     /**

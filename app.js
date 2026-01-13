@@ -115,6 +115,10 @@ class SrishtiApp {
                 onChainUpdate: () => {
                     this.adapter.onChainUpdate();
                     this.updatePresence(this.nodeId, { isOnline: true, lastSeen: Date.now() });
+                },
+                onPresenceUpdate: (nodeId, presenceData) => {
+                    // Update presence for peer nodes
+                    this.adapter.updatePresence(nodeId, presenceData);
                 }
             });
             
