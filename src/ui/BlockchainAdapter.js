@@ -42,6 +42,9 @@ class BlockchainAdapter {
     updateNodeCache() {
         const nodes = this.chain.buildNodeMap();
         
+        // CLEAR old cache first (important for chain replacements!)
+        this.nodeCache = {};
+        
         // Merge with presence data
         for (const nodeId in nodes) {
             const node = nodes[nodeId];

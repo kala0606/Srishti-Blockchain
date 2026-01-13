@@ -1835,6 +1835,14 @@
                 
                 currentUser = { id: nodeId, name: name };
                 
+                // Update stats immediately now that currentUser is set
+                updateStats();
+                
+                // Mark ourselves as online
+                if (window.SrishtiApp) {
+                    window.SrishtiApp.updatePresence(nodeId, { isOnline: true, lastSeen: Date.now() });
+                }
+                
                 // Initialize QR
                 if (window.SrishtiQRCode && window.SrishtiApp.publicKeyBase64) {
                     window.SrishtiQRCode.init(nodeId, window.SrishtiApp.publicKeyBase64);
