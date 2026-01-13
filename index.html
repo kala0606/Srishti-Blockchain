@@ -1790,13 +1790,18 @@
                 const indicator = document.getElementById('your-node-indicator');
                 const freshData = nodesData[currentUser.id];
                 console.log(`📊 User data for ${currentUser.id}:`, freshData);
-                if (freshData) {
-                    document.getElementById('your-avatar').textContent = (freshData.name || '?')[0].toUpperCase();
-                    document.getElementById('your-name').textContent = freshData.name;
-                    document.getElementById('your-children').textContent = `${freshData.childCount || 0} recruits`;
-                    indicator.style.display = 'flex';
-                } else {
-                    console.log(`⚠️ No data found for currentUser ${currentUser.id} in nodesData`);
+                
+                // Use chain data if available, otherwise fallback to currentUser data
+                const displayName = freshData?.name || currentUser.name || '?';
+                const childCount = freshData?.childCount || 0;
+                
+                document.getElementById('your-avatar').textContent = displayName[0].toUpperCase();
+                document.getElementById('your-name').textContent = displayName;
+                document.getElementById('your-children').textContent = `${childCount} recruits`;
+                indicator.style.display = 'flex';
+                
+                if (!freshData) {
+                    console.log(`⚠️ Node ${currentUser.id} not in chain yet, using localStorage data`);
                 }
             } else {
                 console.log(`⚠️ currentUser is not set`);
@@ -1932,9 +1937,19 @@
             // Hide loading
             document.getElementById('loading').style.display = 'none';
             
-            // Check if returning user
-            if (savedNodeId && nodesData[savedNodeId]) {
+            // Check if returning user - trust localStorage if we have valid data
+            const hasValidLocalData = savedNodeId && savedNodeName && localStorage.getItem('srishti_private_key');
+            console.log(`🔍 Checking returning user: savedNodeId=${savedNodeId}, hasValidLocalData=${hasValidLocalData}`);
+            
+            if (hasValidLocalData) {
+                // User has valid identity in localStorage - they're a returning user
                 currentUser = { id: savedNodeId, name: savedNodeName };
+                console.log(`✅ Returning user set: ${savedNodeName} (${savedNodeId})`);
+                
+                // Mark ourselves as online
+                if (window.SrishtiApp) {
+                    window.SrishtiApp.updatePresence(savedNodeId, { isOnline: true, lastSeen: Date.now() });
+                }
                 
                 // Initialize QR
                 if (window.SrishtiQRCode && window.SrishtiApp.publicKeyBase64) {
@@ -1947,6 +1962,9 @@
                     url.searchParams.delete('join');
                     window.history.replaceState({}, document.title, url.pathname);
                 }
+                
+                // Trigger a UI update with current user
+                updateStats();
             } else if (joinParentId) {
                 // New user joining via QR
                 showOnboardingModal(joinParentId);
