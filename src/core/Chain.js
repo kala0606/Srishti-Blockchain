@@ -201,7 +201,8 @@ class Chain {
                 name: joinEvent.name,
                 parentId: joinEvent.parentId,
                 createdAt: joinEvent.timestamp,
-                publicKey: joinEvent.publicKey
+                publicKey: joinEvent.publicKey,
+                recoveryPhraseHash: joinEvent.recoveryPhraseHash || null
             };
         }
         

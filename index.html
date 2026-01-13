@@ -21,6 +21,7 @@
     <script src="src/core/Block.js"></script>
     <script src="src/core/Chain.js"></script>
     <script src="src/crypto/Keys.js"></script>
+    <script src="src/crypto/Recovery.js"></script>
     <script src="src/storage/IndexedDBStore.js"></script>
     <script src="src/consensus/ProofOfParticipation.js"></script>
     <script src="src/p2p/Protocol.js"></script>
@@ -963,6 +964,9 @@
                 <button id="share-qr-btn" class="qr-btn primary">📤 Share</button>
                 <button id="copy-link-btn" class="qr-btn">📋 Copy Link</button>
             </div>
+            <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
+                <button id="show-recovery-btn" class="qr-btn" style="width: 100%;">🔐 Show Recovery Phrase</button>
+            </div>
         </div>
     </div>
 
@@ -1664,28 +1668,51 @@
             setTimeout(() => nameInput.focus(), 100);
         }
         
-        function handleRecoveredNode(nodeData) {
-            // Set current user
-            currentUser = { id: nodeData.id, name: nodeData.name };
+        async function handleRecoveredNode(recoveryData) {
+            const { phrase, name } = recoveryData;
             
-            // Save to localStorage
-            localStorage.setItem('srishti_node_id', nodeData.id);
-            localStorage.setItem('srishti_node_name', nodeData.name);
-            
-            // Initialize presence
-            if (window.SrishtiPresence) {
-                window.SrishtiPresence.init(nodeData.id);
+            try {
+                // Search the chain for a node with matching phrase hash
+                const phraseHash = await window.SrishtiRecovery.hashPhrase(phrase);
+                const nodes = window.SrishtiApp.chain.buildNodeMap();
+                
+                // For now, look for any node with matching recovery hash
+                // In a full implementation, we'd derive the key from the phrase
+                let foundNode = null;
+                for (const [nodeId, node] of Object.entries(nodes)) {
+                    if (node.recoveryPhraseHash === phraseHash) {
+                        foundNode = { id: nodeId, ...node };
+                        break;
+                    }
+                }
+                
+                if (!foundNode) {
+                    // Recovery phrase doesn't match any known node
+                    // Show explanation and offer to join as new node
+                    alert('Recovery phrase not found in the network.\n\nNote: Recovery works best when restoring on a device that previously had the node. For now, you can join as a new node.');
+                    return;
+                }
+                
+                // Set current user
+                currentUser = { id: foundNode.id, name: foundNode.name || name };
+                
+                // Save to localStorage
+                localStorage.setItem('srishti_node_id', foundNode.id);
+                localStorage.setItem('srishti_node_name', foundNode.name || name);
+                
+                // Initialize QR
+                if (window.SrishtiQRCode && foundNode.publicKey) {
+                    window.SrishtiQRCode.init(foundNode.id, foundNode.publicKey);
+                }
+                
+                hideOnboardingModal();
+                showWelcome(foundNode.name || name);
+                
+                console.log('✅ Recovered node:', foundNode.name, foundNode.id);
+            } catch (error) {
+                console.error('Recovery failed:', error);
+                alert('Recovery failed. Please try again or join as a new node.');
             }
-            
-            // Initialize QR
-            if (window.SrishtiQRCode && window.SrishtiApp.publicKeyBase64) {
-                window.SrishtiQRCode.init(nodeData.id, window.SrishtiApp.publicKeyBase64);
-            }
-            
-            hideOnboardingModal();
-            showWelcome(nodeData.name);
-            
-            console.log('✅ Recovered node:', nodeData.name, nodeData.id);
         }
         
         function hideOnboardingModal() {
@@ -1784,7 +1811,9 @@
         
         async function joinNetwork(name, parentId) {
             try {
-                const nodeId = await window.SrishtiApp.createNode(name, parentId);
+                const result = await window.SrishtiApp.createNode(name, parentId);
+                const nodeId = result.nodeId;
+                const recoveryPhrase = result.recoveryPhrase;
                 
                 currentUser = { id: nodeId, name: name };
                 
@@ -1799,7 +1828,15 @@
                 window.history.replaceState({}, document.title, url.pathname);
                 
                 hideOnboardingModal();
-                showWelcome(name);
+                
+                // Show recovery phrase FIRST, then welcome
+                if (window.SrishtiRecovery && recoveryPhrase) {
+                    window.SrishtiRecovery.showPhraseModal(recoveryPhrase, () => {
+                        showWelcome(name);
+                    });
+                } else {
+                    showWelcome(name);
+                }
                 
                 console.log('✅ Joined network as:', name, nodeId);
             } catch (error) {
@@ -1937,6 +1974,16 @@
         document.getElementById('copy-link-btn').addEventListener('click', async () => {
             if (window.SrishtiQRCode) {
                 await window.SrishtiQRCode.copyInviteUrl();
+            }
+        });
+        
+        document.getElementById('show-recovery-btn').addEventListener('click', () => {
+            const privateKey = localStorage.getItem('srishti_private_key');
+            if (privateKey && window.SrishtiRecovery) {
+                const phrase = window.SrishtiRecovery.generatePhrase(privateKey);
+                window.SrishtiRecovery.showPhraseModal(phrase);
+            } else {
+                alert('No recovery phrase available');
             }
         });
         

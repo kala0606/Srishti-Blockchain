@@ -161,12 +161,17 @@ class SrishtiApp {
                 await this.waitForInitialSync();
             }
             
+            // Generate recovery phrase and hash it
+            const recoveryPhrase = window.SrishtiRecovery.generatePhrase(privateKeyBase64);
+            const recoveryPhraseHash = await window.SrishtiRecovery.hashPhrase(recoveryPhrase);
+            
             // NOW create the join block (after syncing, so we have the correct chain state)
             const joinEvent = window.SrishtiEvent.createNodeJoin({
                 nodeId: this.nodeId,
                 name: name,
                 parentId: parentId,
-                publicKey: this.publicKeyBase64
+                publicKey: this.publicKeyBase64,
+                recoveryPhraseHash: recoveryPhraseHash
             });
             
             // Get participation proof
@@ -217,7 +222,7 @@ class SrishtiApp {
             
             console.log('✅ Node created:', name, this.nodeId);
             
-            return this.nodeId;
+            return { nodeId: this.nodeId, recoveryPhrase };
         } catch (error) {
             console.error('Failed to create node:', error);
             throw error;
