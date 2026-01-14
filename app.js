@@ -307,7 +307,7 @@ class SrishtiApp {
     }
     
     /**
-     * Get nodes (compatible with Firebase interface)
+     * Get nodes
      */
     getNodes() {
         if (!this.adapter) {
@@ -318,14 +318,14 @@ class SrishtiApp {
     }
     
     /**
-     * Subscribe to node updates (compatible with Firebase interface)
+     * Subscribe to node updates
      */
     subscribeToNodes(callback) {
         return this.adapter.subscribeToNodes(callback);
     }
     
     /**
-     * Build hierarchy (compatible with Firebase interface)
+     * Build hierarchy
      */
     buildHierarchy() {
         return this.adapter.buildHierarchy();

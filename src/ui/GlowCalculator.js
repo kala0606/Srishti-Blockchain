@@ -1,8 +1,8 @@
 /**
  * Srishti Blockchain - Glow Calculator
  * 
- * Ported from Firebase version to work with blockchain.
  * Calculates the "lit" glow intensity for nodes based on participation.
+ * Considers online presence, recent activity, and recruitment stats.
  */
 
 class GlowCalculator {

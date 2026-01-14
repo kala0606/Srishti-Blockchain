@@ -1,9 +1,8 @@
 /**
  * Srishti Blockchain - Blockchain Adapter
  * 
- * Provides a Firebase-compatible interface for the UI.
- * This allows the existing Three.js visualization to work with the blockchain
- * without major refactoring.
+ * Provides a unified interface for the UI to interact with the blockchain.
+ * Bridges the blockchain data model with the Three.js visualization layer.
  */
 
 class BlockchainAdapter {
@@ -121,7 +120,7 @@ class BlockchainAdapter {
     }
     
     /**
-     * Get all nodes (Firebase-compatible)
+     * Get all nodes
      * @returns {Object} Nodes object
      */
     getAllNodes() {
@@ -147,7 +146,7 @@ class BlockchainAdapter {
     }
     
     /**
-     * Subscribe to node updates (Firebase-compatible)
+     * Subscribe to node updates
      * @param {Function} callback - Called with nodes object on updates
      * @returns {Function} Unsubscribe function
      */
@@ -237,7 +236,7 @@ class BlockchainAdapter {
     }
     
     /**
-     * Generate node ID (compatible with Firebase version)
+     * Generate node ID
      * @returns {string}
      */
     generateNodeId() {

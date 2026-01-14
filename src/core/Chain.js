@@ -189,7 +189,7 @@ class Chain {
     
     /**
      * Build node hierarchy from chain
-     * @returns {Object} - Nodes object (similar to your Firebase structure)
+     * @returns {Object} - Nodes object with node data indexed by nodeId
      */
     buildNodeMap() {
         const nodes = {};

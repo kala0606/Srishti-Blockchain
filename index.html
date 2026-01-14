@@ -1987,7 +1987,7 @@
             const savedNodeId = localStorage.getItem('srishti_node_id');
             const savedNodeName = localStorage.getItem('srishti_node_name');
             
-            // Subscribe to nodes (same interface as Firebase!)
+            // Subscribe to nodes from blockchain
             unsubscribeNodes = window.SrishtiApp.subscribeToNodes((nodes) => {
                 console.log(`🔔 Node update received: ${Object.keys(nodes).length} nodes`);
                 nodesData = nodes;

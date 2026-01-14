@@ -1,61 +1,20 @@
 # Srishti Blockchain - QR Onboarding System
 
-A beautiful 3D visualization for blockchain node onboarding using QR codes. Scan to join, share to grow your tree, and watch your network light up!
+A beautiful 3D visualization for decentralized blockchain node onboarding using QR codes. Scan to join, share to grow your tree, and watch your network light up!
+
+## Architecture
+
+This is a **fully decentralized** blockchain application:
+- **No centralized storage** - All data stored locally in IndexedDB
+- **P2P networking** - Direct browser-to-browser connections via WebRTC
+- **Blockchain-based** - All nodes and relationships recorded on-chain
+- **Signaling server** - Only used for initial peer discovery (doesn't store data)
 
 ## Quick Start
 
-### 1. Set Up Firebase
+### 1. Run the App
 
-1. Go to [Firebase Console](https://console.firebase.google.com/)
-2. Create a new project (or use existing)
-3. Enable **Realtime Database**:
-   - Go to Build → Realtime Database
-   - Click "Create Database"
-   - Start in **test mode** for development
-4. Get your config:
-   - Go to Project Settings → General
-   - Scroll to "Your apps" and click Web icon (</>)
-   - Register your app and copy the config
-
-### 2. Configure Firebase
-
-Edit `firebase-config.js` and replace the placeholder values:
-
-```javascript
-const firebaseConfig = {
-    apiKey: "YOUR_API_KEY",
-    authDomain: "your-project.firebaseapp.com",
-    databaseURL: "https://your-project-default-rtdb.firebaseio.com",
-    projectId: "your-project",
-    storageBucket: "your-project.appspot.com",
-    messagingSenderId: "123456789",
-    appId: "1:123456789:web:abcdef"
-};
-```
-
-### 3. Set Database Rules
-
-In Firebase Console → Realtime Database → Rules:
-
-```json
-{
-  "rules": {
-    "nodes": {
-      ".read": true,
-      ".write": true,
-      "$nodeId": {
-        ".validate": "newData.hasChildren(['id', 'name', 'createdAt'])"
-      }
-    }
-  }
-}
-```
-
-> ⚠️ For production, add proper authentication rules!
-
-### 4. Run the App
-
-Simply open `index.html` in a browser, or serve it locally:
+Simply serve the app locally:
 
 ```bash
 # Using Python
@@ -70,10 +29,18 @@ php -S localhost:8000
 
 Then visit `http://localhost:8000`
 
+> **Note**: For WebRTC to work properly, HTTPS is recommended in production.
+
+### 2. Join the Network
+
+1. Enter your name to create a node
+2. Or scan someone's QR code to join as their child node
+3. Your node data is stored locally and synced via P2P
+
 ## Features
 
 ### 🔗 QR Code Onboarding
-- Every user gets a unique QR code
+- Every user gets a unique QR code with their node ID and public key
 - Scanning joins you as a child node of the QR owner
 - Share via link or native share sheet
 
@@ -88,22 +55,48 @@ Nodes glow based on three factors:
 - **Recent Activity (30%)** - Fades over 24 hours
 - **Recruitment (30%)** - More children = brighter glow
 
-### 🌐 Real-time Sync
-- All nodes sync instantly across devices
+### 🌐 P2P Sync
+- All nodes sync directly via WebRTC
 - See who's online in real-time
 - Watch new nodes appear as they join
+- Longest valid chain wins during sync
+
+### 💾 Local Storage
+- All blockchain data stored in IndexedDB
+- Persists across browser sessions
+- Download chain data as JSON backup
 
 ## File Structure
 
 ```
-space/
-├── index.html          # Main app with 3D visualization
-├── firebase-config.js  # Firebase setup & node CRUD
-├── presence.js         # Online status tracking
-├── glow-calculator.js  # "Lit" effect calculations
-├── qr-generator.js     # QR code creation
-├── qr-scanner.js       # Camera-based scanning
-└── README.md           # This file
+├── index.html                 # Main app with 3D visualization
+├── app.js                     # Application logic
+├── src/
+│   ├── core/                  # Blockchain primitives
+│   │   ├── Block.js           # Block structure
+│   │   ├── Chain.js           # Chain management
+│   │   ├── Event.js           # Event types (NODE_JOIN, etc.)
+│   │   └── Hasher.js          # SHA-256 hashing
+│   ├── crypto/
+│   │   ├── Keys.js            # Ed25519 key generation
+│   │   └── Recovery.js        # Seed phrase system
+│   ├── p2p/
+│   │   ├── Network.js         # P2P network & sync
+│   │   ├── PeerConnection.js  # WebRTC connections
+│   │   ├── Protocol.js        # Message protocol
+│   │   └── SignalingClient.js # Signaling server client
+│   ├── consensus/
+│   │   └── ProofOfParticipation.js
+│   ├── discovery/
+│   │   └── QRCode.js          # QR code generation
+│   ├── storage/
+│   │   └── IndexedDBStore.js  # Local chain storage
+│   └── ui/
+│       ├── BlockchainAdapter.js  # Adapter for UI layer
+│       └── GlowCalculator.js     # "Lit" effect calculations
+└── docs/
+    ├── README.md              # This file
+    └── qr-scanner-blockchain.js  # QR scanner implementation
 ```
 
 ## How It Works
@@ -117,18 +110,28 @@ space/
         │                       │
         ▼                       ▼
 ┌─────────────────────────────────────────┐
-│           Firebase Realtime DB           │
+│         P2P Network (WebRTC)            │
 │  ┌─────────────────────────────────┐    │
-│  │ nodes/                          │    │
-│  │   user_a: { children: [...] }   │    │
-│  │   user_b: { parentId: user_a }  │    │
+│  │ Direct Browser-to-Browser       │    │
+│  │ Connection                      │    │
 │  └─────────────────────────────────┘    │
 └─────────────────────────────────────────┘
-        │
-        │ Real-time sync
-        ▼
+        │                       │
+        │                       │
+        ▼                       ▼
+┌─────────────────┐     ┌─────────────────┐
+│  Local IndexedDB│     │  Local IndexedDB│
+│  (User A's      │     │  (User B's      │
+│   Blockchain)   │     │   Blockchain)   │
+└─────────────────┘     └─────────────────┘
+        │                       │
+        │  Chain Sync           │
+        │  (Longest wins)       │
+        └───────────────────────┘
+                │
+                ▼
 ┌─────────────────────────────────────────┐
-│       3D Visualization (Three.js)        │
+│       3D Visualization (Three.js)       │
 │  ┌───┐                                   │
 │  │ A │──────┐                            │
 │  └───┘      │                            │
@@ -139,10 +142,17 @@ space/
 └─────────────────────────────────────────┘
 ```
 
+## Data Storage
+
+All data is stored **locally** in the browser:
+- **IndexedDB**: Blocks, node keys, chain metadata
+- **localStorage**: Node ID, name, keys (for quick access)
+- **No cloud storage**: Everything is decentralized
+
 ## Customization
 
 ### Glow Colors
-Edit `glow-calculator.js` to change the color gradient:
+Edit `src/ui/GlowCalculator.js` to change the color gradient:
 
 ```javascript
 const dim = { r: 40, g: 40, b: 50 };    // Inactive
@@ -159,11 +169,7 @@ this.ACTIVITY_DECAY_HOURS = 24; // Default: 24 hours
 ```
 
 ### Node Size
-Modify recruitment-based scaling:
-
-```javascript
-scale: 1 + (childrenScore * 0.3), // Up to 30% larger
-```
+Modify recruitment-based scaling in the visualization code.
 
 ## Mobile Support
 
@@ -179,10 +185,11 @@ Camera access requires HTTPS in production.
 Built with:
 - [Three.js](https://threejs.org/) - 3D rendering
 - [D3.js](https://d3js.org/) - Hierarchy layout
-- [Firebase](https://firebase.google.com/) - Real-time database
 - [html5-qrcode](https://github.com/mebjas/html5-qrcode) - QR scanning
 - [QRCode.js](https://davidshimjs.github.io/qrcodejs/) - QR generation
+- Native Web Crypto API - Cryptography
+- WebRTC - P2P networking
 
 ---
 
-Made for the Srishti Blockchain project 🌟
+**No Firebase, No Centralized Storage - Just Pure Decentralization** 🌟
