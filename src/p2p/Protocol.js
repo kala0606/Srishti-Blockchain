@@ -12,6 +12,8 @@ class Protocol {
         HELLO: 'HELLO',
         SYNC_REQUEST: 'SYNC_REQUEST',
         SYNC_RESPONSE: 'SYNC_RESPONSE',
+        SYNC_CHECKPOINT: 'SYNC_CHECKPOINT',
+        SYNC_INCREMENTAL: 'SYNC_INCREMENTAL',
         NEW_BLOCK: 'NEW_BLOCK',
         BLOCK_PROPOSAL: 'BLOCK_PROPOSAL',
         HEARTBEAT: 'HEARTBEAT',
@@ -32,7 +34,9 @@ class Protocol {
             nodeId: info.nodeId,
             publicKey: info.publicKey,
             chainLength: info.chainLength || 0,
-            latestHash: info.latestHash || null
+            latestHash: info.latestHash || null,
+            protocolVersion: info.protocolVersion || 1,
+            nodeType: info.nodeType || 'LIGHT'
         };
     }
     
@@ -61,6 +65,36 @@ class Protocol {
             type: this.MESSAGE_TYPES.SYNC_RESPONSE,
             timestamp: Date.now(),
             blocks: info.blocks || [],
+            chainLength: info.chainLength || 0,
+            checkpoint: info.checkpoint || null // Optional checkpoint for incremental sync
+        };
+    }
+    
+    /**
+     * Create a SYNC_CHECKPOINT message
+     * @param {Object} info - Checkpoint info
+     * @returns {Object}
+     */
+    static createSyncCheckpoint(info) {
+        return {
+            type: this.MESSAGE_TYPES.SYNC_CHECKPOINT,
+            timestamp: Date.now(),
+            checkpoint: info.checkpoint,
+            chainLength: info.chainLength || 0
+        };
+    }
+    
+    /**
+     * Create a SYNC_INCREMENTAL message (sync from checkpoint)
+     * @param {Object} info - Incremental sync info
+     * @returns {Object}
+     */
+    static createSyncIncremental(info) {
+        return {
+            type: this.MESSAGE_TYPES.SYNC_INCREMENTAL,
+            timestamp: Date.now(),
+            fromCheckpoint: info.fromCheckpoint,
+            fromIndex: info.fromIndex || 0,
             chainLength: info.chainLength || 0
         };
     }

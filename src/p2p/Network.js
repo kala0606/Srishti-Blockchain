@@ -24,16 +24,24 @@ class Network {
         this.onPresenceUpdate = options.onPresenceUpdate || null;
         this.signalingServerUrl = options.signalingServerUrl || null;
         
+        // Legacy peer management (maintained for backward compatibility)
         this.peers = new Map(); // Map<nodeId, PeerConnection>
         this.peerInfo = new Map(); // Map<nodeId, {publicKey, chainLength, latestHash}>
         this.pendingConnections = new Map(); // Map<nodeId, {publicKey, timestamp}> - Nodes we want to connect to
         this.pendingOffers = new Map(); // Map<nodeId, PeerConnection> - Connections waiting for answer
         this.pendingAnswers = new Map(); // Map<nodeId, {answer, connection}> - Answers waiting to be sent
         
+        // New scalable components
+        this.dht = null; // DHT for peer discovery
+        this.connectionManager = null; // Connection pool manager
+        
         this.signaling = null;
         this.syncing = false;
         this.heartbeatInterval = null;
         this.syncInterval = null;
+        
+        // Protocol version for compatibility
+        this.protocolVersion = window.SrishtiConfig?.PROTOCOL_VERSION || 1;
     }
     
     /**
@@ -57,7 +65,17 @@ class Network {
             await this.saveChain();
         }
         
-        // Initialize signaling client if URL provided
+        // Initialize DHT if available (new scalable peer discovery)
+        if (window.SrishtiDHT) {
+            await this.initDHT();
+        }
+        
+        // Initialize ConnectionManager if available (new connection pool management)
+        if (window.SrishtiConnectionManager) {
+            await this.initConnectionManager();
+        }
+        
+        // Initialize signaling client if URL provided (backward compatibility)
         if (this.signalingServerUrl) {
             await this.initSignaling();
         }
@@ -72,6 +90,82 @@ class Network {
         this.attemptPendingConnections();
         
         console.log('🌐 Network initialized');
+    }
+    
+    /**
+     * Initialize DHT for distributed peer discovery
+     */
+    async initDHT() {
+        try {
+            this.dht = new window.SrishtiDHT({
+                nodeId: this.nodeId,
+                onPeerFound: (nodeId, info) => {
+                    // Add peer to connection manager as candidate
+                    if (this.connectionManager) {
+                        const priority = this.connectionManager.calculatePriority(nodeId, {
+                            dhtDistance: info.distance,
+                            lastSeen: info.lastSeen,
+                            publicKey: info.publicKey
+                        });
+                        this.connectionManager.addCandidate(nodeId, priority, 'DHT discovery');
+                    } else {
+                        // Fallback: add to pending connections
+                        this.addPendingConnection(nodeId, info.publicKey);
+                    }
+                },
+                onPeerLost: (nodeId) => {
+                    // Remove from connection manager
+                    if (this.connectionManager) {
+                        this.connectionManager.removeCandidate(nodeId);
+                    }
+                }
+            });
+            
+            await this.dht.init();
+            console.log('✅ DHT initialized');
+        } catch (error) {
+            console.warn('⚠️ Failed to initialize DHT:', error);
+            this.dht = null;
+        }
+    }
+    
+    /**
+     * Initialize ConnectionManager for connection pool management
+     */
+    async initConnectionManager() {
+        try {
+            this.connectionManager = new window.SrishtiConnectionManager({
+                onConnectionNeeded: async (nodeId, priority, reason) => {
+                    // Request connection to this node
+                    const peerInfo = this.peerInfo.get(nodeId);
+                    const publicKey = peerInfo?.publicKey || null;
+                    
+                    if (this.signaling && this.signaling.isConnected()) {
+                        await this.attemptConnection(nodeId, publicKey);
+                    } else if (this.dht) {
+                        // Try to find peer via DHT
+                        const closest = await this.dht.lookup(nodeId);
+                        if (closest.length > 0) {
+                            // Use DHT-discovered peer info
+                            const dhtInfo = this.dht.getPeerInfo(nodeId);
+                            if (dhtInfo) {
+                                await this.attemptConnection(nodeId, dhtInfo.publicKey);
+                            }
+                        }
+                    }
+                },
+                onConnectionClose: (nodeId, connection) => {
+                    // Connection manager wants to close this connection
+                    this.disconnectPeer(nodeId);
+                }
+            });
+            
+            await this.connectionManager.init();
+            console.log('✅ ConnectionManager initialized');
+        } catch (error) {
+            console.warn('⚠️ Failed to initialize ConnectionManager:', error);
+            this.connectionManager = null;
+        }
     }
     
     /**
@@ -297,12 +391,33 @@ class Network {
     addPeer(nodeId, connection) {
         this.peers.set(nodeId, connection);
         
+        // Register with connection manager if available
+        if (this.connectionManager) {
+            const peerInfo = this.peerInfo.get(nodeId) || {};
+            const priority = this.connectionManager.calculatePriority(nodeId, {
+                chainLength: peerInfo.chainLength,
+                lastSeen: Date.now(),
+                publicKey: peerInfo.publicKey
+            });
+            this.connectionManager.registerConnection(nodeId, connection, priority);
+        }
+        
+        // Add to DHT if available
+        if (this.dht) {
+            const peerInfo = this.peerInfo.get(nodeId) || {};
+            this.dht.addPeer(nodeId, {
+                publicKey: peerInfo.publicKey,
+                lastSeen: Date.now()
+            });
+        }
+        
         // Send HELLO message
         const hello = window.SrishtiProtocol.createHello({
             nodeId: this.nodeId,
             publicKey: null, // TODO: encode public key
             chainLength: this.chain.getLength(),
-            latestHash: this.chain.getLatestBlock()?.hash || null
+            latestHash: this.chain.getLatestBlock()?.hash || null,
+            protocolVersion: this.protocolVersion // Include protocol version
         });
         
         connection.send(hello);
@@ -318,6 +433,17 @@ class Network {
             connection.close();
             this.peers.delete(nodeId);
             this.peerInfo.delete(nodeId);
+            
+            // Unregister from connection manager
+            if (this.connectionManager) {
+                this.connectionManager.unregisterConnection(nodeId);
+            }
+            
+            // Remove from DHT
+            if (this.dht) {
+                this.dht.removePeer(nodeId);
+            }
+            
             console.log(`📡 Disconnected from ${nodeId}`);
         }
     }
@@ -357,11 +483,34 @@ class Network {
      * Handle HELLO message
      */
     async handleHello(message, peerId) {
+        // Update activity in connection manager
+        if (this.connectionManager) {
+            this.connectionManager.updateActivity(peerId);
+        }
+        
+        // Update DHT
+        if (this.dht) {
+            this.dht.updatePeerSeen(peerId);
+        }
+        
         this.peerInfo.set(peerId, {
             publicKey: message.publicKey,
             chainLength: message.chainLength,
-            latestHash: message.latestHash
+            latestHash: message.latestHash,
+            protocolVersion: message.protocolVersion || 1,
+            nodeType: message.nodeType || 'LIGHT'
         });
+        
+        // Add to connection manager as candidate if not already connected
+        if (this.connectionManager && !this.peers.has(peerId)) {
+            const priority = this.connectionManager.calculatePriority(peerId, {
+                chainLength: message.chainLength,
+                lastSeen: Date.now(),
+                publicKey: message.publicKey,
+                nodeType: message.nodeType
+            });
+            this.connectionManager.addCandidate(peerId, priority, 'HELLO message');
+        }
         
         // Request sync if peer has longer chain
         if (message.chainLength > this.chain.getLength()) {
@@ -1009,6 +1158,14 @@ class Network {
         
         if (this.signaling) {
             this.signaling.disconnect();
+        }
+        
+        if (this.dht) {
+            this.dht.close();
+        }
+        
+        if (this.connectionManager) {
+            this.connectionManager.close();
         }
         
         for (const [peerId, connection] of this.peers.entries()) {

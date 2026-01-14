@@ -276,6 +276,59 @@ class Chain {
         this.blocks = blocks;
         return true;
     }
+    
+    /**
+     * Prune the chain, keeping only the last N blocks
+     * @param {number} keepLastN - Number of blocks to keep
+     * @returns {Promise<Array>} - Array of pruned block indices
+     */
+    async prune(keepLastN) {
+        if (this.blocks.length <= keepLastN) {
+            return []; // Nothing to prune
+        }
+        
+        const pruneCount = this.blocks.length - keepLastN;
+        const prunedIndices = [];
+        
+        // Store indices of blocks to be pruned
+        for (let i = 0; i < pruneCount; i++) {
+            prunedIndices.push(i);
+        }
+        
+        // Remove blocks from chain
+        this.blocks.splice(0, pruneCount);
+        
+        // Update block indices
+        for (let i = 0; i < this.blocks.length; i++) {
+            this.blocks[i].index = i;
+        }
+        
+        return prunedIndices;
+    }
+    
+    /**
+     * Validate chain integrity with checkpoints
+     * @param {Array} checkpoints - Array of checkpoint objects
+     * @returns {Promise<boolean>} - True if valid
+     */
+    async validateWithCheckpoints(checkpoints) {
+        if (!checkpoints || checkpoints.length === 0) {
+            return true; // No checkpoints to validate against
+        }
+        
+        // Check that first block's previousHash matches last checkpoint
+        if (this.blocks.length > 0) {
+            const firstBlock = this.blocks[0];
+            const lastCheckpoint = checkpoints[checkpoints.length - 1];
+            
+            if (firstBlock.previousHash !== lastCheckpoint.hash) {
+                console.error('Chain integrity check failed: previousHash mismatch with checkpoint');
+                return false;
+            }
+        }
+        
+        return true;
+    }
 }
 
 // Export

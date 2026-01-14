@@ -6,7 +6,7 @@
  */
 
 class IndexedDBStore {
-    constructor(dbName = 'srishti_blockchain', version = 1) {
+    constructor(dbName = 'srishti_blockchain', version = 2) {
         this.dbName = dbName;
         this.version = version;
         this.db = null;
@@ -46,6 +46,12 @@ class IndexedDBStore {
                 // Chain metadata
                 if (!db.objectStoreNames.contains('metadata')) {
                     db.createObjectStore('metadata', { keyPath: 'key' });
+                }
+                
+                // Checkpoints store (for pruned blocks)
+                if (!db.objectStoreNames.contains('checkpoints')) {
+                    const checkpointStore = db.createObjectStore('checkpoints', { keyPath: 'index' });
+                    checkpointStore.createIndex('timestamp', 'timestamp', { unique: false });
                 }
             };
         });
@@ -247,12 +253,165 @@ class IndexedDBStore {
     }
     
     /**
+     * Prune blocks, keeping only the last N blocks
+     * @param {number} keepLastN - Number of blocks to keep
+     * @returns {Promise<number>} - Number of blocks pruned
+     */
+    async pruneBlocks(keepLastN) {
+        const db = await this.open();
+        const transaction = db.transaction(['blocks'], 'readwrite');
+        const store = transaction.objectStore('blocks');
+        
+        // Get all blocks
+        const allBlocks = await this.getAllBlocks();
+        
+        if (allBlocks.length <= keepLastN) {
+            return 0; // Nothing to prune
+        }
+        
+        const pruneCount = allBlocks.length - keepLastN;
+        
+        // Delete blocks from index 0 to (pruneCount - 1)
+        const deletePromises = [];
+        for (let i = 0; i < pruneCount; i++) {
+            deletePromises.push(
+                new Promise((resolve, reject) => {
+                    const request = store.delete(i);
+                    request.onsuccess = () => resolve();
+                    request.onerror = () => reject(request.error);
+                })
+            );
+        }
+        
+        await Promise.all(deletePromises);
+        
+        return pruneCount;
+    }
+    
+    /**
+     * Save checkpoints
+     * @param {Array} checkpoints - Array of checkpoint objects
+     * @returns {Promise<void>}
+     */
+    async saveCheckpoints(checkpoints) {
+        if (!checkpoints || checkpoints.length === 0) return;
+        
+        const db = await this.open();
+        const transaction = db.transaction(['checkpoints'], 'readwrite');
+        const store = transaction.objectStore('checkpoints');
+        
+        await Promise.all(checkpoints.map(checkpoint => {
+            return new Promise((resolve, reject) => {
+                const request = store.put(checkpoint);
+                request.onsuccess = () => resolve();
+                request.onerror = () => reject(request.error);
+            });
+        }));
+    }
+    
+    /**
+     * Get all checkpoints
+     * @returns {Promise<Array>}
+     */
+    async getAllCheckpoints() {
+        const db = await this.open();
+        const transaction = db.transaction(['checkpoints'], 'readonly');
+        const store = transaction.objectStore('checkpoints');
+        
+        return new Promise((resolve, reject) => {
+            const request = store.getAll();
+            request.onsuccess = () => {
+                const checkpoints = request.result;
+                // Sort by index
+                checkpoints.sort((a, b) => a.index - b.index);
+                resolve(checkpoints);
+            };
+            request.onerror = () => reject(request.error);
+        });
+    }
+    
+    /**
+     * Get checkpoint by index
+     * @param {number} index
+     * @returns {Promise<Object|null>}
+     */
+    async getCheckpoint(index) {
+        const db = await this.open();
+        const transaction = db.transaction(['checkpoints'], 'readonly');
+        const store = transaction.objectStore('checkpoints');
+        
+        return new Promise((resolve, reject) => {
+            const request = store.get(index);
+            request.onsuccess = () => resolve(request.result || null);
+            request.onerror = () => reject(request.error);
+        });
+    }
+    
+    /**
+     * Batch write blocks (optimized for performance)
+     * @param {Array} blocks - Array of block JSON objects
+     * @returns {Promise<void>}
+     */
+    async batchWriteBlocks(blocks) {
+        if (!blocks || blocks.length === 0) return;
+        
+        const db = await this.open();
+        const transaction = db.transaction(['blocks'], 'readwrite');
+        const store = transaction.objectStore('blocks');
+        
+        const batchSize = window.SrishtiConfig?.BATCH?.WRITE_SIZE || 50;
+        
+        // Process in batches
+        for (let i = 0; i < blocks.length; i += batchSize) {
+            const batch = blocks.slice(i, i + batchSize);
+            await Promise.all(batch.map(block => {
+                return new Promise((resolve, reject) => {
+                    const request = store.put(block);
+                    request.onsuccess = () => resolve();
+                    request.onerror = () => reject(request.error);
+                });
+            }));
+        }
+    }
+    
+    /**
+     * Batch read blocks (optimized for performance)
+     * @param {Array<number>} indices - Array of block indices to read
+     * @returns {Promise<Array>}
+     */
+    async batchReadBlocks(indices) {
+        if (!indices || indices.length === 0) return [];
+        
+        const db = await this.open();
+        const transaction = db.transaction(['blocks'], 'readonly');
+        const store = transaction.objectStore('blocks');
+        
+        const batchSize = window.SrishtiConfig?.BATCH?.READ_SIZE || 100;
+        const results = [];
+        
+        // Process in batches
+        for (let i = 0; i < indices.length; i += batchSize) {
+            const batch = indices.slice(i, i + batchSize);
+            const batchResults = await Promise.all(batch.map(index => {
+                return new Promise((resolve, reject) => {
+                    const request = store.get(index);
+                    request.onsuccess = () => resolve(request.result || null);
+                    request.onerror = () => reject(request.error);
+                });
+            }));
+            results.push(...batchResults);
+        }
+        
+        return results.filter(block => block !== null);
+    }
+    
+    /**
      * Clear all data (use with caution!)
      * @returns {Promise<void>}
      */
     async clear() {
         const db = await this.open();
-        const transaction = db.transaction(['blocks', 'keys', 'metadata'], 'readwrite');
+        const transaction = db.transaction(['blocks', 'keys', 'metadata', 'checkpoints'], 'readwrite');
         
         await Promise.all([
             new Promise((resolve, reject) => {
@@ -267,6 +426,11 @@ class IndexedDBStore {
             }),
             new Promise((resolve, reject) => {
                 const request = transaction.objectStore('metadata').clear();
+                request.onsuccess = () => resolve();
+                request.onerror = () => reject(request.error);
+            }),
+            new Promise((resolve, reject) => {
+                const request = transaction.objectStore('checkpoints').clear();
                 request.onsuccess = () => resolve();
                 request.onerror = () => reject(request.error);
             })

@@ -15,26 +15,37 @@ class ProofOfParticipation {
         this.chain = options.chain;
         this.minParticipationScore = options.minScore || 0.5; // Minimum score to propose
         this.participationScores = new Map(); // Cache of participation scores
+        
+        // Sybil resistance: track block proposals per node
+        this.proposalHistory = new Map(); // Map<nodeId, Array<timestamp>>
+        this.lastProposalTime = new Map(); // Map<nodeId, timestamp>
+        this.childCreationHistory = new Map(); // Map<nodeId, Array<timestamp>>
+        
+        // Configuration
+        this.MIN_TIME_IN_NETWORK = 3600000; // 1 hour minimum
+        this.PROPOSAL_COOLDOWN = 60000; // 1 minute between proposals
+        this.MAX_CHILDREN_PER_HOUR = 10; // Max children per hour
     }
     
     /**
      * Calculate participation score for a node
-     * Uses the same logic as the glow calculator
+     * Uses the same logic as the glow calculator with Sybil resistance
      * @param {string} nodeId - Node ID
      * @param {Object} nodeData - Node data (from chain)
      * @returns {number} - Participation score (0 to 1)
      */
     calculateParticipationScore(nodeId, nodeData) {
         const weights = {
-            online: 0.40,
-            recency: 0.30,
-            children: 0.30
+            online: 0.30,
+            recency: 0.25,
+            children: 0.20,
+            networkAge: 0.25 // New: time in network
         };
         
-        // Online score (40%)
+        // Online score (30%)
         const onlineScore = nodeData.isOnline ? 1.0 : 0.0;
         
-        // Recency score (30%) - based on last seen
+        // Recency score (25%) - based on last seen
         let recencyScore = 0;
         if (nodeData.lastSeen) {
             const now = Date.now();
@@ -49,7 +60,7 @@ class ProofOfParticipation {
             }
         }
         
-        // Children score (30%) - based on number of children
+        // Children score (20%) - based on number of children (reduced weight)
         const childCount = nodeData.childCount || 0;
         const MAX_CHILDREN = 10;
         let childrenScore = 0;
@@ -58,11 +69,28 @@ class ProofOfParticipation {
             childrenScore = Math.min(1, normalized);
         }
         
+        // Network age score (25%) - Sybil resistance: longer in network = higher score
+        let networkAgeScore = 0;
+        if (nodeData.createdAt) {
+            const now = Date.now();
+            const age = now - nodeData.createdAt;
+            const MIN_AGE = this.MIN_TIME_IN_NETWORK;
+            const MAX_AGE = 30 * 24 * 60 * 60 * 1000; // 30 days
+            
+            if (age < MIN_AGE) {
+                networkAgeScore = 0; // Too new, no score
+            } else {
+                const normalized = Math.min(1, (age - MIN_AGE) / (MAX_AGE - MIN_AGE));
+                networkAgeScore = normalized;
+            }
+        }
+        
         // Weighted composite score
         const compositeScore = 
             (onlineScore * weights.online) +
             (recencyScore * weights.recency) +
-            (childrenScore * weights.children);
+            (childrenScore * weights.children) +
+            (networkAgeScore * weights.networkAge);
         
         return compositeScore;
     }
@@ -102,7 +130,30 @@ class ProofOfParticipation {
      */
     canPropose(nodeId) {
         const score = this.getParticipationScore(nodeId);
-        return score >= this.minParticipationScore;
+        if (score < this.minParticipationScore) {
+            return false;
+        }
+        
+        // Check cooldown period
+        const lastProposal = this.lastProposalTime.get(nodeId);
+        if (lastProposal) {
+            const timeSince = Date.now() - lastProposal;
+            if (timeSince < this.PROPOSAL_COOLDOWN) {
+                return false; // Still in cooldown
+            }
+        }
+        
+        // Check minimum time in network
+        const nodes = this.chain.buildNodeMap();
+        const nodeData = nodes[nodeId];
+        if (nodeData && nodeData.createdAt) {
+            const age = Date.now() - nodeData.createdAt;
+            if (age < this.MIN_TIME_IN_NETWORK) {
+                return false; // Too new to propose
+            }
+        }
+        
+        return true;
     }
     
     /**
@@ -111,21 +162,63 @@ class ProofOfParticipation {
      * @returns {Object|null} - Participation proof or null if not eligible
      */
     createParticipationProof(nodeId) {
-        const score = this.getParticipationScore(nodeId);
-        
-        if (score < this.minParticipationScore) {
+        if (!this.canPropose(nodeId)) {
             return null; // Not eligible
         }
         
+        const score = this.getParticipationScore(nodeId);
         const nodes = this.chain.buildNodeMap();
         const nodeData = nodes[nodeId] || {};
+        
+        // Record proposal
+        const now = Date.now();
+        this.lastProposalTime.set(nodeId, now);
+        
+        const history = this.proposalHistory.get(nodeId) || [];
+        history.push(now);
+        // Keep only last hour of history
+        const oneHourAgo = now - 3600000;
+        this.proposalHistory.set(nodeId, history.filter(t => t > oneHourAgo));
         
         return {
             nodeId: nodeId,
             score: score,
             childCount: nodeData.childCount || 0,
-            timestamp: Date.now()
+            timestamp: now,
+            networkAge: nodeData.createdAt ? now - nodeData.createdAt : 0
         };
+    }
+    
+    /**
+     * Check if node can create a child (rate limiting)
+     * @param {string} nodeId - Node ID
+     * @returns {boolean}
+     */
+    canCreateChild(nodeId) {
+        const now = Date.now();
+        const history = this.childCreationHistory.get(nodeId) || [];
+        const oneHourAgo = now - 3600000;
+        const recent = history.filter(t => t > oneHourAgo);
+        
+        if (recent.length >= this.MAX_CHILDREN_PER_HOUR) {
+            return false; // Rate limit exceeded
+        }
+        
+        return true;
+    }
+    
+    /**
+     * Record child creation
+     * @param {string} nodeId - Node ID
+     */
+    recordChildCreation(nodeId) {
+        const now = Date.now();
+        const history = this.childCreationHistory.get(nodeId) || [];
+        history.push(now);
+        
+        // Keep only last hour
+        const oneHourAgo = now - 3600000;
+        this.childCreationHistory.set(nodeId, history.filter(t => t > oneHourAgo));
     }
     
     /**

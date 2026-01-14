@@ -24,6 +24,7 @@ class Block {
         this.proposer = params.proposer || null;
         this.participationProof = params.participationProof || null;
         this.hash = params.hash || null; // Will be computed if not provided
+        this.signature = params.signature || null; // Optional cryptographic signature
     }
     
     /**
@@ -49,6 +50,58 @@ class Block {
     }
     
     /**
+     * Sign the block with a private key
+     * @param {CryptoKey} privateKey - Private key to sign with
+     * @returns {Promise<void>}
+     */
+    async sign(privateKey) {
+        if (!window.SrishtiKeys) {
+            throw new Error('SrishtiKeys not loaded');
+        }
+        
+        // Sign block data (excluding signature itself)
+        const blockData = {
+            index: this.index,
+            timestamp: this.timestamp,
+            previousHash: this.previousHash,
+            data: this.data,
+            proposer: this.proposer,
+            participationProof: this.participationProof,
+            hash: this.hash
+        };
+        
+        this.signature = await window.SrishtiKeys.sign(privateKey, blockData);
+    }
+    
+    /**
+     * Verify the block signature
+     * @param {CryptoKey} publicKey - Public key to verify with
+     * @returns {Promise<boolean>} - True if signature is valid
+     */
+    async verifySignature(publicKey) {
+        if (!this.signature) {
+            return true; // No signature means valid (backward compatibility)
+        }
+        
+        if (!window.SrishtiKeys) {
+            return false;
+        }
+        
+        // Verify signature against block data
+        const blockData = {
+            index: this.index,
+            timestamp: this.timestamp,
+            previousHash: this.previousHash,
+            data: this.data,
+            proposer: this.proposer,
+            participationProof: this.participationProof,
+            hash: this.hash
+        };
+        
+        return await window.SrishtiKeys.verify(publicKey, blockData, this.signature);
+    }
+    
+    /**
      * Serialize block to JSON
      * @returns {Object}
      */
@@ -60,7 +113,8 @@ class Block {
             data: this.data,
             proposer: this.proposer,
             participationProof: this.participationProof,
-            hash: this.hash
+            hash: this.hash,
+            signature: this.signature || null
         };
     }
     
@@ -76,7 +130,8 @@ class Block {
             previousHash: json.previousHash,
             data: json.data,
             proposer: json.proposer,
-            participationProof: json.participationProof
+            participationProof: json.participationProof,
+            signature: json.signature || null
         });
         block.hash = json.hash;
         return block;
