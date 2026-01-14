@@ -310,6 +310,10 @@ class SrishtiApp {
      * Get nodes (compatible with Firebase interface)
      */
     getNodes() {
+        if (!this.adapter) {
+            console.warn('⚠️ Adapter not initialized. Call SrishtiApp.init() first.');
+            return {};
+        }
         return this.adapter.getAllNodes();
     }
     
@@ -346,7 +350,16 @@ class SrishtiApp {
      * Call from console: SrishtiApp.getChainInfo()
      */
     getChainInfo() {
-        const genesis = this.chain.blocks[0];
+        if (!this.chain) {
+            console.warn('⚠️ Chain not initialized. Call SrishtiApp.init() first.');
+            return {
+                chainLength: 0,
+                initialized: false,
+                error: 'Chain not initialized'
+            };
+        }
+        
+        const genesis = this.chain.blocks?.[0];
         const latest = this.chain.getLatestBlock();
         const nodes = this.chain.buildNodeMap();
         const nodeNames = Object.values(nodes).map(n => n.name);
@@ -358,16 +371,18 @@ class SrishtiApp {
             latestHash: latest?.hash?.substring(0, 16) + '...',
             nodeCount: Object.keys(nodes).length,
             nodeNames: nodeNames,
-            myNodeId: this.nodeId
+            myNodeId: this.nodeId,
+            initialized: this.initialized
         };
         
         console.log('📊 Chain Info:', info);
         console.table([
             { key: 'Chain Length', value: info.chainLength },
             { key: 'Genesis Hash', value: info.genesisHash },
-            { key: 'Genesis Time', value: new Date(info.genesisTimestamp).toISOString() },
+            { key: 'Genesis Time', value: genesis?.timestamp ? new Date(info.genesisTimestamp).toISOString() : 'N/A' },
             { key: 'Node Count', value: info.nodeCount },
-            { key: 'Nodes', value: info.nodeNames.join(', ') }
+            { key: 'Nodes', value: info.nodeNames.join(', ') },
+            { key: 'Initialized', value: info.initialized }
         ]);
         
         return info;
@@ -375,4 +390,42 @@ class SrishtiApp {
 }
 
 // Create global instance
-window.SrishtiApp = new SrishtiApp();
+try {
+    window.SrishtiApp = new SrishtiApp();
+    
+    // Verify instance was created and methods exist (for debugging)
+    if (typeof window.SrishtiApp === 'undefined' || !window.SrishtiApp) {
+        console.error('❌ Failed to create SrishtiApp instance');
+    } else {
+        const hasGetChainInfo = typeof window.SrishtiApp.getChainInfo === 'function';
+        const hasGetNodes = typeof window.SrishtiApp.getNodes === 'function';
+        
+        console.log('✅ SrishtiApp instance created', {
+            hasGetChainInfo,
+            hasGetNodes,
+            instanceType: typeof window.SrishtiApp,
+            isInstance: window.SrishtiApp instanceof SrishtiApp
+        });
+        
+        // If methods are missing, something went wrong
+        if (!hasGetChainInfo || !hasGetNodes) {
+            console.error('❌ Methods missing on SrishtiApp instance!', {
+                availableMethods: Object.getOwnPropertyNames(Object.getPrototypeOf(window.SrishtiApp)),
+                ownProperties: Object.keys(window.SrishtiApp)
+            });
+        }
+    }
+} catch (error) {
+    console.error('❌ Error creating SrishtiApp instance:', error);
+    // Create a minimal fallback object so the app doesn't completely break
+    window.SrishtiApp = {
+        getChainInfo: () => {
+            console.error('❌ SrishtiApp not properly initialized');
+            return { error: 'SrishtiApp not initialized' };
+        },
+        getNodes: () => {
+            console.error('❌ SrishtiApp not properly initialized');
+            return {};
+        }
+    };
+}

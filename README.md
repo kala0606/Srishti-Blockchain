@@ -107,15 +107,28 @@ Current deployment: `wss://srishti-signaling.fly.dev`
 Open browser console:
 
 ```javascript
-// View chain info
-SrishtiApp.getChainInfo()
+// First, verify SrishtiApp is available
+console.log('SrishtiApp:', window.SrishtiApp);
+console.log('Methods:', {
+    getChainInfo: typeof window.SrishtiApp?.getChainInfo,
+    getNodes: typeof window.SrishtiApp?.getNodes
+});
 
-// Check connected peers
-SrishtiApp.network.peers.size
+// View chain info (requires initialization)
+window.SrishtiApp?.getChainInfo()
 
-// View all nodes
-SrishtiApp.getNodes()
+// Check connected peers (returns 0 if network not initialized)
+window.SrishtiApp?.network?.peers?.size || 0
+
+// View all nodes (requires initialization)
+window.SrishtiApp?.getNodes()
 ```
+
+**Notes:**
+- Use `window.SrishtiApp` to ensure you're accessing the global instance
+- `network` may be `null` if the app hasn't been initialized or no node has been created yet
+- Methods require the app to be initialized (call `await window.SrishtiApp.init()` if needed)
+- If methods are missing, check the console for initialization errors
 
 ## License
 
