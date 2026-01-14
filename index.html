@@ -988,6 +988,16 @@
                     Show Recovery Phrase
                 </button>
             </div>
+            <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
+                <button id="download-chain-btn" class="qr-btn" style="width: 100%;">
+                    <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                    Download Chain Data
+                </button>
+            </div>
         </div>
     </div>
 
@@ -2072,6 +2082,25 @@
                 window.SrishtiRecovery.showPhraseModal(phrase);
             } else {
                 alert('No recovery phrase available');
+            }
+        });
+        
+        // Download chain data button
+        document.getElementById('download-chain-btn')?.addEventListener('click', async () => {
+            try {
+                await window.SrishtiApp.downloadChainData();
+                // Show success feedback
+                const btn = document.getElementById('download-chain-btn');
+                const originalHTML = btn.innerHTML;
+                btn.innerHTML = '<svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> Downloaded!';
+                btn.style.opacity = '0.7';
+                setTimeout(() => {
+                    btn.innerHTML = originalHTML;
+                    btn.style.opacity = '1';
+                }, 2000);
+            } catch (error) {
+                console.error('Failed to download chain data:', error);
+                alert('Failed to download chain data. Please check the console for details.');
             }
         });
         

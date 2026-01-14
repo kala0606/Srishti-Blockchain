@@ -387,6 +387,51 @@ class SrishtiApp {
         
         return info;
     }
+    
+    /**
+     * Download chain data as JSON file
+     */
+    async downloadChainData() {
+        if (!this.chain) {
+            console.warn('⚠️ Chain not initialized. Call SrishtiApp.init() first.');
+            return;
+        }
+        
+        try {
+            // Get chain data as JSON
+            const chainData = this.chain.toJSON();
+            
+            // Add metadata
+            const exportData = {
+                version: '1.0',
+                exportedAt: new Date().toISOString(),
+                chainLength: chainData.length,
+                nodeId: this.nodeId,
+                nodeName: this.currentUser?.name || 'Unknown',
+                blocks: chainData
+            };
+            
+            // Convert to JSON string with pretty formatting
+            const jsonString = JSON.stringify(exportData, null, 2);
+            
+            // Create blob and download
+            const blob = new Blob([jsonString], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `srishti-chain-${Date.now()}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            console.log('✅ Chain data downloaded');
+            return true;
+        } catch (error) {
+            console.error('❌ Failed to download chain data:', error);
+            throw error;
+        }
+    }
 }
 
 // Create global instance
