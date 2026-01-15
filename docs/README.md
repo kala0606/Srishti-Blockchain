@@ -192,4 +192,4 @@ Built with:
 
 ---
 
-**No Firebase, No Centralized Storage - Just Pure Decentralization** 🌟
+**No Centralized Storage - Just Pure Decentralization** 🌟
