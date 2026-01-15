@@ -93,8 +93,27 @@ class SrishtiApp {
     
     /**
      * Initialize P2P network
+     * @param {boolean} guestMode - If true, create temporary identity for guest viewing
      */
-    async initNetwork() {
+    async initNetwork(guestMode = false) {
+        // If guest mode, create temporary identity just for viewing
+        if (guestMode && (!this.nodeId || !this.keyPair)) {
+            try {
+                const tempKeyPair = await window.SrishtiKeys.generateKeyPair();
+                const tempNodeId = await window.SrishtiKeys.generateNodeId(tempKeyPair.publicKey);
+                const tempPublicKeyBase64 = await window.SrishtiKeys.exportPublicKeyBase64(tempKeyPair.publicKey);
+                
+                this.nodeId = tempNodeId;
+                this.keyPair = tempKeyPair;
+                this.publicKeyBase64 = tempPublicKeyBase64;
+                this.isGuest = true; // Mark as guest mode
+                console.log('👁️ Guest mode: Created temporary identity for viewing');
+            } catch (error) {
+                console.warn('⚠️ Failed to create guest identity:', error);
+                return;
+            }
+        }
+        
         if (!this.nodeId || !this.keyPair) {
             return;
         }
@@ -115,16 +134,19 @@ class SrishtiApp {
                 signalingServerUrl: signalingUrl,
                 onChainUpdate: () => {
                     this.adapter.onChainUpdate();
-                    this.updatePresence(this.nodeId, { isOnline: true, lastSeen: Date.now() });
+                    // Only update presence if not in guest mode
+                    if (!this.isGuest && this.nodeId) {
+                        this.updatePresence(this.nodeId, { isOnline: true, lastSeen: Date.now() });
+                    }
                 },
                 onPresenceUpdate: (nodeId, presenceData) => {
-                    // Update presence for peer nodes
+                    // Update presence for peer nodes (works in guest mode too)
                     this.adapter.updatePresence(nodeId, presenceData);
                 }
             });
             
             await this.network.init();
-            console.log('✅ Network initialized');
+            console.log(this.isGuest ? '✅ Network initialized (guest mode)' : '✅ Network initialized');
         } catch (error) {
             console.warn('⚠️ Network initialization failed (will work offline):', error);
         }

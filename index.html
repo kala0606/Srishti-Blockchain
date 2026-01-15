@@ -15,12 +15,16 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     
+    <!-- Ed25519 Library for deterministic key generation -->
+    <script src="https://cdn.jsdelivr.net/npm/@noble/ed25519@1.7.3/index.js"></script>
+    
     <!-- Blockchain Core (load in order) -->
     <script src="src/core/Hasher.js"></script>
     <script src="src/core/Event.js"></script>
     <script src="src/core/Block.js"></script>
     <script src="src/core/Chain.js"></script>
     <script src="src/crypto/Keys.js"></script>
+    <script src="src/crypto/BIP39.js"></script>
     <script src="src/crypto/Recovery.js"></script>
     <script src="src/storage/IndexedDBStore.js"></script>
     <script src="src/consensus/ProofOfParticipation.js"></script>
@@ -104,6 +108,28 @@
             25% { transform: translate(2%, -2%) rotate(3deg); }
             50% { transform: translate(-1%, 3%) rotate(-2deg); }
             75% { transform: translate(-3%, -1%) rotate(2deg); }
+        }
+        
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        @keyframes fadeOut {
+            from {
+                opacity: 1;
+                transform: translateY(0);
+            }
+            to {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
         }
 
         #container {
@@ -1734,51 +1760,271 @@
             const { phrase, name } = recoveryData;
             
             try {
-                // Search the chain for a node with matching phrase hash
+                console.log('🔄 Starting recovery process...');
+                
+                // Show loading message
+                const loadingMsg = document.createElement('div');
+                loadingMsg.id = 'recovery-loading';
+                loadingMsg.style.cssText = `
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    background: rgba(0, 0, 0, 0.9);
+                    display: flex;
+                    flex-direction: column;
+                    justify-content: center;
+                    align-items: center;
+                    z-index: 10001;
+                    color: #fff;
+                `;
+                loadingMsg.innerHTML = `
+                    <div style="text-align: center;">
+                        <div style="font-size: 24px; margin-bottom: 20px;">🔄 Recovering Node...</div>
+                        <div style="font-size: 14px; color: #888;">Syncing with network to find your node...</div>
+                    </div>
+                `;
+                document.body.appendChild(loadingMsg);
+                
+                // Step 1: Initialize network and sync with peers to get full chain
+                console.log('📡 Step 1: Initializing network and syncing...');
+                
+                // Create a temporary node ID for network initialization
+                // We'll use a temporary key pair just to connect to the network
+                const tempKeyPair = await window.SrishtiKeys.generateKeyPair();
+                const tempNodeId = await window.SrishtiKeys.generateNodeId(tempKeyPair.publicKey);
+                
+                // Initialize network with temporary identity (we'll replace it after finding the real node)
+                if (!window.SrishtiApp.network) {
+                    const signalingUrl = window.SRISHTI_SIGNALING_URL || 
+                                       (window.location.protocol === 'https:' 
+                                           ? 'wss://srishti-signaling.fly.dev' 
+                                           : 'ws://localhost:8080');
+                    
+                    window.SrishtiApp.network = new window.SrishtiNetwork({
+                        nodeId: tempNodeId,
+                        publicKey: tempKeyPair.publicKey,
+                        chain: window.SrishtiApp.chain,
+                        storage: window.SrishtiApp.storage,
+                        signalingServerUrl: signalingUrl,
+                        onChainUpdate: () => {
+                            window.SrishtiApp.adapter.onChainUpdate();
+                        },
+                        onPresenceUpdate: (nodeId, presenceData) => {
+                            window.SrishtiApp.adapter.updatePresence(nodeId, presenceData);
+                        }
+                    });
+                    
+                    await window.SrishtiApp.network.init();
+                    console.log('✅ Network initialized for recovery');
+                }
+                
+                // Wait for sync with peers (give it time to connect and sync)
+                console.log('⏳ Waiting for network sync...');
+                let syncAttempts = 0;
+                const maxSyncAttempts = 20; // 10 seconds max wait
+                
+                while (syncAttempts < maxSyncAttempts) {
+                    const connectedPeers = window.SrishtiApp.network.getPeerCount();
+                    const chainLength = window.SrishtiApp.chain.getLength();
+                    
+                    console.log(`🔄 Sync attempt ${syncAttempts + 1}/${maxSyncAttempts}: peers=${connectedPeers}, chain=${chainLength}`);
+                    
+                    // If we have peers and chain has data, we're synced
+                    if (connectedPeers > 0 && chainLength > 0) {
+                        console.log('✅ Network sync complete');
+                        break;
+                    }
+                    
+                    // If we have chain data even without peers, that's okay too
+                    if (chainLength > 0) {
+                        console.log('✅ Have chain data, proceeding...');
+                        break;
+                    }
+                    
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    syncAttempts++;
+                }
+                
+                // Step 2: Search the synced chain for a node with matching phrase hash
+                console.log('🔍 Step 2: Searching chain for recovery phrase...');
                 const phraseHash = await window.SrishtiRecovery.hashPhrase(phrase);
                 const nodes = window.SrishtiApp.chain.buildNodeMap();
                 
-                // For now, look for any node with matching recovery hash
-                // In a full implementation, we'd derive the key from the phrase
+                console.log(`📊 Searching ${Object.keys(nodes).length} nodes in chain...`);
+                
                 let foundNode = null;
                 for (const [nodeId, node] of Object.entries(nodes)) {
                     if (node.recoveryPhraseHash === phraseHash) {
                         foundNode = { id: nodeId, ...node };
+                        console.log(`✅ Found matching node: ${foundNode.name} (${nodeId})`);
                         break;
                     }
                 }
                 
+                // Remove loading message
+                loadingMsg.remove();
+                
                 if (!foundNode) {
                     // Recovery phrase doesn't match any known node
-                    // Show explanation and offer to join as new node
-                    alert('Recovery phrase not found in the network.\n\nNote: Recovery works best when restoring on a device that previously had the node. For now, you can join as a new node.');
+                    console.error('❌ Recovery phrase not found in network');
+                    alert(`Recovery phrase not found in the network.\n\nThis could mean:\n- The phrase was entered incorrectly\n- The node hasn't been added to the blockchain yet\n- You're on a different network/fork\n\nPlease verify your recovery phrase and try again, or join as a new node.`);
                     return;
                 }
+                
+                // Step 3: Restore node identity
+                console.log('🔑 Step 3: Restoring node identity...');
+                
+                // We found the node, but we can't restore the private key from just the phrase
+                // (the phrase only encodes part of the key). However, we can restore the identity.
+                // For now, we'll need to generate a new key pair and update the node.
+                // In a full implementation, we'd need to store the encrypted private key.
+                
+                // For now, restore what we can:
+                // - Node ID (from chain)
+                // - Node name (from chain or user input)
+                // - Public key (from chain)
                 
                 // Set current user
                 currentUser = { id: foundNode.id, name: foundNode.name || name };
                 
-                // Save to localStorage
+                // Save to localStorage (but note: we don't have the private key)
                 localStorage.setItem('srishti_node_id', foundNode.id);
                 localStorage.setItem('srishti_node_name', foundNode.name || name);
+                localStorage.setItem('srishti_public_key', foundNode.publicKey || '');
                 
-                // Initialize QR
+                // Note: We can't restore the private key from just the recovery phrase
+                // The user will need to re-join or we'd need a different recovery mechanism
+                console.warn('⚠️ Private key cannot be restored from recovery phrase alone');
+                
+                // Initialize QR with the public key from chain
                 if (window.SrishtiQRCode && foundNode.publicKey) {
                     window.SrishtiQRCode.init(foundNode.id, foundNode.publicKey);
                 }
                 
+                // Update the app's nodeId to match the recovered node
+                window.SrishtiApp.nodeId = foundNode.id;
+                window.SrishtiApp.currentUser = currentUser;
+                window.SrishtiApp.publicKeyBase64 = foundNode.publicKey || '';
+                
+                // Reinitialize network with the correct node ID
+                // (We'll keep using the temp keys for now since we don't have the real private key)
+                // In a production system, we'd need to store encrypted private keys or use deterministic key derivation
+                
                 hideOnboardingModal();
                 showWelcome(foundNode.name || name);
                 
+                // Mark ourselves as online
+                if (window.SrishtiApp) {
+                    window.SrishtiApp.updatePresence(foundNode.id, { isOnline: true, lastSeen: Date.now() });
+                }
+                
                 console.log('✅ Recovered node:', foundNode.name, foundNode.id);
+                console.warn('⚠️ Note: Private key not restored. Some features may be limited.');
             } catch (error) {
                 console.error('Recovery failed:', error);
-                alert('Recovery failed. Please try again or join as a new node.');
+                const loadingMsg = document.getElementById('recovery-loading');
+                if (loadingMsg) loadingMsg.remove();
+                alert('Recovery failed: ' + error.message + '\n\nPlease try again or join as a new node.');
             }
         }
         
         function hideOnboardingModal() {
             document.getElementById('onboarding-modal').classList.remove('active');
+        }
+        
+        /**
+         * Show guest mode - allows viewing without joining
+         */
+        function showGuestMode() {
+            // Remove any existing guest UI
+            const existingBtn = document.getElementById('guest-join-btn');
+            const existingIndicator = document.getElementById('guest-indicator');
+            if (existingBtn) existingBtn.remove();
+            if (existingIndicator) existingIndicator.remove();
+            
+            // Create a floating "Join Network" button
+            const joinButton = document.createElement('button');
+            joinButton.id = 'guest-join-btn';
+            joinButton.innerHTML = '✨ Join Network';
+            joinButton.style.cssText = `
+                position: fixed;
+                bottom: 100px;
+                right: 30px;
+                padding: 15px 30px;
+                background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05));
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                border-radius: 12px;
+                color: #fff;
+                font-family: 'Outfit', sans-serif;
+                font-size: 16px;
+                font-weight: 600;
+                cursor: pointer;
+                z-index: 1000;
+                backdrop-filter: blur(10px);
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+                transition: all 0.3s ease;
+            `;
+            
+            joinButton.onmouseenter = () => {
+                joinButton.style.transform = 'translateY(-2px)';
+                joinButton.style.boxShadow = '0 12px 40px rgba(0, 0, 0, 0.4)';
+                joinButton.style.background = 'linear-gradient(135deg, rgba(255, 255, 255, 0.15), rgba(255, 255, 255, 0.08))';
+            };
+            
+            joinButton.onmouseleave = () => {
+                joinButton.style.transform = 'translateY(0)';
+                joinButton.style.boxShadow = '0 8px 32px rgba(0, 0, 0, 0.3)';
+                joinButton.style.background = 'linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05))';
+            };
+            
+            joinButton.onclick = () => {
+                // Check if there's a join param in URL
+                const urlParams = new URLSearchParams(window.location.search);
+                const joinParam = urlParams.get('join');
+                let joinParentId = null;
+                
+                if (joinParam) {
+                    try {
+                        const connectionInfo = window.SrishtiQRCodeClass.parseFromUrl(joinParam);
+                        if (connectionInfo) {
+                            joinParentId = connectionInfo.nodeId;
+                        }
+                    } catch (e) {
+                        console.warn('Failed to parse join param:', e);
+                    }
+                }
+                
+                showOnboardingModal(joinParentId);
+                joinButton.remove();
+                const indicator = document.getElementById('guest-indicator');
+                if (indicator) indicator.remove();
+            };
+            
+            document.body.appendChild(joinButton);
+            
+            // Add a subtle indicator that you're viewing as guest
+            const guestIndicator = document.createElement('div');
+            guestIndicator.id = 'guest-indicator';
+            guestIndicator.innerHTML = '👁️ Viewing as Guest';
+            guestIndicator.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 30px;
+                padding: 8px 16px;
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 8px;
+                color: rgba(255, 255, 255, 0.7);
+                font-family: 'Outfit', sans-serif;
+                font-size: 12px;
+                font-weight: 500;
+                z-index: 1000;
+                backdrop-filter: blur(10px);
+                pointer-events: none;
+            `;
+            document.body.appendChild(guestIndicator);
         }
         
         function showQRModal() {
@@ -1886,6 +2132,26 @@
         
         async function joinNetwork(name, parentId) {
             try {
+                // Clean up guest mode UI if present
+                const guestBtn = document.getElementById('guest-join-btn');
+                const guestIndicator = document.getElementById('guest-indicator');
+                const qrHint = document.getElementById('qr-join-hint');
+                if (guestBtn) guestBtn.remove();
+                if (guestIndicator) guestIndicator.remove();
+                if (qrHint) qrHint.remove();
+                
+                // If we were in guest mode, we need to reinitialize network with real identity
+                if (window.SrishtiApp && window.SrishtiApp.isGuest && window.SrishtiApp.network) {
+                    console.log('🔄 Disconnecting guest network to join with real identity...');
+                    try {
+                        window.SrishtiApp.network.disconnect();
+                    } catch (e) {
+                        console.warn('Error disconnecting guest network:', e);
+                    }
+                    window.SrishtiApp.network = null;
+                    window.SrishtiApp.isGuest = false;
+                }
+                
                 const result = await window.SrishtiApp.createNode(name, parentId);
                 const nodeId = result.nodeId;
                 const recoveryPhrase = result.recoveryPhrase;
@@ -2036,12 +2302,58 @@
                 
                 // Trigger a UI update with current user
                 updateStats();
-            } else if (joinParentId) {
-                // New user joining via QR
-                showOnboardingModal(joinParentId);
             } else {
-                // New user, no parent (root node)
-                showOnboardingModal(null);
+                // New user - show guest mode first (allows viewing before joining)
+                console.log('👁️ New user - entering guest mode');
+                showGuestMode();
+                
+                // Initialize network in guest mode so they can see the network
+                // This allows viewing other nodes without joining
+                if (window.SrishtiApp && !window.SrishtiApp.network) {
+                    try {
+                        await window.SrishtiApp.initNetwork(true); // true = guest mode
+                        console.log('✅ Guest mode network initialized - you can now see the network');
+                    } catch (error) {
+                        console.warn('⚠️ Guest mode network initialization failed:', error);
+                        // Continue anyway - they can still view local chain
+                    }
+                }
+                
+                // If they came via QR code, show a subtle hint after a delay
+                if (joinParentId) {
+                    setTimeout(() => {
+                        // Only show hint if they haven't joined yet
+                        if (!currentUser) {
+                            const hint = document.createElement('div');
+                            hint.id = 'qr-join-hint';
+                            hint.innerHTML = `💡 You can join under ${nodesData[joinParentId]?.name || 'this node'}`;
+                            hint.style.cssText = `
+                                position: fixed;
+                                bottom: 180px;
+                                right: 30px;
+                                padding: 12px 20px;
+                                background: rgba(255, 255, 255, 0.08);
+                                border: 1px solid rgba(255, 255, 255, 0.15);
+                                border-radius: 10px;
+                                color: rgba(255, 255, 255, 0.8);
+                                font-family: 'Outfit', sans-serif;
+                                font-size: 13px;
+                                z-index: 1000;
+                                backdrop-filter: blur(10px);
+                                animation: fadeIn 0.5s ease;
+                            `;
+                            document.body.appendChild(hint);
+                            
+                            // Remove hint after 5 seconds
+                            setTimeout(() => {
+                                if (hint.parentNode) {
+                                    hint.style.animation = 'fadeOut 0.5s ease';
+                                    setTimeout(() => hint.remove(), 500);
+                                }
+                            }, 5000);
+                        }
+                    }, 2000);
+                }
             }
             
             // Start animation
