@@ -437,6 +437,21 @@ class Network {
         });
         
         connection.send(hello);
+        
+        // If we only have genesis (1 block or less) and this is a new connection, 
+        // request sync after a short delay to allow HELLO exchange
+        const ourChainLength = this.chain.getLength();
+        const onlyHasGenesis = ourChainLength <= 1;
+        if (onlyHasGenesis) {
+            // Wait a bit for HELLO exchange, then request sync
+            setTimeout(async () => {
+                const peerInfo = this.peerInfo.get(nodeId);
+                if (peerInfo && (peerInfo.chainLength > ourChainLength || (onlyHasGenesis && peerInfo.chainLength > 1)) && this.peers.has(nodeId)) {
+                    console.log(`🔄 Auto-requesting sync from ${nodeId} (we have ${ourChainLength} blocks, they have ${peerInfo.chainLength})`);
+                    await this.requestSync(nodeId);
+                }
+            }, 1000);
+        }
     }
     
     /**
@@ -560,8 +575,11 @@ class Network {
             this.connectionManager.addCandidate(peerId, priority, 'HELLO message');
         }
         
-        // Request sync if peer has longer chain
-        if (message.chainLength > this.chain.getLength()) {
+        // Request sync if peer has longer chain, OR if we only have genesis (1 block) and they have more
+        const ourChainLength = this.chain.getLength();
+        const onlyHasGenesis = ourChainLength <= 1;
+        if (message.chainLength > ourChainLength || (onlyHasGenesis && message.chainLength > 1)) {
+            console.log(`📥 Requesting sync: our chain=${ourChainLength}, their chain=${message.chainLength}`);
             await this.requestSync(peerId);
         }
     }
@@ -1075,10 +1093,16 @@ class Network {
         }
         
         this.syncInterval = setInterval(async () => {
-            // Request sync from peers with longer chains
+            const ourChainLength = this.chain.getLength();
+            const onlyHasGenesis = ourChainLength <= 1;
+            
+            // Request sync from peers with longer chains, OR if we only have genesis and they have more
             for (const [peerId, info] of this.peerInfo.entries()) {
-                if (info.chainLength > this.chain.getLength()) {
-                    await this.requestSync(peerId);
+                if (info.chainLength > ourChainLength || (onlyHasGenesis && info.chainLength > 1)) {
+                    // Only request if we have a connection to this peer
+                    if (this.peers.has(peerId)) {
+                        await this.requestSync(peerId);
+                    }
                 }
             }
             
