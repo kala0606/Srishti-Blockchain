@@ -250,6 +250,22 @@ class Network {
                     console.log(`📶 Connection state from ${fromNodeId}: ${state}`);
                     if (state === 'data_channel_open') {
                         console.log(`🎉 Data channel open with ${fromNodeId}! Syncing...`);
+                        // Mark as online immediately
+                        const info = this.peerInfo.get(fromNodeId) || {};
+                        this.peerInfo.set(fromNodeId, {
+                            ...info,
+                            isOnline: true,
+                            lastSeen: Date.now()
+                        });
+                        if (this.onPresenceUpdate) {
+                            this.onPresenceUpdate(fromNodeId, {
+                                isOnline: true,
+                                lastSeen: Date.now()
+                            });
+                        }
+                        // Send immediate heartbeat
+                        this.sendHeartbeat();
+                        // Request sync
                         this.requestSync(fromNodeId);
                     } else if (state === 'data_channel_closed' || state === 'data_channel_error' || 
                                state === 'disconnected' || state === 'failed') {
@@ -432,6 +448,24 @@ class Network {
         if (connection) {
             connection.close();
             this.peers.delete(nodeId);
+            
+            // Mark as offline before deleting
+            const info = this.peerInfo.get(nodeId);
+            if (info) {
+                this.peerInfo.set(nodeId, {
+                    ...info,
+                    isOnline: false,
+                    lastSeen: Date.now()
+                });
+                // Notify UI that peer went offline
+                if (this.onPresenceUpdate) {
+                    this.onPresenceUpdate(nodeId, {
+                        isOnline: false,
+                        lastSeen: Date.now()
+                    });
+                }
+            }
+            
             this.peerInfo.delete(nodeId);
             
             // Unregister from connection manager
@@ -493,13 +527,27 @@ class Network {
             this.dht.updatePeerSeen(peerId);
         }
         
+        // Mark peer as online immediately when we receive HELLO
         this.peerInfo.set(peerId, {
             publicKey: message.publicKey,
             chainLength: message.chainLength,
             latestHash: message.latestHash,
             protocolVersion: message.protocolVersion || 1,
-            nodeType: message.nodeType || 'LIGHT'
+            nodeType: message.nodeType || 'LIGHT',
+            isOnline: true,
+            lastSeen: Date.now()
         });
+        
+        // Notify UI immediately that this peer is online
+        if (this.onPresenceUpdate) {
+            this.onPresenceUpdate(peerId, {
+                isOnline: true,
+                lastSeen: Date.now()
+            });
+        }
+        
+        // Send immediate heartbeat so peer knows we're online too
+        this.sendHeartbeat();
         
         // Add to connection manager as candidate if not already connected
         if (this.connectionManager && !this.peers.has(peerId)) {
@@ -968,6 +1016,41 @@ class Network {
     }
     
     /**
+     * Send heartbeat to all connected peers
+     */
+    sendHeartbeat() {
+        // Collect list of nodes we know are online (including ourselves and connected peers)
+        const knownOnline = [this.nodeId];
+        for (const [peerId, connection] of this.peers.entries()) {
+            if (connection.isConnected()) {
+                knownOnline.push(peerId);
+                // Mark connected peers as online in peerInfo
+                const info = this.peerInfo.get(peerId) || {};
+                this.peerInfo.set(peerId, {
+                    ...info,
+                    isOnline: true,
+                    lastSeen: Date.now()
+                });
+                // Notify UI about this peer being online
+                if (this.onPresenceUpdate) {
+                    this.onPresenceUpdate(peerId, {
+                        isOnline: true,
+                        lastSeen: Date.now()
+                    });
+                }
+            }
+        }
+        
+        const heartbeat = window.SrishtiProtocol.createHeartbeat({
+            nodeId: this.nodeId,
+            isOnline: true,
+            knownOnline: knownOnline
+        });
+        
+        this.broadcast(heartbeat);
+    }
+    
+    /**
      * Start heartbeat (send periodic heartbeats to peers)
      */
     startHeartbeat() {
@@ -975,23 +1058,12 @@ class Network {
             clearInterval(this.heartbeatInterval);
         }
         
+        // Send initial heartbeat immediately
+        this.sendHeartbeat();
+        
         this.heartbeatInterval = setInterval(() => {
-            // Collect list of nodes we know are online (including ourselves and connected peers)
-            const knownOnline = [this.nodeId];
-            for (const [peerId, info] of this.peerInfo.entries()) {
-                if (info.isOnline) {
-                    knownOnline.push(peerId);
-                }
-            }
-            
-            const heartbeat = window.SrishtiProtocol.createHeartbeat({
-                nodeId: this.nodeId,
-                isOnline: true,
-                knownOnline: knownOnline
-            });
-            
-            this.broadcast(heartbeat);
-        }, 30000); // Every 30 seconds
+            this.sendHeartbeat();
+        }, 5000); // Every 5 seconds (reduced from 30s for faster updates)
     }
     
     /**
@@ -1012,7 +1084,7 @@ class Network {
             
             // Also attempt pending connections periodically
             this.attemptPendingConnections();
-        }, 60000); // Every minute
+        }, 15000); // Every 15 seconds (reduced from 60s for faster sync)
     }
     
     /**
@@ -1095,6 +1167,22 @@ class Network {
                         this.pendingOffers.delete(nodeId);
                         this.pendingConnections.delete(nodeId);
                         console.log(`🎉 Data channel open with ${nodeId}! Syncing...`);
+                        // Mark as online immediately
+                        const info = this.peerInfo.get(nodeId) || {};
+                        this.peerInfo.set(nodeId, {
+                            ...info,
+                            isOnline: true,
+                            lastSeen: Date.now()
+                        });
+                        if (this.onPresenceUpdate) {
+                            this.onPresenceUpdate(nodeId, {
+                                isOnline: true,
+                                lastSeen: Date.now()
+                            });
+                        }
+                        // Send immediate heartbeat
+                        this.sendHeartbeat();
+                        // Request sync
                         this.requestSync(nodeId);
                     } else if (state === 'data_channel_closed' || state === 'data_channel_error' ||
                                state === 'disconnected' || state === 'failed') {
