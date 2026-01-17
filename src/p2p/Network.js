@@ -438,20 +438,40 @@ class Network {
         
         connection.send(hello);
         
-        // If we only have genesis (1 block or less) and this is a new connection, 
-        // request sync after a short delay to allow HELLO exchange
+        // When a peer connects, always check if we need to sync chains
+        // This ensures we get new blocks (like INSTITUTION_REGISTER) even if chains have same length
         const ourChainLength = this.chain.getLength();
-        const onlyHasGenesis = ourChainLength <= 1;
-        if (onlyHasGenesis) {
-            // Wait a bit for HELLO exchange, then request sync
-            setTimeout(async () => {
-                const peerInfo = this.peerInfo.get(nodeId);
-                if (peerInfo && (peerInfo.chainLength > ourChainLength || (onlyHasGenesis && peerInfo.chainLength > 1)) && this.peers.has(nodeId)) {
-                    console.log(`🔄 Auto-requesting sync from ${nodeId} (we have ${ourChainLength} blocks, they have ${peerInfo.chainLength})`);
-                    await this.requestSync(nodeId);
-                }
-            }, 1000);
-        }
+        const ourLatestHash = this.chain.getLatestBlock()?.hash || null;
+        
+        // Wait a bit for HELLO exchange, then check if sync is needed
+        setTimeout(async () => {
+            if (!this.peers.has(nodeId)) {
+                return; // Peer disconnected
+            }
+            
+            const peerInfo = this.peerInfo.get(nodeId);
+            if (!peerInfo) {
+                return; // No peer info yet
+            }
+            
+            const theirChainLength = peerInfo.chainLength || 0;
+            const theirLatestHash = peerInfo.latestHash || null;
+            
+            // Sync if:
+            // 1. Their chain is longer, OR
+            // 2. Chains have same length but different latest hash (divergent chains), OR
+            // 3. We only have genesis and they have more
+            const shouldSync = theirChainLength > ourChainLength || 
+                             (theirChainLength === ourChainLength && theirLatestHash && ourLatestHash && theirLatestHash !== ourLatestHash) ||
+                             (ourChainLength <= 1 && theirChainLength > 1);
+            
+            if (shouldSync) {
+                console.log(`🔄 Auto-requesting sync from ${nodeId} (ours: ${ourChainLength}/${ourLatestHash?.substring(0, 8)}, theirs: ${theirChainLength}/${theirLatestHash?.substring(0, 8)})`);
+                await this.requestSync(nodeId);
+            } else {
+                console.log(`✓ Chains in sync with ${nodeId} (${ourChainLength} blocks, hash: ${ourLatestHash?.substring(0, 8)})`);
+            }
+        }, 1000);
     }
     
     /**
@@ -587,12 +607,22 @@ class Network {
             this.connectionManager.addCandidate(peerId, priority, 'HELLO message');
         }
         
-        // Request sync if peer has longer chain, OR if we only have genesis (1 block) and they have more
+        // Request sync if peer has longer chain, different latest hash (divergent chains), 
+        // OR if we only have genesis (1 block) and they have more
         const ourChainLength = this.chain.getLength();
+        const ourLatestHash = this.chain.getLatestBlock()?.hash || null;
+        const theirLatestHash = message.latestHash || null;
         const onlyHasGenesis = ourChainLength <= 1;
-        if (message.chainLength > ourChainLength || (onlyHasGenesis && message.chainLength > 1)) {
-            console.log(`📥 Requesting sync: our chain=${ourChainLength}, their chain=${message.chainLength}`);
+        
+        const shouldSync = message.chainLength > ourChainLength || 
+                          (message.chainLength === ourChainLength && theirLatestHash && ourLatestHash && theirLatestHash !== ourLatestHash) ||
+                          (onlyHasGenesis && message.chainLength > 1);
+        
+        if (shouldSync) {
+            console.log(`📥 Requesting sync: our chain=${ourChainLength}/${ourLatestHash?.substring(0, 8)}, their chain=${message.chainLength}/${theirLatestHash?.substring(0, 8)}`);
             await this.requestSync(peerId);
+        } else {
+            console.log(`✓ Chains appear in sync with ${peerId} (${ourChainLength} blocks)`);
         }
     }
     

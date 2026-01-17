@@ -2573,29 +2573,55 @@
                 return;
             }
             
-            const root = d3.hierarchy(hierarchyData);
-            const links = root.links();
-            let nodes = root.descendants();
+            // If hierarchy has virtual root, flatten it by promoting its children to root level
+            let actualRoot = hierarchyData;
+            if (hierarchyData.isVirtualRoot && hierarchyData.children) {
+                // If there's only one child of virtual root, use it as root
+                // If multiple, we still need to create a tree structure
+                if (hierarchyData.children.length === 1) {
+                    actualRoot = hierarchyData.children[0];
+                } else {
+                    // Multiple roots - keep virtual root but we'll handle it in visualization
+                    actualRoot = hierarchyData;
+                }
+            }
             
-            // Filter out virtual root node from visualization
+            const root = d3.hierarchy(actualRoot);
+            let nodes = root.descendants();
+            let links = root.links();
+            
+            // Filter out virtual root node from visualization if present
+            const nodesBeforeFilter = nodes.length;
             nodes = nodes.filter(d => !d.data.isVirtualRoot);
             
             // Filter links to exclude those connecting to/from virtual root
-            const filteredLinks = links.filter(link => 
-                !link.source.data.isVirtualRoot && !link.target.data.isVirtualRoot
-            );
+            // Also ensure both source and target exist in filtered nodes
+            const nodeIds = new Set(nodes.map(n => n.data.id));
+            const filteredLinks = links.filter(link => {
+                const sourceIsVirtual = link.source.data.isVirtualRoot;
+                const targetIsVirtual = link.target.data.isVirtualRoot;
+                const sourceExists = nodeIds.has(link.source.data.id);
+                const targetExists = nodeIds.has(link.target.data.id);
+                return !sourceIsVirtual && !targetIsVirtual && sourceExists && targetExists;
+            });
             
-            console.log(`🎨 Creating ${nodes.length} spheres, ${filteredLinks.length} links (filtered virtual root)`);
+            console.log(`🎨 Creating ${nodes.length} spheres, ${filteredLinks.length} links (filtered ${nodesBeforeFilter - nodes.length} virtual root nodes)`);
             
-            // Layout
+            // Layout (using the root with virtual root, but we'll only visualize filtered nodes)
             const treeLayout = d3.tree().size([2 * Math.PI, 500]);
             treeLayout(root);
+            
+            // Recalculate depths for filtered nodes (since we removed virtual root)
+            // Find the minimum depth in filtered nodes to adjust all depths
+            const minDepth = nodes.length > 0 ? Math.min(...nodes.map(n => n.depth)) : 0;
             
             // Position nodes
             nodes.forEach((d, i) => {
                 const angle = d.x;
                 const radius = d.y * 1.2;
-                const height = (d.depth - root.height / 2) * 120;
+                // Adjust depth: if virtual root was removed, reduce depth by 1
+                const adjustedDepth = d.depth - minDepth;
+                const height = (adjustedDepth - (root.height - minDepth) / 2) * 120;
                 
                 d.x3d = radius * Math.cos(angle);
                 d.y3d = height;

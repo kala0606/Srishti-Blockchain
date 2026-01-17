@@ -76,13 +76,19 @@ class BlockchainAdapter {
             return null;
         }
         
+        // Log all nodes with their parentId for debugging
+        console.log('🌳 Nodes in cache:', nodesArray.map(n => ({ id: n.id.substring(0, 12), name: n.name, parentId: n.parentId?.substring(0, 12) || 'null' })));
+        
         // Find root nodes (no parent)
         const rootNodes = nodesArray.filter(n => !n.parentId);
+        
+        console.log(`🌳 Found ${rootNodes.length} root nodes:`, rootNodes.map(n => ({ id: n.id.substring(0, 12), name: n.name })));
         
         if (rootNodes.length === 0) {
             // If no root, use the oldest node as root
             nodesArray.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
             rootNodes.push(nodesArray[0]);
+            console.log(`🌳 No root found, using oldest node as root:`, rootNodes[0].name);
         }
         
         // Build children map
@@ -95,6 +101,12 @@ class BlockchainAdapter {
                 childrenMap[node.parentId].push(node);
             }
         });
+        
+        // Log children map for debugging
+        console.log('🌳 Children map:', Object.entries(childrenMap).map(([parentId, children]) => ({
+            parent: parentId.substring(0, 12),
+            children: children.map(c => ({ id: c.id.substring(0, 12), name: c.name }))
+        })));
         
         // Recursive function to build tree
         function buildTree(node) {

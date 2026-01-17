@@ -236,19 +236,48 @@ class SrishtiApp {
                 await this.network.proposeBlock(newBlock);
                 
                 // If we joined under a parent, attempt to connect to them
+                // This is critical for ensuring blocks (like INSTITUTION_REGISTER) reach the parent
                 if (parentId) {
                     setTimeout(async () => {
                         const parentNode = this.chain.buildNodeMap()[parentId];
                         if (parentNode && parentNode.publicKey) {
                             console.log(`🔗 Adding pending connection to parent: ${parentId}`);
                             this.network.addPendingConnection(parentId, parentNode.publicKey);
+                            
+                            // Try to connect immediately if signaling is ready
                             if (this.network.signaling && this.network.signaling.isConnected()) {
+                                console.log(`🔗 Attempting immediate connection to parent ${parentId}...`);
                                 await this.network.attemptConnection(parentId, parentNode.publicKey);
+                            } else {
+                                console.log(`⏳ Signaling not ready yet, will connect when available`);
                             }
+                            
+                            // Also set up periodic retry in case initial connection fails
+                            let retryCount = 0;
+                            const maxRetries = 10;
+                            const retryInterval = setInterval(async () => {
+                                if (this.network.peers.has(parentId)) {
+                                    console.log(`✅ Successfully connected to parent ${parentId}`);
+                                    clearInterval(retryInterval);
+                                    return;
+                                }
+                                
+                                if (retryCount >= maxRetries) {
+                                    console.warn(`⚠️ Failed to connect to parent ${parentId} after ${maxRetries} attempts`);
+                                    clearInterval(retryInterval);
+                                    return;
+                                }
+                                
+                                retryCount++;
+                                if (this.network.signaling && this.network.signaling.isConnected()) {
+                                    console.log(`🔄 Retry ${retryCount}/${maxRetries}: Attempting connection to parent ${parentId}...`);
+                                    await this.network.attemptConnection(parentId, parentNode.publicKey);
+                                }
+                            }, 3000); // Retry every 3 seconds
                         } else {
-                            console.warn(`⚠️ Parent node ${parentId} not found in chain`);
+                            console.warn(`⚠️ Parent node ${parentId} not found in chain - may need to sync first`);
                         }
-                    }, 1000);
+                    }, 1500); // Give a bit more time for initial sync
                 }
             } else {
                 // If no network, just add to chain locally
