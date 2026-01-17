@@ -14,6 +14,10 @@ class Protocol {
         SYNC_RESPONSE: 'SYNC_RESPONSE',
         SYNC_CHECKPOINT: 'SYNC_CHECKPOINT',
         SYNC_INCREMENTAL: 'SYNC_INCREMENTAL',
+        HEADER_SYNC_REQUEST: 'HEADER_SYNC_REQUEST',
+        HEADER_SYNC_RESPONSE: 'HEADER_SYNC_RESPONSE',
+        MERKLE_PROOF_REQUEST: 'MERKLE_PROOF_REQUEST',
+        MERKLE_PROOF_RESPONSE: 'MERKLE_PROOF_RESPONSE',
         NEW_BLOCK: 'NEW_BLOCK',
         BLOCK_PROPOSAL: 'BLOCK_PROPOSAL',
         HEARTBEAT: 'HEARTBEAT',
@@ -172,6 +176,62 @@ class Protocol {
         return {
             type: this.MESSAGE_TYPES.PONG,
             timestamp: Date.now()
+        };
+    }
+
+    /**
+     * Create a HEADER_SYNC_REQUEST message (light client requesting headers)
+     * @param {Object} info - Header sync request info
+     * @returns {Object}
+     */
+    static createHeaderSyncRequest(info) {
+        return {
+            type: this.MESSAGE_TYPES.HEADER_SYNC_REQUEST,
+            timestamp: Date.now(),
+            fromIndex: info.fromIndex || 0,
+            count: info.count || 100 // Number of headers to request
+        };
+    }
+
+    /**
+     * Create a HEADER_SYNC_RESPONSE message (full node responding with headers)
+     * @param {Object} info - Header sync response info
+     * @returns {Object}
+     */
+    static createHeaderSyncResponse(info) {
+        return {
+            type: this.MESSAGE_TYPES.HEADER_SYNC_RESPONSE,
+            timestamp: Date.now(),
+            headers: info.headers || [],
+            chainLength: info.chainLength || 0
+        };
+    }
+
+    /**
+     * Create a MERKLE_PROOF_REQUEST message (light client requesting proof)
+     * @param {Object} info - Proof request info
+     * @returns {Object}
+     */
+    static createMerkleProofRequest(info) {
+        return {
+            type: this.MESSAGE_TYPES.MERKLE_PROOF_REQUEST,
+            timestamp: Date.now(),
+            transactionId: info.transactionId,
+            blockIndex: info.blockIndex || null // Optional: specify block, otherwise search all
+        };
+    }
+
+    /**
+     * Create a MERKLE_PROOF_RESPONSE message (full node responding with proof)
+     * @param {Object} info - Proof response info
+     * @returns {Object}
+     */
+    static createMerkleProofResponse(info) {
+        return {
+            type: this.MESSAGE_TYPES.MERKLE_PROOF_RESPONSE,
+            timestamp: Date.now(),
+            proof: info.proof || null,
+            found: info.found || false
         };
     }
     

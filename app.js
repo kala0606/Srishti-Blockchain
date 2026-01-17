@@ -31,14 +31,15 @@ class SrishtiApp {
             await this.storage.open();
             console.log('✅ Storage initialized');
             
-            // Initialize chain
-            this.chain = new window.SrishtiChain();
+            // Initialize chain with storage for state persistence
+            this.chain = new window.SrishtiChain(null, this.storage);
             
             // Load chain from storage
             const blocks = await this.storage.getAllBlocks();
             if (blocks.length > 0) {
                 await this.chain.replaceChain(blocks);
                 console.log(`✅ Chain loaded: ${blocks.length} blocks`);
+                // State is automatically rebuilt during replaceChain via processTransactions
             } else {
                 // DON'T create genesis yet - wait to sync with peers first
                 // This ensures all devices converge on the same genesis
@@ -453,6 +454,381 @@ class SrishtiApp {
             console.error('❌ Failed to download chain data:', error);
             throw error;
         }
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════════
+    // INSTITUTION MANAGEMENT METHODS
+    // ═══════════════════════════════════════════════════════════════════════
+    
+    /**
+     * Register as an institution (request to become a credential issuer)
+     * @param {Object} options - Institution details
+     * @returns {Promise<Object>} - Result with block info
+     */
+    async registerInstitution(options = {}) {
+        if (!this.chain || !this.nodeId) {
+            throw new Error('App not initialized or no node created');
+        }
+        
+        if (!options.name || !options.category) {
+            throw new Error('Institution registration requires name and category');
+        }
+        
+        const validCategories = ['EDUCATION', 'CERTIFICATION', 'GOVERNMENT', 'EMPLOYER', 'HEALTHCARE', 'COMMUNITY'];
+        if (!validCategories.includes(options.category)) {
+            throw new Error(`Category must be one of: ${validCategories.join(', ')}`);
+        }
+        
+        const tx = {
+            type: 'INSTITUTION_REGISTER',
+            sender: this.nodeId,
+            payload: {
+                name: options.name,
+                category: options.category,
+                description: options.description || '',
+                proofUrl: options.proofUrl || null,
+                contactEmail: options.contactEmail || null
+            },
+            timestamp: Date.now(),
+            signature: 'sig_' + Math.random().toString(36).substring(2, 10)
+        };
+        
+        const result = await this._createAndBroadcastBlock(tx);
+        console.log(`📋 Institution registration submitted: ${options.name} (${options.category})`);
+        return result;
+    }
+    
+    /**
+     * Verify an institution (only ROOT/GOVERNANCE_ADMIN can do this)
+     * @param {string} targetNodeId - Node ID to verify
+     * @param {boolean} approved - Whether to approve or reject
+     * @param {string} reason - Reason for decision (optional)
+     * @returns {Promise<Object>} - Result with block info
+     */
+    async verifyInstitution(targetNodeId, approved = true, reason = null) {
+        if (!this.chain || !this.nodeId) {
+            throw new Error('App not initialized or no node created');
+        }
+        
+        // Check if caller has authority
+        const myRole = this.chain.getNodeRole(this.nodeId);
+        if (myRole !== 'ROOT' && myRole !== 'GOVERNANCE_ADMIN') {
+            throw new Error(`You don't have authority to verify institutions. Your role: ${myRole}`);
+        }
+        
+        const tx = {
+            type: 'INSTITUTION_VERIFY',
+            sender: this.nodeId,
+            payload: {
+                targetNodeId: targetNodeId,
+                approved: approved,
+                reason: reason
+            },
+            timestamp: Date.now(),
+            signature: 'sig_' + Math.random().toString(36).substring(2, 10)
+        };
+        
+        const result = await this._createAndBroadcastBlock(tx);
+        console.log(`${approved ? '✅' : '❌'} Institution ${approved ? 'VERIFIED' : 'REJECTED'}: ${targetNodeId}`);
+        return result;
+    }
+    
+    /**
+     * Revoke institution status (only ROOT can do this)
+     * @param {string} targetNodeId - Institution to revoke
+     * @param {string} reason - Reason for revocation
+     * @returns {Promise<Object>} - Result with block info
+     */
+    async revokeInstitution(targetNodeId, reason = 'No reason provided') {
+        if (!this.chain || !this.nodeId) {
+            throw new Error('App not initialized or no node created');
+        }
+        
+        // Check if caller has authority
+        const myRole = this.chain.getNodeRole(this.nodeId);
+        if (myRole !== 'ROOT') {
+            throw new Error(`Only ROOT can revoke institutions. Your role: ${myRole}`);
+        }
+        
+        const tx = {
+            type: 'INSTITUTION_REVOKE',
+            sender: this.nodeId,
+            payload: {
+                targetNodeId: targetNodeId,
+                reason: reason
+            },
+            timestamp: Date.now(),
+            signature: 'sig_' + Math.random().toString(36).substring(2, 10)
+        };
+        
+        const result = await this._createAndBroadcastBlock(tx);
+        console.log(`🚫 Institution REVOKED: ${targetNodeId}`);
+        return result;
+    }
+    
+    /**
+     * Get my role in the network
+     * @returns {string} - Role (USER, INSTITUTION, GOVERNANCE_ADMIN, ROOT)
+     */
+    getMyRole() {
+        if (!this.chain || !this.nodeId) return 'USER';
+        return this.chain.getNodeRole(this.nodeId);
+    }
+    
+    /**
+     * Check if I am a verified institution
+     * @returns {boolean}
+     */
+    isInstitution() {
+        if (!this.chain || !this.nodeId) return false;
+        return this.chain.isVerifiedInstitution(this.nodeId);
+    }
+    
+    /**
+     * Check if I am ROOT
+     * @returns {boolean}
+     */
+    isRoot() {
+        return this.getMyRole() === 'ROOT';
+    }
+    
+    /**
+     * Get all institutions
+     * @returns {Object} - { verified: {...}, pending: {...} }
+     */
+    getInstitutions() {
+        if (!this.chain) return { verified: {}, pending: {} };
+        return this.chain.getInstitutions();
+    }
+    
+    /**
+     * Get pending institution registrations (for ROOT/ADMIN to review)
+     * @returns {Object}
+     */
+    getPendingInstitutions() {
+        if (!this.chain) return {};
+        return this.chain.getPendingInstitutions();
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════════
+    // SOULBOUND TOKEN METHODS (Institution-only)
+    // ═══════════════════════════════════════════════════════════════════════
+    
+    /**
+     * Create and broadcast a SOULBOUND_MINT transaction
+     * ONLY verified institutions can call this
+     * @param {string} recipient - Recipient address (CANNOT be self)
+     * @param {Object} options - Token options
+     * @returns {Promise<Object>} - Result with block info
+     */
+    async mintSoulboundToken(recipient, options = {}) {
+        if (!this.chain || !this.nodeId) {
+            throw new Error('App not initialized or no node created');
+        }
+        
+        // Pre-check: Only institutions can mint
+        if (!this.isInstitution()) {
+            throw new Error('Only verified institutions can mint soulbound tokens. Register and get verified first.');
+        }
+        
+        // Pre-check: Cannot mint to self
+        if (!recipient || recipient === this.nodeId) {
+            throw new Error('Cannot mint soulbound tokens to yourself. Specify a different recipient.');
+        }
+        
+        const tx = {
+            type: 'SOULBOUND_MINT',
+            sender: this.nodeId,
+            recipient: recipient,
+            payload: {
+                achievementId: options.achievementId || `CREDENTIAL_${Date.now()}`,
+                title: options.title || options.achievementId || 'Credential',
+                description: options.description || '',
+                ipfsProof: options.ipfsProof || null,
+                isTransferable: false, // Soulbound = non-transferable
+                revocable: options.revocable !== undefined ? options.revocable : true,
+                metadata: options.metadata || {}
+            },
+            timestamp: Date.now(),
+            signature: 'sig_' + Math.random().toString(36).substring(2, 10)
+        };
+        
+        const result = await this._createAndBroadcastBlock(tx);
+        console.log(`🎓 Soulbound token minted: ${options.title || options.achievementId} -> ${recipient}`);
+        return result;
+    }
+    
+    /**
+     * Create and broadcast a GOV_PROPOSAL transaction
+     * @param {Object} options - Proposal options
+     * @returns {Promise<Object>} - Result with block info
+     */
+    async createProposal(options = {}) {
+        if (!this.chain || !this.nodeId) {
+            throw new Error('App not initialized or no node created');
+        }
+        
+        const proposalId = options.proposalId || `PROP_${Date.now()}`;
+        
+        const tx = {
+            type: 'GOV_PROPOSAL',
+            sender: this.nodeId,
+            payload: {
+                proposalId: proposalId,
+                description: options.description || 'New governance proposal',
+                votingPeriodBlocks: options.votingPeriodBlocks || 5000,
+                quorumThreshold: options.quorumThreshold || '20%',
+                ipfsManifesto: options.ipfsManifesto || null
+            },
+            timestamp: Date.now(),
+            signature: 'sig_' + Math.random().toString(36).substring(2, 10)
+        };
+        
+        const result = await this._createAndBroadcastBlock(tx);
+        console.log(`🗳️ Proposal created: ${proposalId}`);
+        return result;
+    }
+    
+    /**
+     * Update social recovery guardians
+     * @param {Array<string>} guardians - Array of guardian addresses
+     * @param {number} threshold - Number of guardians required for recovery
+     * @returns {Promise<Object>} - Result with block info
+     */
+    async updateSocialRecovery(guardians, threshold) {
+        if (!this.chain || !this.nodeId) {
+            throw new Error('App not initialized or no node created');
+        }
+        
+        if (!Array.isArray(guardians) || guardians.length === 0) {
+            throw new Error('Guardians must be a non-empty array');
+        }
+        
+        if (!threshold || threshold < 1 || threshold > guardians.length) {
+            throw new Error(`Threshold must be between 1 and ${guardians.length}`);
+        }
+        
+        const tx = {
+            type: 'SOCIAL_RECOVERY_UPDATE',
+            sender: this.nodeId,
+            payload: {
+                recoveryThreshold: threshold,
+                guardians: guardians
+            },
+            timestamp: Date.now(),
+            signature: 'sig_' + Math.random().toString(36).substring(2, 10)
+        };
+        
+        const result = await this._createAndBroadcastBlock(tx);
+        console.log(`🛡️ Social recovery updated: ${guardians.length} guardians, threshold: ${threshold}`);
+        return result;
+    }
+    
+    /**
+     * Cast a vote on a governance proposal
+     * @param {string} proposalId - Proposal ID to vote on
+     * @param {string} vote - Vote choice ('YES', 'NO', 'ABSTAIN')
+     * @param {string} weight - Vote weight type (default: 'EQUAL')
+     * @returns {Promise<Object>} - Result with block info
+     */
+    async castVote(proposalId, vote = 'YES', weight = 'EQUAL') {
+        if (!this.chain || !this.nodeId) {
+            throw new Error('App not initialized or no node created');
+        }
+        
+        const validVotes = ['YES', 'NO', 'ABSTAIN'];
+        if (!validVotes.includes(vote.toUpperCase())) {
+            throw new Error(`Vote must be one of: ${validVotes.join(', ')}`);
+        }
+        
+        const tx = {
+            type: 'VOTE_CAST',
+            sender: this.nodeId,
+            payload: {
+                proposalId: proposalId,
+                vote: vote.toUpperCase(),
+                weight: weight
+            },
+            timestamp: Date.now(),
+            signature: 'sig_' + Math.random().toString(36).substring(2, 10)
+        };
+        
+        const result = await this._createAndBroadcastBlock(tx);
+        console.log(`🗳️ Vote cast: ${vote} on ${proposalId}`);
+        return result;
+    }
+    
+    /**
+     * Internal helper to create and broadcast a block with a transaction
+     * @param {Object} tx - Transaction object
+     * @returns {Promise<Object>} - Result with block info
+     */
+    async _createAndBroadcastBlock(tx) {
+        const latestBlock = this.chain.getLatestBlock();
+        
+        // Get participation proof
+        const participationProof = this.consensus?.createParticipationProof(this.nodeId) || {
+            nodeId: this.nodeId,
+            score: 0.5,
+            timestamp: Date.now()
+        };
+        
+        const newBlock = new window.SrishtiBlock({
+            index: this.chain.getLength(),
+            previousHash: latestBlock.hash,
+            data: tx,
+            proposer: this.nodeId,
+            participationProof: participationProof
+        });
+        
+        await newBlock.computeHash();
+        
+        // Add block to chain and broadcast
+        if (this.network) {
+            await this.network.proposeBlock(newBlock);
+        } else {
+            await this.chain.addBlock(newBlock);
+            await this.saveChain();
+        }
+        
+        // Notify adapter of chain update
+        if (this.adapter) {
+            this.adapter.onChainUpdate();
+        }
+        
+        return {
+            success: true,
+            blockIndex: newBlock.index,
+            blockHash: newBlock.hash,
+            transactionType: tx.type
+        };
+    }
+    
+    /**
+     * Get current user's soulbound tokens
+     * @returns {Array} - Array of soulbound tokens
+     */
+    getSoulboundTokens() {
+        if (!this.chain || !this.nodeId) return [];
+        return this.chain.getSoulboundTokens(this.nodeId);
+    }
+    
+    /**
+     * Get all active proposals
+     * @returns {Object} - Object of active proposals
+     */
+    getActiveProposals() {
+        if (!this.chain) return {};
+        return this.chain.getActiveProposals();
+    }
+    
+    /**
+     * Get current user's account state (guardians, etc.)
+     * @returns {Object|null} - Account state or null
+     */
+    getAccountState() {
+        if (!this.chain || !this.nodeId) return null;
+        return this.chain.getAccountState(this.nodeId);
     }
 }
 

@@ -6,7 +6,7 @@
  */
 
 class IndexedDBStore {
-    constructor(dbName = 'srishti_blockchain', version = 2) {
+    constructor(dbName = 'srishti_blockchain', version = 3) {
         this.dbName = dbName;
         this.version = version;
         this.db = null;
@@ -52,6 +52,12 @@ class IndexedDBStore {
                 if (!db.objectStoreNames.contains('checkpoints')) {
                     const checkpointStore = db.createObjectStore('checkpoints', { keyPath: 'index' });
                     checkpointStore.createIndex('timestamp', 'timestamp', { unique: false });
+                }
+
+                // Headers store (for light clients - SPV mode)
+                if (!db.objectStoreNames.contains('headers')) {
+                    const headerStore = db.createObjectStore('headers', { keyPath: 'index' });
+                    headerStore.createIndex('timestamp', 'timestamp', { unique: false });
                 }
             };
         });
@@ -406,12 +412,108 @@ class IndexedDBStore {
     }
     
     /**
+     * Save a block header (for light clients)
+     * @param {number} index - Header index
+     * @param {Object} headerData - Header JSON object
+     * @returns {Promise<void>}
+     */
+    async saveHeader(index, headerData) {
+        const db = await this.open();
+        const transaction = db.transaction(['headers'], 'readwrite');
+        const store = transaction.objectStore('headers');
+        
+        const headerWithIndex = {
+            index: index,
+            ...headerData
+        };
+        
+        return new Promise((resolve, reject) => {
+            const request = store.put(headerWithIndex);
+            request.onsuccess = () => resolve();
+            request.onerror = () => reject(request.error);
+        });
+    }
+
+    /**
+     * Get a header by index
+     * @param {number} index
+     * @returns {Promise<Object|null>}
+     */
+    async getHeader(index) {
+        const db = await this.open();
+        const transaction = db.transaction(['headers'], 'readonly');
+        const store = transaction.objectStore('headers');
+        
+        return new Promise((resolve, reject) => {
+            const request = store.get(index);
+            request.onsuccess = () => {
+                const result = request.result;
+                if (result) {
+                    // Remove index from result (it's the key)
+                    const { index, ...headerData } = result;
+                    resolve(headerData);
+                } else {
+                    resolve(null);
+                }
+            };
+            request.onerror = () => reject(request.error);
+        });
+    }
+
+    /**
+     * Get all headers
+     * @returns {Promise<Array>}
+     */
+    async getAllHeaders() {
+        const db = await this.open();
+        const transaction = db.transaction(['headers'], 'readonly');
+        const store = transaction.objectStore('headers');
+        
+        return new Promise((resolve, reject) => {
+            const request = store.getAll();
+            request.onsuccess = () => {
+                const headers = request.result;
+                // Sort by index
+                headers.sort((a, b) => a.index - b.index);
+                // Remove index from each header
+                const headerData = headers.map(({ index, ...header }) => header);
+                resolve(headerData);
+            };
+            request.onerror = () => reject(request.error);
+        });
+    }
+
+    /**
+     * Get headers in a range
+     * @param {number} fromIndex - Start index (inclusive)
+     * @param {number} toIndex - End index (exclusive)
+     * @returns {Promise<Array>}
+     */
+    async getHeadersRange(fromIndex, toIndex) {
+        const db = await this.open();
+        const transaction = db.transaction(['headers'], 'readonly');
+        const store = transaction.objectStore('headers');
+        
+        const headers = [];
+        for (let i = fromIndex; i < toIndex; i++) {
+            const header = await this.getHeader(i);
+            if (header) {
+                headers.push(header);
+            } else {
+                break; // Stop if we hit a gap
+            }
+        }
+        
+        return headers;
+    }
+
+    /**
      * Clear all data (use with caution!)
      * @returns {Promise<void>}
      */
     async clear() {
         const db = await this.open();
-        const transaction = db.transaction(['blocks', 'keys', 'metadata', 'checkpoints'], 'readwrite');
+        const transaction = db.transaction(['blocks', 'keys', 'metadata', 'checkpoints', 'headers'], 'readwrite');
         
         await Promise.all([
             new Promise((resolve, reject) => {
@@ -431,6 +533,11 @@ class IndexedDBStore {
             }),
             new Promise((resolve, reject) => {
                 const request = transaction.objectStore('checkpoints').clear();
+                request.onsuccess = () => resolve();
+                request.onerror = () => reject(request.error);
+            }),
+            new Promise((resolve, reject) => {
+                const request = transaction.objectStore('headers').clear();
                 request.onsuccess = () => resolve();
                 request.onerror = () => reject(request.error);
             })

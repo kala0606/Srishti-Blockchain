@@ -517,6 +517,18 @@ class Network {
             case window.SrishtiProtocol.MESSAGE_TYPES.SYNC_RESPONSE:
                 await this.handleSyncResponse(message, peerId);
                 break;
+            case window.SrishtiProtocol.MESSAGE_TYPES.HEADER_SYNC_REQUEST:
+                await this.handleHeaderSyncRequest(message, peerId);
+                break;
+            case window.SrishtiProtocol.MESSAGE_TYPES.HEADER_SYNC_RESPONSE:
+                await this.handleHeaderSyncResponse(message, peerId);
+                break;
+            case window.SrishtiProtocol.MESSAGE_TYPES.MERKLE_PROOF_REQUEST:
+                await this.handleMerkleProofRequest(message, peerId);
+                break;
+            case window.SrishtiProtocol.MESSAGE_TYPES.MERKLE_PROOF_RESPONSE:
+                await this.handleMerkleProofResponse(message, peerId);
+                break;
             case window.SrishtiProtocol.MESSAGE_TYPES.NEW_BLOCK:
                 await this.handleNewBlock(message, peerId);
                 break;
@@ -703,6 +715,126 @@ class Network {
         }
     }
     
+    /**
+     * Handle HEADER_SYNC_REQUEST (light client requesting headers)
+     */
+    async handleHeaderSyncRequest(message, peerId) {
+        console.log(`📥 Received HEADER_SYNC_REQUEST from ${peerId}:`, message);
+
+        const connection = this.peers.get(peerId);
+        if (!connection) {
+            console.log(`❌ No connection for ${peerId} to send header response`);
+            return;
+        }
+
+        if (!window.SrishtiBlockHeader) {
+            console.error('SrishtiBlockHeader not loaded');
+            return;
+        }
+
+        const fromIndex = message.fromIndex || 0;
+        const count = message.count || 100;
+        const totalBlocks = this.chain.getLength();
+        const toIndex = Math.min(fromIndex + count, totalBlocks);
+
+        // Extract headers from blocks
+        const headers = [];
+        for (let i = fromIndex; i < toIndex; i++) {
+            const block = this.chain.getBlock(i);
+            if (block) {
+                // Ensure block has header computed
+                if (!block.header) {
+                    await block.computeHash();
+                }
+                const header = block.getHeader();
+                if (header) {
+                    headers.push(header.toJSON());
+                }
+            }
+        }
+
+        console.log(`📤 Sending ${headers.length} headers to ${peerId} (from index ${fromIndex})`);
+
+        const response = window.SrishtiProtocol.createHeaderSyncResponse({
+            headers: headers,
+            chainLength: totalBlocks
+        });
+
+        connection.send(response);
+    }
+
+    /**
+     * Handle HEADER_SYNC_RESPONSE (light client receiving headers)
+     */
+    async handleHeaderSyncResponse(message, peerId) {
+        console.log(`📥 Received HEADER_SYNC_RESPONSE from ${peerId}: ${message.headers?.length || 0} headers`);
+
+        // This is typically handled by LightClient, but we can log it here
+        if (this.lightClient) {
+            try {
+                const synced = await this.lightClient.syncHeaders(
+                    async (fromIndex) => message.headers,
+                    message.headers.length > 0 ? 0 : null
+                );
+                console.log(`✅ Synced ${synced} headers from ${peerId}`);
+            } catch (error) {
+                console.error(`Failed to sync headers from ${peerId}:`, error);
+            }
+        }
+    }
+
+    /**
+     * Handle MERKLE_PROOF_REQUEST (light client requesting Merkle proof)
+     */
+    async handleMerkleProofRequest(message, peerId) {
+        console.log(`📥 Received MERKLE_PROOF_REQUEST from ${peerId}:`, message);
+
+        const connection = this.peers.get(peerId);
+        if (!connection) {
+            console.log(`❌ No connection for ${peerId} to send proof response`);
+            return;
+        }
+
+        try {
+            let proof = null;
+
+            if (message.blockIndex !== null && message.blockIndex !== undefined) {
+                // Specific block requested
+                proof = await this.chain.generateMerkleProof(message.blockIndex, message.transactionId);
+            } else {
+                // Search all blocks
+                proof = await this.chain.findTransactionAndGenerateProof(message.transactionId);
+            }
+
+            const response = window.SrishtiProtocol.createMerkleProofResponse({
+                proof: proof,
+                found: proof !== null
+            });
+
+            connection.send(response);
+            console.log(`📤 Sent Merkle proof to ${peerId}: ${proof ? 'found' : 'not found'}`);
+        } catch (error) {
+            console.error(`Failed to generate Merkle proof for ${peerId}:`, error);
+            const response = window.SrishtiProtocol.createMerkleProofResponse({
+                proof: null,
+                found: false
+            });
+            connection.send(response);
+        }
+    }
+
+    /**
+     * Handle MERKLE_PROOF_RESPONSE (light client receiving proof)
+     */
+    async handleMerkleProofResponse(message, peerId) {
+        console.log(`📥 Received MERKLE_PROOF_RESPONSE from ${peerId}: ${message.found ? 'proof found' : 'not found'}`);
+
+        // This is typically handled by LightClient, but we can log it here
+        if (this.onMerkleProofReceived) {
+            this.onMerkleProofReceived(message.proof, peerId);
+        }
+    }
+
     /**
      * Handle NEW_BLOCK
      */

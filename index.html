@@ -21,8 +21,12 @@
     <!-- Blockchain Core (load in order) -->
     <script src="src/core/Hasher.js"></script>
     <script src="src/core/Event.js"></script>
+    <script src="src/core/MerkleTree.js"></script>
+    <script src="src/core/BlockHeader.js"></script>
+    <script src="src/core/BlockBody.js"></script>
     <script src="src/core/Block.js"></script>
     <script src="src/core/Chain.js"></script>
+    <script src="src/core/LightClient.js"></script>
     <script src="src/crypto/Keys.js"></script>
     <script src="src/crypto/BIP39.js"></script>
     <script src="src/crypto/Recovery.js"></script>
@@ -41,6 +45,13 @@
     
     <!-- Main App -->
     <script src="app.js"></script>
+    
+    <!-- Configuration: Force use of Fly.io signaling server even on localhost -->
+    <script>
+        // Always use Fly.io signaling server for WebSocket connections
+        // This ensures P2P networking works on both localhost and GitHub Pages
+        window.SRISHTI_SIGNALING_URL = 'wss://srishti-signaling.fly.dev';
+    </script>
     
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Syne:wght@400;500;600;700;800&display=swap');
@@ -785,6 +796,17 @@
             box-shadow: 
                 0 12px 40px rgba(0, 0, 0, 0.3),
                 inset 0 1px 0 rgba(255, 255, 255, 0.08);
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .your-node-indicator:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.2);
+            transform: translateY(-2px);
+            box-shadow: 
+                0 16px 50px rgba(0, 0, 0, 0.4),
+                inset 0 1px 0 rgba(255, 255, 255, 0.12);
         }
 
         .your-node-avatar {
@@ -933,6 +955,904 @@
         ::-webkit-scrollbar-thumb:hover {
             background: rgba(255, 255, 255, 0.15);
         }
+
+        /* ============================================
+           USER DASHBOARD STYLES
+           ============================================ */
+        
+        #dashboard-panel {
+            position: fixed;
+            top: 0;
+            right: -450px;
+            width: 420px;
+            height: 100vh;
+            background: linear-gradient(180deg, rgba(12, 12, 25, 0.95) 0%, rgba(8, 8, 18, 0.98) 100%);
+            backdrop-filter: blur(40px);
+            -webkit-backdrop-filter: blur(40px);
+            border-left: 1px solid rgba(255, 255, 255, 0.08);
+            z-index: 800;
+            transition: right 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+            overflow-y: auto;
+            overflow-x: hidden;
+            box-shadow: -20px 0 60px rgba(0, 0, 0, 0.5);
+        }
+        
+        #dashboard-panel.open {
+            right: 0;
+        }
+        
+        #dashboard-panel::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 200px;
+            background: linear-gradient(180deg, rgba(255, 215, 0, 0.03) 0%, transparent 100%);
+            pointer-events: none;
+        }
+        
+        .dashboard-close {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 20px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+            z-index: 10;
+        }
+        
+        .dashboard-close:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            transform: rotate(90deg);
+        }
+        
+        .dashboard-content {
+            padding: 32px 28px;
+            padding-top: 24px;
+        }
+        
+        /* Profile Header */
+        .dashboard-profile {
+            text-align: center;
+            padding-bottom: 28px;
+            margin-bottom: 28px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            position: relative;
+        }
+        
+        .dashboard-avatar {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 42px;
+            font-weight: 800;
+            color: #000;
+            margin: 0 auto 18px;
+            font-family: 'Syne', sans-serif;
+            box-shadow: 
+                0 8px 32px rgba(255, 215, 0, 0.3),
+                0 0 0 4px rgba(255, 215, 0, 0.1);
+            position: relative;
+        }
+        
+        .dashboard-avatar::after {
+            content: '';
+            position: absolute;
+            bottom: 6px;
+            right: 6px;
+            width: 18px;
+            height: 18px;
+            background: #00ff88;
+            border-radius: 50%;
+            border: 3px solid #0c0c19;
+            box-shadow: 0 0 12px rgba(0, 255, 136, 0.5);
+        }
+        
+        .dashboard-avatar.offline::after {
+            background: rgba(255, 255, 255, 0.3);
+            box-shadow: none;
+        }
+        
+        .dashboard-name {
+            font-family: 'Syne', sans-serif;
+            font-size: 1.8em;
+            font-weight: 700;
+            color: #fff;
+            margin: 0 0 6px 0;
+            letter-spacing: -0.5px;
+        }
+        
+        .dashboard-subtitle {
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 0.85em;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        
+        .dashboard-subtitle .node-id {
+            font-family: 'JetBrains Mono', monospace;
+            background: rgba(255, 255, 255, 0.06);
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.9em;
+        }
+        
+        /* Stats Grid */
+        .dashboard-stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 14px;
+            margin-bottom: 28px;
+        }
+        
+        .stat-card {
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 18px;
+            padding: 20px;
+            text-align: center;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-2px);
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.03) 100%);
+            border-color: rgba(255, 255, 255, 0.12);
+        }
+        
+        .stat-card.highlight {
+            background: linear-gradient(135deg, rgba(255, 215, 0, 0.1) 0%, rgba(255, 165, 0, 0.05) 100%);
+            border-color: rgba(255, 215, 0, 0.2);
+        }
+        
+        .stat-card.highlight:hover {
+            border-color: rgba(255, 215, 0, 0.3);
+        }
+        
+        .stat-card-icon {
+            font-size: 1.6em;
+            margin-bottom: 8px;
+            opacity: 0.9;
+        }
+        
+        .stat-card-value {
+            font-family: 'Syne', sans-serif;
+            font-size: 2em;
+            font-weight: 700;
+            color: #fff;
+            line-height: 1;
+            margin-bottom: 6px;
+        }
+        
+        .stat-card.highlight .stat-card-value {
+            background: linear-gradient(135deg, #FFD700, #FFA500);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .stat-card-label {
+            font-size: 0.75em;
+            color: rgba(255, 255, 255, 0.5);
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+        }
+        
+        /* Section Headers */
+        .dashboard-section {
+            margin-bottom: 24px;
+        }
+        
+        .dashboard-section-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+        
+        .dashboard-section-title {
+            font-family: 'Syne', sans-serif;
+            font-size: 0.9em;
+            font-weight: 600;
+            color: rgba(255, 255, 255, 0.9);
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+        
+        .dashboard-section-line {
+            flex: 1;
+            height: 1px;
+            background: linear-gradient(90deg, rgba(255, 255, 255, 0.15), transparent);
+        }
+        
+        /* Network Tree Mini */
+        .network-tree-mini {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 16px;
+            padding: 20px;
+        }
+        
+        .network-node {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.04);
+            border-radius: 12px;
+            margin-bottom: 8px;
+            transition: all 0.3s ease;
+        }
+        
+        .network-node:hover {
+            background: rgba(255, 255, 255, 0.08);
+        }
+        
+        .network-node.parent {
+            border-left: 3px solid rgba(255, 215, 0, 0.5);
+        }
+        
+        .network-node.self {
+            background: rgba(255, 215, 0, 0.1);
+            border: 1px solid rgba(255, 215, 0, 0.2);
+        }
+        
+        .network-node.child {
+            margin-left: 24px;
+            border-left: 3px solid rgba(0, 255, 136, 0.4);
+        }
+        
+        .network-node-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.15);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 14px;
+            color: #fff;
+            font-family: 'Syne', sans-serif;
+        }
+        
+        .network-node.self .network-node-avatar {
+            background: linear-gradient(135deg, #FFD700, #FFA500);
+            color: #000;
+        }
+        
+        .network-node-info {
+            flex: 1;
+        }
+        
+        .network-node-name {
+            font-weight: 600;
+            color: #fff;
+            font-size: 0.95em;
+        }
+        
+        .network-node-role {
+            font-size: 0.75em;
+            color: rgba(255, 255, 255, 0.5);
+        }
+        
+        .network-node-status {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.2);
+        }
+        
+        .network-node-status.online {
+            background: #00ff88;
+            box-shadow: 0 0 8px rgba(0, 255, 136, 0.5);
+        }
+        
+        /* Activity Timeline */
+        .activity-timeline {
+            position: relative;
+        }
+        
+        .activity-timeline::before {
+            content: '';
+            position: absolute;
+            left: 15px;
+            top: 20px;
+            bottom: 20px;
+            width: 2px;
+            background: linear-gradient(180deg, rgba(255, 215, 0, 0.3), rgba(255, 255, 255, 0.1), transparent);
+        }
+        
+        .activity-item {
+            display: flex;
+            gap: 16px;
+            padding: 12px 0;
+            position: relative;
+        }
+        
+        .activity-dot {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.08);
+            border: 2px solid rgba(255, 255, 255, 0.15);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            flex-shrink: 0;
+            z-index: 1;
+        }
+        
+        .activity-item:first-child .activity-dot {
+            background: rgba(255, 215, 0, 0.2);
+            border-color: rgba(255, 215, 0, 0.4);
+        }
+        
+        .activity-content {
+            flex: 1;
+            padding-top: 4px;
+        }
+        
+        .activity-title {
+            color: #fff;
+            font-size: 0.9em;
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+        
+        .activity-time {
+            font-size: 0.75em;
+            color: rgba(255, 255, 255, 0.4);
+        }
+        
+        /* Blockchain Info */
+        .blockchain-info {
+            background: linear-gradient(135deg, rgba(100, 100, 255, 0.08) 0%, rgba(100, 100, 255, 0.02) 100%);
+            border: 1px solid rgba(100, 100, 255, 0.15);
+            border-radius: 16px;
+            padding: 20px;
+        }
+        
+        .blockchain-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        
+        .blockchain-row:last-child {
+            border-bottom: none;
+            padding-bottom: 0;
+        }
+        
+        .blockchain-label {
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 0.85em;
+        }
+        
+        .blockchain-value {
+            color: #fff;
+            font-weight: 600;
+            font-family: 'JetBrains Mono', 'Outfit', monospace;
+            font-size: 0.9em;
+        }
+        
+        .blockchain-value.hash {
+            font-size: 0.75em;
+            color: rgba(100, 180, 255, 0.9);
+        }
+        
+        /* Dashboard Actions */
+        .dashboard-actions {
+            display: flex;
+            gap: 12px;
+            margin-top: 24px;
+            padding-top: 24px;
+            border-top: 1px solid rgba(255, 255, 255, 0.06);
+        }
+        
+        .dashboard-btn {
+            flex: 1;
+            padding: 14px 20px;
+            border-radius: 12px;
+            font-family: 'Outfit', sans-serif;
+            font-size: 0.9em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        
+        .dashboard-btn.primary {
+            background: linear-gradient(135deg, #FFD700, #FFA500);
+            border: none;
+            color: #000;
+        }
+        
+        .dashboard-btn.primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(255, 215, 0, 0.3);
+        }
+        
+        .dashboard-btn.secondary {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: #fff;
+        }
+        
+        .dashboard-btn.secondary:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+        
+        /* Empty State */
+        .dashboard-empty {
+            text-align: center;
+            padding: 40px 20px;
+            color: rgba(255, 255, 255, 0.5);
+        }
+        
+        .dashboard-empty-icon {
+            font-size: 3em;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+        
+        .dashboard-empty-title {
+            font-family: 'Syne', sans-serif;
+            font-size: 1.2em;
+            color: rgba(255, 255, 255, 0.7);
+            margin-bottom: 8px;
+        }
+        
+        /* Soulbound Tokens */
+        .soulbound-grid {
+            display: grid;
+            gap: 12px;
+        }
+        
+        .soulbound-token {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 14px 16px;
+            background: linear-gradient(135deg, rgba(147, 51, 234, 0.15), rgba(79, 70, 229, 0.1));
+            border: 1px solid rgba(147, 51, 234, 0.25);
+            border-radius: 12px;
+            transition: all 0.3s ease;
+        }
+        
+        .soulbound-token:hover {
+            transform: translateX(4px);
+            border-color: rgba(147, 51, 234, 0.4);
+        }
+        
+        .soulbound-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 10px;
+            background: linear-gradient(135deg, #9333EA, #4F46E5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.4em;
+            flex-shrink: 0;
+        }
+        
+        .soulbound-info {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .soulbound-name {
+            font-weight: 600;
+            font-size: 0.95em;
+            color: #fff;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .soulbound-issuer {
+            font-size: 0.8em;
+            color: rgba(255, 255, 255, 0.5);
+            margin-top: 2px;
+        }
+        
+        .soulbound-badge {
+            font-size: 0.7em;
+            padding: 4px 8px;
+            border-radius: 20px;
+            background: rgba(147, 51, 234, 0.3);
+            color: rgba(200, 150, 255, 1);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        /* Governance Proposals */
+        .proposals-list {
+            display: grid;
+            gap: 12px;
+        }
+        
+        .proposal-card {
+            padding: 16px;
+            background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(16, 185, 129, 0.05));
+            border: 1px solid rgba(34, 197, 94, 0.2);
+            border-radius: 12px;
+            transition: all 0.3s ease;
+        }
+        
+        .proposal-card:hover {
+            border-color: rgba(34, 197, 94, 0.35);
+        }
+        
+        .proposal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+        
+        .proposal-id {
+            font-family: 'Syne', sans-serif;
+            font-weight: 600;
+            color: rgba(34, 197, 94, 0.9);
+            font-size: 0.85em;
+        }
+        
+        .proposal-status {
+            font-size: 0.7em;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .proposal-status.active {
+            background: rgba(34, 197, 94, 0.25);
+            color: #22C55E;
+        }
+        
+        .proposal-status.ended {
+            background: rgba(156, 163, 175, 0.2);
+            color: #9CA3AF;
+        }
+        
+        .proposal-description {
+            font-size: 0.9em;
+            color: rgba(255, 255, 255, 0.8);
+            line-height: 1.4;
+            margin-bottom: 12px;
+        }
+        
+        .proposal-meta {
+            display: flex;
+            gap: 16px;
+            font-size: 0.8em;
+            color: rgba(255, 255, 255, 0.5);
+        }
+        
+        .proposal-meta span {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        
+        /* Social Recovery / Guardians */
+        .guardians-container {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 16px;
+            padding: 16px;
+        }
+        
+        .guardians-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 14px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        
+        .guardians-threshold {
+            font-size: 0.85em;
+            color: rgba(255, 215, 0, 0.9);
+            font-weight: 600;
+        }
+        
+        .guardians-count {
+            font-size: 0.8em;
+            color: rgba(255, 255, 255, 0.5);
+        }
+        
+        .guardians-list {
+            display: grid;
+            gap: 8px;
+        }
+        
+        .guardian-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 14px;
+            background: rgba(255, 215, 0, 0.05);
+            border: 1px solid rgba(255, 215, 0, 0.1);
+            border-radius: 10px;
+        }
+        
+        .guardian-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            background: linear-gradient(135deg, rgba(255, 215, 0, 0.2), rgba(255, 165, 0, 0.15));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1em;
+        }
+        
+        .guardian-address {
+            flex: 1;
+            font-family: monospace;
+            font-size: 0.8em;
+            color: rgba(255, 255, 255, 0.7);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .setup-recovery-btn {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, rgba(255, 215, 0, 0.15), rgba(255, 165, 0, 0.1));
+            border: 1px dashed rgba(255, 215, 0, 0.3);
+            border-radius: 12px;
+            color: rgba(255, 215, 0, 0.9);
+            font-family: 'Outfit', sans-serif;
+            font-size: 0.9em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        
+        .setup-recovery-btn:hover {
+            background: linear-gradient(135deg, rgba(255, 215, 0, 0.2), rgba(255, 165, 0, 0.15));
+            border-color: rgba(255, 215, 0, 0.5);
+        }
+        
+        /* Institution Section */
+        .role-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.75em;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .role-badge.root {
+            background: linear-gradient(135deg, rgba(255, 215, 0, 0.25), rgba(255, 165, 0, 0.2));
+            color: #FFD700;
+            border: 1px solid rgba(255, 215, 0, 0.4);
+        }
+        
+        .role-badge.institution {
+            background: linear-gradient(135deg, rgba(147, 51, 234, 0.2), rgba(79, 70, 229, 0.15));
+            color: #A78BFA;
+            border: 1px solid rgba(147, 51, 234, 0.3);
+        }
+        
+        .role-badge.user {
+            background: rgba(255, 255, 255, 0.08);
+            color: rgba(255, 255, 255, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+        }
+        
+        .institution-info {
+            background: linear-gradient(135deg, rgba(147, 51, 234, 0.1), rgba(79, 70, 229, 0.05));
+            border: 1px solid rgba(147, 51, 234, 0.2);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 12px;
+        }
+        
+        .institution-name {
+            font-weight: 600;
+            font-size: 1em;
+            color: #fff;
+            margin-bottom: 4px;
+        }
+        
+        .institution-category {
+            font-size: 0.8em;
+            color: rgba(167, 139, 250, 0.9);
+        }
+        
+        .register-institution-btn {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, rgba(147, 51, 234, 0.15), rgba(79, 70, 229, 0.1));
+            border: 1px dashed rgba(147, 51, 234, 0.4);
+            border-radius: 12px;
+            color: rgba(167, 139, 250, 1);
+            font-family: 'Outfit', sans-serif;
+            font-size: 0.9em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        
+        .register-institution-btn:hover {
+            background: linear-gradient(135deg, rgba(147, 51, 234, 0.25), rgba(79, 70, 229, 0.15));
+            border-color: rgba(147, 51, 234, 0.6);
+        }
+        
+        /* Admin Panel - Pending Institutions */
+        .admin-section {
+            background: linear-gradient(135deg, rgba(255, 215, 0, 0.08), rgba(255, 165, 0, 0.04));
+            border: 1px solid rgba(255, 215, 0, 0.2);
+            border-radius: 16px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+        
+        .admin-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 14px;
+            font-family: 'Syne', sans-serif;
+            font-size: 0.85em;
+            font-weight: 600;
+            color: rgba(255, 215, 0, 0.9);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .pending-institution {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+            padding: 14px;
+            margin-bottom: 10px;
+        }
+        
+        .pending-institution:last-child {
+            margin-bottom: 0;
+        }
+        
+        .pending-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 8px;
+        }
+        
+        .pending-name {
+            font-weight: 600;
+            color: #fff;
+        }
+        
+        .pending-category {
+            font-size: 0.75em;
+            padding: 3px 8px;
+            border-radius: 12px;
+            background: rgba(147, 51, 234, 0.2);
+            color: rgba(167, 139, 250, 0.9);
+        }
+        
+        .pending-id {
+            font-size: 0.75em;
+            color: rgba(255, 255, 255, 0.4);
+            font-family: monospace;
+            margin-bottom: 10px;
+        }
+        
+        .pending-actions {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .pending-actions button {
+            flex: 1;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-family: 'Outfit', sans-serif;
+            font-size: 0.8em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .approve-btn {
+            background: linear-gradient(135deg, rgba(34, 197, 94, 0.2), rgba(16, 185, 129, 0.15));
+            border: 1px solid rgba(34, 197, 94, 0.4);
+            color: #22C55E;
+        }
+        
+        .approve-btn:hover {
+            background: linear-gradient(135deg, rgba(34, 197, 94, 0.3), rgba(16, 185, 129, 0.2));
+        }
+        
+        .reject-btn {
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #EF4444;
+        }
+        
+        .reject-btn:hover {
+            background: rgba(239, 68, 68, 0.25);
+        }
+        
+        /* Responsive */
+        @media (max-width: 480px) {
+            #dashboard-panel {
+                width: 100%;
+                right: -100%;
+            }
+            
+            .dashboard-stats {
+                grid-template-columns: 1fr 1fr;
+                gap: 10px;
+            }
+            
+            .stat-card {
+                padding: 16px;
+            }
+            
+            .stat-card-value {
+                font-size: 1.6em;
+            }
+        }
     </style>
 </head>
 
@@ -1079,8 +1999,224 @@
         </div>
     </div>
 
+    <!-- User Dashboard Panel -->
+    <div id="dashboard-panel">
+        <button class="dashboard-close">&times;</button>
+        <div class="dashboard-content">
+            <!-- Profile Header -->
+            <div class="dashboard-profile">
+                <div class="dashboard-avatar" id="dash-avatar">?</div>
+                <h2 class="dashboard-name" id="dash-name">Your Name</h2>
+                <div class="dashboard-subtitle">
+                    <span id="dash-joined">Joined today</span>
+                    <span class="node-id" id="dash-node-id">node_xxx</span>
+                </div>
+            </div>
+            
+            <!-- Stats Grid -->
+            <div class="dashboard-stats">
+                <div class="stat-card highlight">
+                    <div class="stat-card-icon">👥</div>
+                    <div class="stat-card-value" id="dash-recruits">0</div>
+                    <div class="stat-card-label">Direct Recruits</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-card-icon">🌐</div>
+                    <div class="stat-card-value" id="dash-network">0</div>
+                    <div class="stat-card-label">Network Reach</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-card-icon">📅</div>
+                    <div class="stat-card-value" id="dash-days">0</div>
+                    <div class="stat-card-label">Days Active</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-card-icon">🏆</div>
+                    <div class="stat-card-value" id="dash-rank">#1</div>
+                    <div class="stat-card-label">Network Rank</div>
+                </div>
+            </div>
+            
+            <!-- Network Connections -->
+            <div class="dashboard-section">
+                <div class="dashboard-section-header">
+                    <span class="dashboard-section-title">Your Network</span>
+                    <div class="dashboard-section-line"></div>
+                </div>
+                <div class="network-tree-mini" id="dash-network-tree">
+                    <!-- Parent Node (if any) -->
+                    <div class="network-node parent" id="dash-parent-node" style="display: none;">
+                        <div class="network-node-avatar" id="dash-parent-avatar">?</div>
+                        <div class="network-node-info">
+                            <div class="network-node-name" id="dash-parent-name">Parent</div>
+                            <div class="network-node-role">Your Recruiter</div>
+                        </div>
+                        <div class="network-node-status" id="dash-parent-status"></div>
+                    </div>
+                    
+                    <!-- Self (You) -->
+                    <div class="network-node self">
+                        <div class="network-node-avatar" id="dash-self-avatar">?</div>
+                        <div class="network-node-info">
+                            <div class="network-node-name" id="dash-self-name">You</div>
+                            <div class="network-node-role">That's you!</div>
+                        </div>
+                        <div class="network-node-status online"></div>
+                    </div>
+                    
+                    <!-- Children preview -->
+                    <div id="dash-children-container"></div>
+                </div>
+            </div>
+            
+            <!-- Activity Timeline -->
+            <div class="dashboard-section">
+                <div class="dashboard-section-header">
+                    <span class="dashboard-section-title">Recent Activity</span>
+                    <div class="dashboard-section-line"></div>
+                </div>
+                <div class="activity-timeline" id="dash-activity">
+                    <div class="activity-item">
+                        <div class="activity-dot">🎉</div>
+                        <div class="activity-content">
+                            <div class="activity-title">Joined Srishti Network</div>
+                            <div class="activity-time" id="dash-join-time">Just now</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Blockchain Info -->
+            <div class="dashboard-section">
+                <div class="dashboard-section-header">
+                    <span class="dashboard-section-title">Blockchain Info</span>
+                    <div class="dashboard-section-line"></div>
+                </div>
+                <div class="blockchain-info">
+                    <div class="blockchain-row">
+                        <span class="blockchain-label">Chain Length</span>
+                        <span class="blockchain-value" id="dash-chain-length">0 blocks</span>
+                    </div>
+                    <div class="blockchain-row">
+                        <span class="blockchain-label">Your Block</span>
+                        <span class="blockchain-value" id="dash-your-block">#0</span>
+                    </div>
+                    <div class="blockchain-row">
+                        <span class="blockchain-label">Genesis Hash</span>
+                        <span class="blockchain-value hash" id="dash-genesis-hash">-</span>
+                    </div>
+                    <div class="blockchain-row">
+                        <span class="blockchain-label">Network Status</span>
+                        <span class="blockchain-value" id="dash-network-status">🟢 Online</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Your Role & Institution Status -->
+            <div class="dashboard-section" id="dash-role-section">
+                <div class="dashboard-section-header">
+                    <span class="dashboard-section-title">🏛️ Your Role</span>
+                    <div class="dashboard-section-line"></div>
+                </div>
+                <div id="dash-role-container">
+                    <!-- Will be populated by JS -->
+                    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+                        <span class="role-badge user" id="dash-role-badge">👤 USER</span>
+                    </div>
+                    <button class="register-institution-btn" id="register-institution-btn">
+                        <span>🏫</span>
+                        <span>Register as Institution</span>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Admin Panel (Only visible for ROOT/GOVERNANCE_ADMIN) -->
+            <div class="dashboard-section admin-section" id="dash-admin-section" style="display: none;">
+                <div class="admin-header">
+                    <span>👑</span>
+                    <span>Admin Panel</span>
+                </div>
+                <div id="dash-pending-institutions">
+                    <div style="color: rgba(255,255,255,0.5); font-size: 0.85em; text-align: center; padding: 16px;">
+                        No pending institution requests
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Soulbound Tokens (Credentials) -->
+            <div class="dashboard-section" id="dash-soulbound-section">
+                <div class="dashboard-section-header">
+                    <span class="dashboard-section-title">🎓 Soulbound Tokens</span>
+                    <div class="dashboard-section-line"></div>
+                </div>
+                <div class="soulbound-grid" id="dash-soulbound-list">
+                    <div class="dashboard-empty" style="padding: 24px;">
+                        <div class="dashboard-empty-icon">🎓</div>
+                        <div class="dashboard-empty-title">No credentials yet</div>
+                        <div style="color: rgba(255,255,255,0.4); font-size: 0.85em;">Non-transferable tokens will appear here</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Governance Proposals -->
+            <div class="dashboard-section" id="dash-proposals-section">
+                <div class="dashboard-section-header">
+                    <span class="dashboard-section-title">🗳️ Active Proposals</span>
+                    <div class="dashboard-section-line"></div>
+                </div>
+                <div class="proposals-list" id="dash-proposals-list">
+                    <div class="dashboard-empty" style="padding: 24px;">
+                        <div class="dashboard-empty-icon">🗳️</div>
+                        <div class="dashboard-empty-title">No active proposals</div>
+                        <div style="color: rgba(255,255,255,0.4); font-size: 0.85em;">Governance proposals will appear here</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Social Recovery / Guardians -->
+            <div class="dashboard-section" id="dash-recovery-section">
+                <div class="dashboard-section-header">
+                    <span class="dashboard-section-title">🛡️ Social Recovery</span>
+                    <div class="dashboard-section-line"></div>
+                </div>
+                <div id="dash-guardians-container">
+                    <button class="setup-recovery-btn" id="setup-recovery-btn">
+                        <span>🔐</span>
+                        <span>Set Up Guardian Recovery</span>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Actions -->
+            <div class="dashboard-actions">
+                <button class="dashboard-btn secondary" id="dash-share-btn">
+                    <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path>
+                        <polyline points="16 6 12 2 8 6"></polyline>
+                        <line x1="12" y1="2" x2="12" y2="15"></line>
+                    </svg>
+                    Share Invite
+                </button>
+                <button class="dashboard-btn primary" id="dash-qr-btn">
+                    <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="5" height="5"></rect>
+                        <rect x="16" y="3" width="5" height="5"></rect>
+                        <rect x="3" y="16" width="5" height="5"></rect>
+                    </svg>
+                    Show QR
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Floating Action Buttons -->
     <div class="fab-container">
+        <button class="fab" id="dashboard-fab" title="Your Dashboard">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                <circle cx="12" cy="7" r="4"></circle>
+            </svg>
+        </button>
         <button class="fab" id="scan-fab" title="Scan QR Code">
             <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
@@ -1704,6 +2840,562 @@
         }
         
         // ============================================
+        // Dashboard Functions
+        // ============================================
+        
+        function showDashboard() {
+            if (!currentUser) {
+                alert('Please join the network first to view your dashboard.');
+                return;
+            }
+            
+            const panel = document.getElementById('dashboard-panel');
+            panel.classList.add('open');
+            updateDashboard();
+        }
+        
+        function hideDashboard() {
+            document.getElementById('dashboard-panel').classList.remove('open');
+        }
+        
+        function updateDashboard() {
+            if (!currentUser) return;
+            
+            const userData = nodesData[currentUser.id] || {};
+            const nodes = Object.values(nodesData).filter(n => !n.isVirtualRoot);
+            
+            // Profile section
+            document.getElementById('dash-avatar').textContent = (userData.name || currentUser.name || '?')[0].toUpperCase();
+            document.getElementById('dash-name').textContent = userData.name || currentUser.name || 'Your Name';
+            document.getElementById('dash-node-id').textContent = currentUser.id.substring(0, 12) + '...';
+            
+            // Calculate join date
+            const joinDate = userData.createdAt ? new Date(userData.createdAt) : new Date();
+            document.getElementById('dash-joined').textContent = formatJoinDate(joinDate);
+            
+            // Stats
+            const directRecruits = userData.childCount || 0;
+            const networkReach = calculateNetworkReach(currentUser.id);
+            const daysActive = Math.max(1, Math.floor((Date.now() - joinDate.getTime()) / (1000 * 60 * 60 * 24)));
+            const rank = calculateNetworkRank(currentUser.id);
+            
+            document.getElementById('dash-recruits').textContent = directRecruits;
+            document.getElementById('dash-network').textContent = networkReach;
+            document.getElementById('dash-days').textContent = daysActive;
+            document.getElementById('dash-rank').textContent = '#' + rank;
+            
+            // Network tree - Self
+            document.getElementById('dash-self-avatar').textContent = (userData.name || currentUser.name || '?')[0].toUpperCase();
+            document.getElementById('dash-self-name').textContent = userData.name || currentUser.name || 'You';
+            
+            // Parent node
+            const parentNode = document.getElementById('dash-parent-node');
+            if (userData.parentId && nodesData[userData.parentId]) {
+                const parent = nodesData[userData.parentId];
+                parentNode.style.display = 'flex';
+                document.getElementById('dash-parent-avatar').textContent = (parent.name || '?')[0].toUpperCase();
+                document.getElementById('dash-parent-name').textContent = parent.name || 'Unknown';
+                const parentStatus = document.getElementById('dash-parent-status');
+                parentStatus.className = 'network-node-status' + (parent.isOnline ? ' online' : '');
+            } else {
+                parentNode.style.display = 'none';
+            }
+            
+            // Children nodes
+            const childrenContainer = document.getElementById('dash-children-container');
+            childrenContainer.innerHTML = '';
+            const children = nodes.filter(n => n.parentId === currentUser.id);
+            
+            if (children.length > 0) {
+                const maxShow = Math.min(children.length, 3);
+                for (let i = 0; i < maxShow; i++) {
+                    const child = children[i];
+                    const childNode = document.createElement('div');
+                    childNode.className = 'network-node child';
+                    childNode.innerHTML = `
+                        <div class="network-node-avatar">${(child.name || '?')[0].toUpperCase()}</div>
+                        <div class="network-node-info">
+                            <div class="network-node-name">${child.name || 'Unknown'}</div>
+                            <div class="network-node-role">Your Recruit</div>
+                        </div>
+                        <div class="network-node-status${child.isOnline ? ' online' : ''}"></div>
+                    `;
+                    childrenContainer.appendChild(childNode);
+                }
+                
+                if (children.length > 3) {
+                    const moreNode = document.createElement('div');
+                    moreNode.className = 'network-node child';
+                    moreNode.style.justifyContent = 'center';
+                    moreNode.style.color = 'rgba(255, 255, 255, 0.5)';
+                    moreNode.style.fontSize = '0.85em';
+                    moreNode.textContent = `+ ${children.length - 3} more recruits`;
+                    childrenContainer.appendChild(moreNode);
+                }
+            }
+            
+            // Activity timeline
+            updateActivityTimeline();
+            
+            // Blockchain info
+            updateBlockchainInfo();
+            
+            // Role & Institution section
+            updateRoleSection();
+            
+            // New sections: Soulbound Tokens, Proposals, Guardians
+            updateSoulboundTokens();
+            updateProposals();
+            updateGuardians();
+        }
+        
+        // Update Soulbound Tokens section
+        function updateSoulboundTokens() {
+            if (!window.SrishtiApp?.chain || !currentUser) return;
+            
+            const container = document.getElementById('dash-soulbound-list');
+            const tokens = window.SrishtiApp.chain.getSoulboundTokens(currentUser.id);
+            
+            if (tokens.length === 0) {
+                container.innerHTML = `
+                    <div class="dashboard-empty" style="padding: 24px;">
+                        <div class="dashboard-empty-icon">🎓</div>
+                        <div class="dashboard-empty-title">No credentials yet</div>
+                        <div style="color: rgba(255,255,255,0.4); font-size: 0.85em;">Non-transferable tokens will appear here</div>
+                    </div>
+                `;
+                return;
+            }
+            
+            container.innerHTML = tokens.map(token => `
+                <div class="soulbound-token">
+                    <div class="soulbound-icon">🎓</div>
+                    <div class="soulbound-info">
+                        <div class="soulbound-name">${escapeHtml(token.achievementId || 'Credential')}</div>
+                        <div class="soulbound-issuer">Issued by ${shortenAddress(token.issuer)}</div>
+                    </div>
+                    <div class="soulbound-badge">${token.revocable ? 'Revocable' : 'Permanent'}</div>
+                </div>
+            `).join('');
+        }
+        
+        // Update Governance Proposals section
+        function updateProposals() {
+            if (!window.SrishtiApp?.chain) return;
+            
+            const container = document.getElementById('dash-proposals-list');
+            const proposals = window.SrishtiApp.chain.getActiveProposals();
+            const proposalArray = Object.values(proposals);
+            
+            if (proposalArray.length === 0) {
+                container.innerHTML = `
+                    <div class="dashboard-empty" style="padding: 24px;">
+                        <div class="dashboard-empty-icon">🗳️</div>
+                        <div class="dashboard-empty-title">No active proposals</div>
+                        <div style="color: rgba(255,255,255,0.4); font-size: 0.85em;">Governance proposals will appear here</div>
+                    </div>
+                `;
+                return;
+            }
+            
+            container.innerHTML = proposalArray.slice(0, 3).map(proposal => `
+                <div class="proposal-card">
+                    <div class="proposal-header">
+                        <span class="proposal-id">${escapeHtml(proposal.proposalId)}</span>
+                        <span class="proposal-status ${proposal.status === 'ACTIVE' ? 'active' : 'ended'}">${proposal.status}</span>
+                    </div>
+                    <div class="proposal-description">${escapeHtml(proposal.description || 'No description')}</div>
+                    <div class="proposal-meta">
+                        <span>📊 Quorum: ${proposal.quorumThreshold}</span>
+                        <span>⏱️ ${proposal.votingPeriodBlocks} blocks</span>
+                    </div>
+                </div>
+            `).join('');
+            
+            if (proposalArray.length > 3) {
+                container.innerHTML += `<div style="text-align: center; color: rgba(255,255,255,0.5); font-size: 0.85em; padding: 8px;">+ ${proposalArray.length - 3} more proposals</div>`;
+            }
+        }
+        
+        // Update Social Recovery / Guardians section
+        function updateGuardians() {
+            if (!window.SrishtiApp?.chain || !currentUser) return;
+            
+            const container = document.getElementById('dash-guardians-container');
+            const accountState = window.SrishtiApp.chain.getAccountState(currentUser.id);
+            
+            if (!accountState || !accountState.guardians || accountState.guardians.length === 0) {
+                container.innerHTML = `
+                    <button class="setup-recovery-btn" id="setup-recovery-btn">
+                        <span>🔐</span>
+                        <span>Set Up Guardian Recovery</span>
+                    </button>
+                `;
+                // Re-attach event listener
+                document.getElementById('setup-recovery-btn')?.addEventListener('click', showSetupRecoveryModal);
+                return;
+            }
+            
+            const guardians = accountState.guardians;
+            const threshold = accountState.recoveryThreshold;
+            
+            container.innerHTML = `
+                <div class="guardians-container">
+                    <div class="guardians-header">
+                        <span class="guardians-threshold">Threshold: ${threshold} of ${guardians.length}</span>
+                        <span class="guardians-count">${guardians.length} guardians</span>
+                    </div>
+                    <div class="guardians-list">
+                        ${guardians.map((g, i) => `
+                            <div class="guardian-item">
+                                <div class="guardian-icon">🛡️</div>
+                                <div class="guardian-address">${shortenAddress(g)}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Update Role & Institution section
+        function updateRoleSection() {
+            if (!window.SrishtiApp || !currentUser) return;
+            
+            const container = document.getElementById('dash-role-container');
+            const badgeEl = document.getElementById('dash-role-badge');
+            const adminSection = document.getElementById('dash-admin-section');
+            
+            const myRole = window.SrishtiApp.getMyRole();
+            const isInstitution = window.SrishtiApp.isInstitution();
+            const institutions = window.SrishtiApp.getInstitutions();
+            const myInstitution = institutions.verified[currentUser.id];
+            const myPending = institutions.pending[currentUser.id];
+            
+            // Update role badge
+            let badgeClass = 'user';
+            let badgeText = '👤 USER';
+            
+            if (myRole === 'ROOT') {
+                badgeClass = 'root';
+                badgeText = '👑 ROOT';
+            } else if (myRole === 'GOVERNANCE_ADMIN') {
+                badgeClass = 'root';
+                badgeText = '⚖️ GOVERNANCE';
+            } else if (isInstitution) {
+                badgeClass = 'institution';
+                badgeText = '🏛️ INSTITUTION';
+            }
+            
+            // Build container HTML
+            let html = `
+                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+                    <span class="role-badge ${badgeClass}">${badgeText}</span>
+                </div>
+            `;
+            
+            if (isInstitution && myInstitution) {
+                html += `
+                    <div class="institution-info">
+                        <div class="institution-name">${escapeHtml(myInstitution.name)}</div>
+                        <div class="institution-category">${myInstitution.category} • Verified ✓</div>
+                    </div>
+                    <div style="color: rgba(255,255,255,0.5); font-size: 0.85em; text-align: center;">
+                        You can issue soulbound tokens to users
+                    </div>
+                `;
+            } else if (myPending) {
+                html += `
+                    <div class="institution-info" style="background: linear-gradient(135deg, rgba(251, 191, 36, 0.1), rgba(245, 158, 11, 0.05)); border-color: rgba(251, 191, 36, 0.2);">
+                        <div class="institution-name">${escapeHtml(myPending.name)}</div>
+                        <div class="institution-category" style="color: rgba(251, 191, 36, 0.9);">${myPending.category} • Pending Verification ⏳</div>
+                    </div>
+                `;
+            } else if (myRole !== 'ROOT' && myRole !== 'GOVERNANCE_ADMIN') {
+                html += `
+                    <button class="register-institution-btn" id="register-institution-btn">
+                        <span>🏫</span>
+                        <span>Register as Institution</span>
+                    </button>
+                `;
+            }
+            
+            container.innerHTML = html;
+            
+            // Re-attach event listener for register button
+            document.getElementById('register-institution-btn')?.addEventListener('click', showRegisterInstitutionModal);
+            
+            // Show/hide admin section
+            if (myRole === 'ROOT' || myRole === 'GOVERNANCE_ADMIN') {
+                adminSection.style.display = 'block';
+                updateAdminSection();
+            } else {
+                adminSection.style.display = 'none';
+            }
+        }
+        
+        // Update Admin Section (pending institutions)
+        function updateAdminSection() {
+            if (!window.SrishtiApp) return;
+            
+            const container = document.getElementById('dash-pending-institutions');
+            const pending = window.SrishtiApp.getPendingInstitutions();
+            const pendingList = Object.entries(pending).filter(([_, p]) => p.status === 'PENDING');
+            
+            if (pendingList.length === 0) {
+                container.innerHTML = `
+                    <div style="color: rgba(255,255,255,0.5); font-size: 0.85em; text-align: center; padding: 16px;">
+                        No pending institution requests
+                    </div>
+                `;
+                return;
+            }
+            
+            container.innerHTML = pendingList.map(([nodeId, inst]) => `
+                <div class="pending-institution" data-node-id="${nodeId}">
+                    <div class="pending-header">
+                        <span class="pending-name">${escapeHtml(inst.name)}</span>
+                        <span class="pending-category">${inst.category}</span>
+                    </div>
+                    <div class="pending-id">${shortenAddress(nodeId)}</div>
+                    <div class="pending-actions">
+                        <button class="approve-btn" onclick="approveInstitution('${nodeId}')">✓ Approve</button>
+                        <button class="reject-btn" onclick="rejectInstitution('${nodeId}')">✗ Reject</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        // Approve institution
+        async function approveInstitution(nodeId) {
+            try {
+                await window.SrishtiApp.verifyInstitution(nodeId, true, 'Approved by admin');
+                updateRoleSection();
+                alert('Institution approved successfully!');
+            } catch (error) {
+                console.error('Failed to approve:', error);
+                alert('Failed to approve: ' + error.message);
+            }
+        }
+        
+        // Reject institution
+        async function rejectInstitution(nodeId) {
+            const reason = prompt('Reason for rejection (optional):');
+            try {
+                await window.SrishtiApp.verifyInstitution(nodeId, false, reason || 'Rejected by admin');
+                updateRoleSection();
+                alert('Institution rejected.');
+            } catch (error) {
+                console.error('Failed to reject:', error);
+                alert('Failed to reject: ' + error.message);
+            }
+        }
+        
+        // Show Register Institution Modal
+        function showRegisterInstitutionModal() {
+            const categories = ['EDUCATION', 'CERTIFICATION', 'GOVERNMENT', 'EMPLOYER', 'HEALTHCARE', 'COMMUNITY'];
+            
+            const name = prompt('Institution Name:');
+            if (!name) return;
+            
+            const category = prompt(`Category (${categories.join(', ')}):`);
+            if (!category || !categories.includes(category.toUpperCase())) {
+                alert(`Invalid category. Must be one of: ${categories.join(', ')}`);
+                return;
+            }
+            
+            const description = prompt('Description (optional):') || '';
+            
+            registerAsInstitution(name, category.toUpperCase(), description);
+        }
+        
+        // Register as institution
+        async function registerAsInstitution(name, category, description) {
+            try {
+                await window.SrishtiApp.registerInstitution({
+                    name: name,
+                    category: category,
+                    description: description
+                });
+                updateRoleSection();
+                alert('Registration submitted! Waiting for approval from network administrators.');
+            } catch (error) {
+                console.error('Failed to register:', error);
+                alert('Failed to register: ' + error.message);
+            }
+        }
+        
+        // Helper: Shorten address for display
+        function shortenAddress(address) {
+            if (!address || address.length < 12) return address || 'Unknown';
+            return address.substring(0, 8) + '...' + address.substring(address.length - 6);
+        }
+        
+        // Helper: Escape HTML to prevent XSS
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // Modal for setting up social recovery (placeholder)
+        function showSetupRecoveryModal() {
+            alert('Social Recovery Setup\n\nThis feature allows you to designate trusted guardians who can help recover your account.\n\nComing soon!');
+        }
+        
+        function formatJoinDate(date) {
+            const now = new Date();
+            const diffMs = now - date;
+            const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+            
+            if (diffDays === 0) return 'Joined today';
+            if (diffDays === 1) return 'Joined yesterday';
+            if (diffDays < 7) return `Joined ${diffDays} days ago`;
+            if (diffDays < 30) return `Joined ${Math.floor(diffDays / 7)} weeks ago`;
+            return `Joined ${date.toLocaleDateString()}`;
+        }
+        
+        function calculateNetworkReach(nodeId) {
+            // Calculate total descendants recursively
+            function countDescendants(id) {
+                let count = 0;
+                for (const node of Object.values(nodesData)) {
+                    if (node.parentId === id && !node.isVirtualRoot) {
+                        count += 1 + countDescendants(node.id);
+                    }
+                }
+                return count;
+            }
+            return countDescendants(nodeId);
+        }
+        
+        function calculateNetworkRank(nodeId) {
+            // Rank by total network reach (descendants)
+            const nodes = Object.values(nodesData).filter(n => !n.isVirtualRoot);
+            const rankings = nodes.map(n => ({
+                id: n.id,
+                reach: calculateNetworkReach(n.id)
+            }));
+            rankings.sort((a, b) => b.reach - a.reach);
+            
+            const rank = rankings.findIndex(r => r.id === nodeId) + 1;
+            return rank || nodes.length;
+        }
+        
+        function updateActivityTimeline() {
+            const timeline = document.getElementById('dash-activity');
+            const events = [];
+            
+            // Add join event
+            const userData = nodesData[currentUser.id] || {};
+            if (userData.createdAt) {
+                events.push({
+                    icon: '🎉',
+                    title: 'Joined Srishti Network',
+                    time: userData.createdAt
+                });
+            }
+            
+            // Add recruits as events
+            const children = Object.values(nodesData).filter(n => n.parentId === currentUser.id && !n.isVirtualRoot);
+            children.forEach(child => {
+                events.push({
+                    icon: '👤',
+                    title: `Recruited ${child.name || 'a node'}`,
+                    time: child.createdAt || Date.now()
+                });
+            });
+            
+            // Sort by time descending
+            events.sort((a, b) => b.time - a.time);
+            
+            // Render timeline
+            timeline.innerHTML = '';
+            const maxEvents = Math.min(events.length, 5);
+            
+            if (maxEvents === 0) {
+                timeline.innerHTML = `
+                    <div class="activity-item">
+                        <div class="activity-dot">🎉</div>
+                        <div class="activity-content">
+                            <div class="activity-title">Welcome to Srishti!</div>
+                            <div class="activity-time">Start recruiting to grow your network</div>
+                        </div>
+                    </div>
+                `;
+                return;
+            }
+            
+            for (let i = 0; i < maxEvents; i++) {
+                const event = events[i];
+                const item = document.createElement('div');
+                item.className = 'activity-item';
+                item.innerHTML = `
+                    <div class="activity-dot">${event.icon}</div>
+                    <div class="activity-content">
+                        <div class="activity-title">${event.title}</div>
+                        <div class="activity-time">${formatTimeAgo(event.time)}</div>
+                    </div>
+                `;
+                timeline.appendChild(item);
+            }
+        }
+        
+        function formatTimeAgo(timestamp) {
+            const diff = Date.now() - timestamp;
+            const minutes = Math.floor(diff / 60000);
+            const hours = Math.floor(diff / 3600000);
+            const days = Math.floor(diff / 86400000);
+            
+            if (minutes < 1) return 'Just now';
+            if (minutes < 60) return `${minutes} min ago`;
+            if (hours < 24) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+            if (days < 7) return `${days} day${days > 1 ? 's' : ''} ago`;
+            return new Date(timestamp).toLocaleDateString();
+        }
+        
+        function updateBlockchainInfo() {
+            if (!window.SrishtiApp || !window.SrishtiApp.chain) return;
+            
+            const chain = window.SrishtiApp.chain;
+            const chainLength = chain.getLength();
+            
+            document.getElementById('dash-chain-length').textContent = `${chainLength} block${chainLength !== 1 ? 's' : ''}`;
+            
+            // Find user's block
+            const userBlockIndex = findUserBlockIndex(currentUser.id);
+            document.getElementById('dash-your-block').textContent = userBlockIndex !== -1 ? `#${userBlockIndex}` : '-';
+            
+            // Genesis hash
+            const genesis = chain.getBlock(0);
+            if (genesis && genesis.hash) {
+                document.getElementById('dash-genesis-hash').textContent = genesis.hash.substring(0, 16) + '...';
+            }
+            
+            // Network status
+            const isOnline = window.SrishtiApp.network && window.SrishtiApp.network.signaling;
+            const peerCount = window.SrishtiApp.network ? window.SrishtiApp.network.getPeerCount() : 0;
+            document.getElementById('dash-network-status').textContent = 
+                isOnline ? `🟢 Online (${peerCount} peer${peerCount !== 1 ? 's' : ''})` : '🔴 Offline';
+        }
+        
+        function findUserBlockIndex(nodeId) {
+            if (!window.SrishtiApp || !window.SrishtiApp.chain) return -1;
+            
+            const chain = window.SrishtiApp.chain;
+            for (let i = 0; i < chain.getLength(); i++) {
+                const block = chain.getBlock(i);
+                const events = block.getEvents();
+                for (const event of events) {
+                    if (event.type === 'NODE_JOIN' && event.nodeId === nodeId) {
+                        return i;
+                    }
+                }
+            }
+            return -1;
+        }
+        
+        // ============================================
         // UI Functions
         // ============================================
         
@@ -2266,6 +3958,11 @@
                 
                 // Update glows periodically
                 updateNodeGlows();
+                
+                // Update dashboard if open
+                if (document.getElementById('dashboard-panel').classList.contains('open')) {
+                    updateDashboard();
+                }
             });
             
             // Wait a moment for initial data
@@ -2366,6 +4063,26 @@
         // ============================================
         // Event Listeners
         // ============================================
+        
+        // Dashboard
+        document.getElementById('dashboard-fab').addEventListener('click', showDashboard);
+        document.querySelector('.dashboard-close').addEventListener('click', hideDashboard);
+        document.getElementById('dash-share-btn').addEventListener('click', () => {
+            window.SrishtiQRCode && window.SrishtiQRCode.shareInviteUrl();
+        });
+        document.getElementById('dash-qr-btn').addEventListener('click', () => {
+            hideDashboard();
+            setTimeout(showQRModal, 200);
+        });
+        
+        // Setup recovery button (initial state)
+        document.getElementById('setup-recovery-btn')?.addEventListener('click', showSetupRecoveryModal);
+        
+        // Register institution button (initial state)
+        document.getElementById('register-institution-btn')?.addEventListener('click', showRegisterInstitutionModal);
+        
+        // Your node indicator - click to open dashboard
+        document.getElementById('your-node-indicator').addEventListener('click', showDashboard);
         
         // FAB buttons
         document.getElementById('qr-fab').addEventListener('click', showQRModal);
