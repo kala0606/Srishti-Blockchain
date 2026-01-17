@@ -288,7 +288,20 @@ class QRScanner {
                 
                 if (joinParam) {
                     // Parse blockchain QR code
-                    if (window.SrishtiQRCode) {
+                    // Use the class (SrishtiQRCodeClass) for static methods, not the instance
+                    if (window.SrishtiQRCodeClass) {
+                        const connectionInfo = window.SrishtiQRCodeClass.parseFromUrl(joinParam);
+                        if (connectionInfo && connectionInfo.nodeId) {
+                            setTimeout(() => {
+                                this.close();
+                                if (this.onScanCallback) {
+                                    this.onScanCallback(connectionInfo.nodeId);
+                                }
+                            }, 1000);
+                            return;
+                        }
+                    } else if (window.SrishtiQRCode && typeof window.SrishtiQRCode.parseFromUrl === 'function') {
+                        // Fallback: try instance method if it exists
                         const connectionInfo = window.SrishtiQRCode.parseFromUrl(joinParam);
                         if (connectionInfo && connectionInfo.nodeId) {
                             setTimeout(() => {
@@ -306,7 +319,20 @@ class QRScanner {
             }
             
             // Try to parse as JSON (blockchain QR format)
-            if (window.SrishtiQRCode) {
+            // Use the class (SrishtiQRCodeClass) for static methods, not the instance
+            if (window.SrishtiQRCodeClass) {
+                const connectionInfo = window.SrishtiQRCodeClass.parseFromJSON(decodedText);
+                if (connectionInfo && connectionInfo.nodeId) {
+                    setTimeout(() => {
+                        this.close();
+                        if (this.onScanCallback) {
+                            this.onScanCallback(connectionInfo.nodeId);
+                        }
+                    }, 1000);
+                    return;
+                }
+            } else if (window.SrishtiQRCode && typeof window.SrishtiQRCode.parseFromJSON === 'function') {
+                // Fallback: try instance method if it exists
                 const connectionInfo = window.SrishtiQRCode.parseFromJSON(decodedText);
                 if (connectionInfo && connectionInfo.nodeId) {
                     setTimeout(() => {
