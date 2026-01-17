@@ -841,16 +841,17 @@ class SrishtiApp {
             throw new Error('Chain not initialized');
         }
         
+        // Clear chain state
         await this.chain.clearChain();
         
-        // Clear storage
+        // Clear storage (all blocks)
         if (this.storage) {
-            const blocks = await this.storage.getAllBlocks();
-            for (const block of blocks) {
-                await this.storage.saveBlock(null); // Clear each block
+            try {
+                await this.storage.clear();
+                console.log('✅ Storage cleared');
+            } catch (error) {
+                console.warn('⚠️ Failed to clear storage:', error);
             }
-            // Clear all blocks in one go (better approach)
-            // Note: IndexedDBStore might need a clear method
         }
         
         // Notify adapter
@@ -913,9 +914,29 @@ class SrishtiApp {
             this.adapter.onChainUpdate();
         }
         
-        // Clear node data (if user wants to start fresh)
-        // Optionally clear localStorage node data too
+        // Ask if user wants to clear node data too
+        const clearNodeData = confirm(
+            'Also clear your node identity (localStorage)?\n\n' +
+            'This will remove:\n' +
+            '- Your node ID\n' +
+            '- Your keys\n' +
+            '- You will need to join again\n\n' +
+            'Click Cancel to keep your node identity.'
+        );
+        
+        if (clearNodeData) {
+            localStorage.removeItem('srishti_node_id');
+            localStorage.removeItem('srishti_node_name');
+            localStorage.removeItem('srishti_public_key');
+            localStorage.removeItem('srishti_private_key');
+            this.nodeId = null;
+            this.currentUser = null;
+            this.keyPair = null;
+            console.log('✅ Node identity cleared');
+        }
+        
         console.log('✅ Chain reset complete - new genesis block created');
+        console.log('🔄 Please refresh the page to see the new chain');
         
         return genesisBlock;
     }
