@@ -2575,9 +2575,17 @@
             
             const root = d3.hierarchy(hierarchyData);
             const links = root.links();
-            const nodes = root.descendants();
+            let nodes = root.descendants();
             
-            console.log(`🎨 Creating ${nodes.length} spheres, ${links.length} links`);
+            // Filter out virtual root node from visualization
+            nodes = nodes.filter(d => !d.data.isVirtualRoot);
+            
+            // Filter links to exclude those connecting to/from virtual root
+            const filteredLinks = links.filter(link => 
+                !link.source.data.isVirtualRoot && !link.target.data.isVirtualRoot
+            );
+            
+            console.log(`🎨 Creating ${nodes.length} spheres, ${filteredLinks.length} links (filtered virtual root)`);
             
             // Layout
             const treeLayout = d3.tree().size([2 * Math.PI, 500]);
@@ -2607,14 +2615,14 @@
                 d.orbitSpeed = 0.2 + Math.random() * 0.3;
             });
             
-            // Create links
+            // Create links (use filtered links)
             const linkMaterial = new THREE.LineBasicMaterial({
                 color: 0xFFD700,
                 transparent: true,
                 opacity: 0.3
             });
             
-            links.forEach(link => {
+            filteredLinks.forEach(link => {
                 const geometry = new THREE.BufferGeometry();
                 const positions = new Float32Array(6);
                 geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
@@ -3976,6 +3984,15 @@
                 // Update dashboard if open
                 if (document.getElementById('dashboard-panel').classList.contains('open')) {
                     updateDashboard();
+                }
+                
+                // Always update role section (includes admin panel) when chain updates
+                // This ensures ROOT sees pending institution requests even if dashboard isn't fully open
+                if (window.SrishtiApp && currentUser) {
+                    const myRole = window.SrishtiApp.getMyRole();
+                    if (myRole === 'ROOT' || myRole === 'GOVERNANCE_ADMIN') {
+                        updateRoleSection();
+                    }
                 }
             });
             
