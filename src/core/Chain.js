@@ -167,18 +167,22 @@ class Chain {
         const nodeId = tx.nodeId;
         
         // First non-genesis node join gets ROOT role
-        // Check if this is the first NODE_JOIN after genesis
+        // Check if this is the first NODE_JOIN in the chain
         const existingRoles = Object.keys(this.state.nodeRoles);
         
-        if (existingRoles.length === 0 && block.index <= 1) {
-            // This is the first node - assign ROOT role
+        // More flexible ROOT assignment:
+        // - First NODE_JOIN event in the chain gets ROOT
+        // - Check if existingRoles is empty (no other NODE_JOINs processed yet)
+        if (existingRoles.length === 0) {
+            // This is the first node to join - assign ROOT role
             this.state.nodeRoles[nodeId] = 'ROOT';
-            console.log(`👑 ROOT role assigned to first node: ${nodeId}`);
-        } else {
-            // All other nodes start as USER
+            console.log(`👑 ROOT role assigned to first node: ${nodeId} (block ${block.index})`);
+        } else if (!this.state.nodeRoles[nodeId]) {
+            // New node that doesn't have a role yet - assign USER
             this.state.nodeRoles[nodeId] = 'USER';
-            console.log(`👤 USER role assigned to: ${nodeId}`);
+            console.log(`👤 USER role assigned to: ${nodeId} (block ${block.index})`);
         }
+        // If nodeId already has a role, don't change it (e.g., might be INSTITUTION)
         
         // Persist to storage
         if (this.storage) {
@@ -227,6 +231,7 @@ class Chain {
         }
         
         console.log(`📋 Institution registration request: ${name} (${category}) from ${tx.sender}`);
+        console.log(`📊 Pending institutions now:`, Object.keys(this.state.pendingInstitutions));
     }
     
     /**

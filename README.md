@@ -263,6 +263,21 @@ SrishtiApp.getNodes()
 
 // Download chain data
 SrishtiApp.downloadChainData()
+
+// Check your role
+SrishtiApp.getMyRole()  // Should return "ROOT" for first node
+
+// View all node roles
+SrishtiApp.chain?.state?.nodeRoles
+
+// Check pending institution requests (for ROOT users)
+SrishtiApp.getPendingInstitutions()
+
+// View all institutions (verified + pending)
+SrishtiApp.getInstitutions()
+
+// Debug: Force refresh chain state
+SrishtiApp.chain?.state
 ```
 
 ## License

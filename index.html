@@ -2132,9 +2132,12 @@
             
             <!-- Admin Panel (Only visible for ROOT/GOVERNANCE_ADMIN) -->
             <div class="dashboard-section admin-section" id="dash-admin-section" style="display: none;">
-                <div class="admin-header">
-                    <span>👑</span>
-                    <span>Admin Panel</span>
+                <div class="admin-header" style="display: flex; justify-content: space-between; align-items: center;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span>👑</span>
+                        <span>Admin Panel</span>
+                    </div>
+                    <button onclick="updateAdminSection()" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; padding: 4px 10px; color: #fff; font-size: 0.75em; cursor: pointer;">🔄 Refresh</button>
                 </div>
                 <div id="dash-pending-institutions">
                     <div style="color: rgba(255,255,255,0.5); font-size: 0.85em; text-align: center; padding: 16px;">
@@ -3071,6 +3074,10 @@
             const myInstitution = institutions.verified[currentUser.id];
             const myPending = institutions.pending[currentUser.id];
             
+            console.log(`🔍 updateRoleSection - myRole: ${myRole}, isInstitution: ${isInstitution}`);
+            console.log(`🔍 updateRoleSection - currentUser: ${currentUser.id}`);
+            console.log(`🔍 updateRoleSection - All roles:`, window.SrishtiApp.chain?.state?.nodeRoles);
+            
             // Update role badge
             let badgeClass = 'user';
             let badgeText = '👤 USER';
@@ -3139,7 +3146,12 @@
             
             const container = document.getElementById('dash-pending-institutions');
             const pending = window.SrishtiApp.getPendingInstitutions();
+            
+            console.log('📊 Admin Panel - Raw pending institutions:', pending);
+            
             const pendingList = Object.entries(pending).filter(([_, p]) => p.status === 'PENDING');
+            
+            console.log(`📊 Admin Panel - Filtered pending (status=PENDING): ${pendingList.length} items`);
             
             if (pendingList.length === 0) {
                 container.innerHTML = `
@@ -3163,6 +3175,8 @@
                     </div>
                 </div>
             `).join('');
+            
+            console.log(`✅ Admin Panel updated with ${pendingList.length} pending requests`);
         }
         
         // Approve institution
