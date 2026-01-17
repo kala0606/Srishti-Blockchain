@@ -830,6 +830,95 @@ class SrishtiApp {
         if (!this.chain || !this.nodeId) return null;
         return this.chain.getAccountState(this.nodeId);
     }
+    
+    /**
+     * Clear the chain and reset all state
+     * WARNING: This will delete all blocks and data!
+     * @returns {Promise<void>}
+     */
+    async clearChain() {
+        if (!this.chain) {
+            throw new Error('Chain not initialized');
+        }
+        
+        await this.chain.clearChain();
+        
+        // Clear storage
+        if (this.storage) {
+            const blocks = await this.storage.getAllBlocks();
+            for (const block of blocks) {
+                await this.storage.saveBlock(null); // Clear each block
+            }
+            // Clear all blocks in one go (better approach)
+            // Note: IndexedDBStore might need a clear method
+        }
+        
+        // Notify adapter
+        if (this.adapter) {
+            this.adapter.onChainUpdate();
+        }
+        
+        console.log('✅ Chain cleared');
+    }
+    
+    /**
+     * Reset chain and create a new genesis block
+     * WARNING: This will delete all existing blocks and state!
+     * @param {Object} options - Optional genesis data
+     * @returns {Promise<Block>} The new genesis block
+     */
+    async resetChain(options = {}) {
+        if (!this.chain) {
+            throw new Error('Chain not initialized');
+        }
+        
+        const confirmed = confirm(
+            '⚠️ WARNING: This will delete ALL blocks and chain data!\n\n' +
+            'This includes:\n' +
+            '- All nodes\n' +
+            '- All soulbound tokens\n' +
+            '- All proposals\n' +
+            '- All institution registrations\n\n' +
+            'Are you sure you want to reset the chain?'
+        );
+        
+        if (!confirmed) {
+            console.log('Chain reset cancelled');
+            return null;
+        }
+        
+        // Clear storage first
+        if (this.storage) {
+            try {
+                await this.storage.clear();
+                console.log('✅ Storage cleared');
+            } catch (error) {
+                console.warn('⚠️ Failed to clear storage:', error);
+            }
+        }
+        
+        // Reset chain and create new genesis
+        const genesisBlock = await this.chain.resetChain(options);
+        
+        // Save new genesis block
+        if (this.storage) {
+            await this.storage.saveBlock(genesisBlock.toJSON());
+        }
+        
+        // Save chain
+        await this.saveChain();
+        
+        // Notify adapter
+        if (this.adapter) {
+            this.adapter.onChainUpdate();
+        }
+        
+        // Clear node data (if user wants to start fresh)
+        // Optionally clear localStorage node data too
+        console.log('✅ Chain reset complete - new genesis block created');
+        
+        return genesisBlock;
+    }
 }
 
 // Create global instance

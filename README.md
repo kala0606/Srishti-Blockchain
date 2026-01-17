@@ -278,6 +278,12 @@ SrishtiApp.getInstitutions()
 
 // Debug: Force refresh chain state
 SrishtiApp.chain?.state
+
+// Reset chain (WARNING: Deletes all data!)
+await SrishtiApp.resetChain({ message: 'New chain begins' })
+
+// Clear chain without creating new genesis
+await SrishtiApp.clearChain()
 ```
 
 ## License

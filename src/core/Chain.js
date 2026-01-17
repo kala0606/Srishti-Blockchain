@@ -29,22 +29,52 @@ class Chain {
             nodeRoles: {}           // nodeId -> role (USER, INSTITUTION, GOVERNANCE_ADMIN, ROOT)
         };
         
+        // Only add genesis block if explicitly provided
+        // No automatic genesis block creation - must be created manually or loaded from storage
         if (genesisBlock) {
             this.blocks.push(genesisBlock);
-        } else {
-            // Create default genesis block
-            this.createGenesisBlock();
         }
+    }
+    
+    /**
+     * Clear the chain and reset state
+     * @returns {Promise<void>}
+     */
+    async clearChain() {
+        this.blocks = [];
+        
+        // Reset all state
+        this.state = {
+            activeProposals: {},
+            accountStates: {},
+            soulboundTokens: {},
+            institutions: {},
+            pendingInstitutions: {},
+            nodeRoles: {}
+        };
+        
+        // Clear from storage if available
+        if (this.storage) {
+            await this.storage.saveMetadata('node_roles', {});
+            await this.storage.saveMetadata('institutions', {});
+            await this.storage.saveMetadata('pending_institutions_list', []);
+        }
+        
+        console.log('🗑️ Chain cleared');
     }
     
     /**
      * Create the genesis (first) block
      * @param {Object} options - Optional genesis data
+     * @returns {Promise<Block>} The genesis block
      */
     async createGenesisBlock(options = {}) {
         if (!window.SrishtiEvent || !window.SrishtiBlock || !window.SrishtiHasher) {
             throw new Error('Required dependencies not loaded');
         }
+        
+        // Clear existing chain first
+        await this.clearChain();
         
         const genesisEvent = window.SrishtiEvent.createGenesis({
             message: options.message || 'Srishti timeline begins',
@@ -62,7 +92,24 @@ class Chain {
         await genesisBlock.computeHash();
         this.blocks = [genesisBlock];
         
+        // Save to storage if available
+        if (this.storage) {
+            await this.storage.saveBlock(genesisBlock.toJSON());
+        }
+        
+        console.log('🌱 Genesis block created');
         return genesisBlock;
+    }
+    
+    /**
+     * Reset chain and create a new genesis block
+     * WARNING: This will delete all existing blocks and state!
+     * @param {Object} options - Optional genesis data
+     * @returns {Promise<Block>} The new genesis block
+     */
+    async resetChain(options = {}) {
+        console.warn('⚠️ RESETTING CHAIN - All data will be lost!');
+        return await this.createGenesisBlock(options);
     }
     
     /**
