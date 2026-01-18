@@ -4884,8 +4884,8 @@
             const savedPrivateKey = localStorage.getItem('srishti_private_key');
             
             // Also verify app has loaded the node correctly
-            const appHasNode = window.SrishtiApp && window.SrishtiApp.nodeId && window.SrishtiApp.keyPair;
-            console.log(`🔍 Initialization check: savedNodeId=${savedNodeId}, appHasNode=${appHasNode}, app.nodeId=${window.SrishtiApp?.nodeId}`);
+            const appHasLoadedNode = window.SrishtiApp && window.SrishtiApp.nodeId && window.SrishtiApp.keyPair;
+            console.log(`🔍 Initialization check: savedNodeId=${savedNodeId}, appHasLoadedNode=${appHasLoadedNode}, app.nodeId=${window.SrishtiApp?.nodeId}`);
             
             // Subscribe to nodes from blockchain
             unsubscribeNodes = window.SrishtiApp.subscribeToNodes((nodes) => {
