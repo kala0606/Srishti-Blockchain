@@ -4293,45 +4293,90 @@
             if (existingBtn) existingBtn.remove();
             if (existingIndicator) existingIndicator.remove();
             
-            // Create a floating "Join Network" button
-            const joinButton = document.createElement('button');
-            joinButton.id = 'guest-join-btn';
-            joinButton.innerHTML = '✨ Join Network';
-            joinButton.style.cssText = `
+            // Hide FAB icons on landing page
+            const fabContainer = document.querySelector('.fab-container');
+            if (fabContainer) {
+                fabContainer.style.display = 'none';
+            }
+            
+            // Add a subtle indicator that you're viewing as guest (clickable to join)
+            const guestIndicator = document.createElement('div');
+            guestIndicator.id = 'guest-indicator';
+            
+            // Check if mobile
+            const isMobile = window.innerWidth <= 768;
+            const mobileText = '👁️ Guest • Tap to join';
+            const desktopText = '👁️ Viewing as Guest <span style="opacity: 0.7; margin-left: 8px;">• Click to join</span>';
+            
+            guestIndicator.innerHTML = isMobile ? mobileText : desktopText;
+            
+            // Base styles - positioned at bottom-left corner
+            let baseStyles = `
                 position: fixed;
-                bottom: 180px;
-                right: 32px;
-                padding: 16px 32px;
-                background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05));
-                border: 1px solid rgba(255, 255, 255, 0.15);
-                border-radius: 16px;
-                color: #fff;
+                bottom: 32px;
+                left: 32px;
+                padding: 12px 24px;
+                background: rgba(255, 255, 255, 0.06);
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                border-radius: 12px;
+                color: rgba(255, 255, 255, 0.8);
                 font-family: 'Outfit', sans-serif;
-                font-size: 16px;
-                font-weight: 600;
-                cursor: pointer;
+                font-size: 13px;
+                font-weight: 500;
                 z-index: 1000;
                 backdrop-filter: blur(20px);
                 -webkit-backdrop-filter: blur(20px);
-                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+                cursor: pointer;
                 transition: all 0.3s ease;
-                transform: translateY(0);
+                text-align: center;
             `;
             
-            joinButton.onmouseenter = () => {
-                joinButton.style.transform = 'translateY(-2px)';
-                joinButton.style.boxShadow = '0 12px 40px rgba(0, 0, 0, 0.4)';
-                joinButton.style.background = 'linear-gradient(135deg, rgba(255, 255, 255, 0.15), rgba(255, 255, 255, 0.08))';
+            // Mobile-specific adjustments
+            if (isMobile) {
+                baseStyles += `
+                    bottom: 24px;
+                    left: 24px;
+                    padding: 10px 18px;
+                    font-size: 12px;
+                `;
+            }
+            
+            guestIndicator.style.cssText = baseStyles;
+            
+            guestIndicator.onmouseenter = () => {
+                guestIndicator.style.background = 'rgba(255, 255, 255, 0.1)';
+                guestIndicator.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+                guestIndicator.style.transform = 'translateY(-2px)';
             };
             
-            joinButton.onmouseleave = () => {
-                joinButton.style.transform = 'translateY(0)';
-                joinButton.style.boxShadow = '0 8px 32px rgba(0, 0, 0, 0.3)';
-                joinButton.style.background = 'linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05))';
-                joinButton.style.borderColor = 'rgba(255, 255, 255, 0.15)';
+            guestIndicator.onmouseleave = () => {
+                guestIndicator.style.background = 'rgba(255, 255, 255, 0.06)';
+                guestIndicator.style.borderColor = 'rgba(255, 255, 255, 0.12)';
+                guestIndicator.style.transform = 'translateY(0)';
             };
             
-            joinButton.onclick = () => {
+            // Handle window resize
+            const handleResize = () => {
+                const nowMobile = window.innerWidth <= 768;
+                if (nowMobile !== isMobile) {
+                    guestIndicator.innerHTML = nowMobile ? mobileText : desktopText;
+                    if (nowMobile) {
+                        guestIndicator.style.bottom = '24px';
+                        guestIndicator.style.left = '24px';
+                        guestIndicator.style.padding = '10px 18px';
+                        guestIndicator.style.fontSize = '12px';
+                    } else {
+                        guestIndicator.style.bottom = '32px';
+                        guestIndicator.style.left = '32px';
+                        guestIndicator.style.padding = '12px 24px';
+                        guestIndicator.style.fontSize = '13px';
+                    }
+                }
+            };
+            window.addEventListener('resize', handleResize);
+            
+            guestIndicator.onclick = () => {
                 // Check if there's a join param in URL
                 const urlParams = new URLSearchParams(window.location.search);
                 const joinParam = urlParams.get('join');
@@ -4349,35 +4394,9 @@
                 }
                 
                 showOnboardingModal(joinParentId);
-                joinButton.remove();
-                const indicator = document.getElementById('guest-indicator');
-                if (indicator) indicator.remove();
+                guestIndicator.remove();
             };
             
-            document.body.appendChild(joinButton);
-            
-            // Add a subtle indicator that you're viewing as guest
-            const guestIndicator = document.createElement('div');
-            guestIndicator.id = 'guest-indicator';
-            guestIndicator.innerHTML = '👁️ Viewing as Guest';
-            guestIndicator.style.cssText = `
-                position: fixed;
-                top: 80px;
-                right: 30px;
-                padding: 10px 18px;
-                background: rgba(255, 255, 255, 0.06);
-                border: 1px solid rgba(255, 255, 255, 0.12);
-                border-radius: 12px;
-                color: rgba(255, 255, 255, 0.8);
-                font-family: 'Outfit', sans-serif;
-                font-size: 13px;
-                font-weight: 500;
-                z-index: 1000;
-                backdrop-filter: blur(20px);
-                -webkit-backdrop-filter: blur(20px);
-                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-                pointer-events: none;
-            `;
             document.body.appendChild(guestIndicator);
         }
         
@@ -4636,6 +4655,12 @@
                 if (guestBtn) guestBtn.remove();
                 if (guestIndicator) guestIndicator.remove();
                 if (qrHint) qrHint.remove();
+                
+                // Show FAB icons again after joining
+                const fabContainer = document.querySelector('.fab-container');
+                if (fabContainer) {
+                    fabContainer.style.display = 'flex';
+                }
                 
                 // If we were in guest mode, we need to reinitialize network with real identity
                 if (window.SrishtiApp && window.SrishtiApp.isGuest && window.SrishtiApp.network) {
