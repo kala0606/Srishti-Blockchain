@@ -3100,7 +3100,7 @@
             document.getElementById('dash-self-avatar').textContent = (userData.name || currentUser.name || '?')[0].toUpperCase();
             document.getElementById('dash-self-name').textContent = userData.name || currentUser.name || 'You';
             
-            // Parent node
+            // Parent node(s) - Support multiple parents
             const parentNode = document.getElementById('dash-parent-node');
             const requestParentSection = document.getElementById('request-parent-section');
             const nodeMap = window.SrishtiApp?.chain?.buildNodeMap() || {};
@@ -3109,29 +3109,37 @@
                 ? currentNode.parentIds 
                 : (currentNode?.parentId ? [currentNode.parentId] : []);
             
-            if (userData.parentId && nodesData[userData.parentId]) {
-                const parent = nodesData[userData.parentId];
+            // Display parent(s) - show first parent in the single parent display, or show count if multiple
+            if (currentParentIds.length > 0 && nodesData[currentParentIds[0]]) {
+                const parent = nodesData[currentParentIds[0]];
                 parentNode.style.display = 'flex';
                 document.getElementById('dash-parent-avatar').textContent = (parent.name || '?')[0].toUpperCase();
-                document.getElementById('dash-parent-name').textContent = parent.name || 'Unknown';
+                const parentNameDisplay = currentParentIds.length > 1 
+                    ? `${parent.name || 'Unknown'} (+${currentParentIds.length - 1} more)`
+                    : parent.name || 'Unknown';
+                document.getElementById('dash-parent-name').textContent = parentNameDisplay;
                 const parentStatus = document.getElementById('dash-parent-status');
                 parentStatus.className = 'network-node-status' + (parent.isOnline ? ' online' : '');
-                // Hide request section if already has parent
-                if (requestParentSection) requestParentSection.style.display = 'none';
             } else {
                 parentNode.style.display = 'none';
-                // Show request section if no parent
-                if (requestParentSection && currentParentIds.length === 0) {
+            }
+            
+            // Always show request section if there are available nodes to connect to
+            // (Support multiple parents - allow adding more parents even if already has some)
+            if (requestParentSection) {
+                // Filter nodes to only show those that aren't already parents
+                const availableNodes = nodes.filter(n => 
+                    n.id !== currentUser.id && 
+                    !currentParentIds.includes(n.id)
+                );
+                
+                if (availableNodes.length > 0) {
                     requestParentSection.style.display = 'block';
                     
                     // Populate parent request dropdown
                     const parentSelect = document.getElementById('parent-request-select');
                     if (parentSelect) {
                         parentSelect.innerHTML = '<option value="">Select a node...</option>';
-                        const availableNodes = nodes.filter(n => 
-                            n.id !== currentUser.id && 
-                            !currentParentIds.includes(n.id)
-                        );
                         availableNodes.forEach(node => {
                             const option = document.createElement('option');
                             option.value = node.id;
@@ -3150,14 +3158,23 @@
                     // Handler for submit button
                     const submitBtn = document.getElementById('request-parent-submit-btn');
                     if (submitBtn) {
-                        submitBtn.onclick = async () => {
+                        // Remove any existing click handlers to avoid duplicates
+                        submitBtn.replaceWith(submitBtn.cloneNode(true));
+                        const newSubmitBtn = document.getElementById('request-parent-submit-btn');
+                        
+                        newSubmitBtn.onclick = async () => {
                             const selectedParentId = parentSelect.value;
                             if (selectedParentId) {
                                 await handleRequestParent(selectedParentId);
+                                // Refresh dashboard after request
+                                setTimeout(() => {
+                                    if (window.updateDashboard) window.updateDashboard();
+                                }, 500);
                             }
                         };
                     }
-                } else if (requestParentSection) {
+                } else {
+                    // Hide section if no available nodes
                     requestParentSection.style.display = 'none';
                 }
             }
@@ -4227,6 +4244,7 @@
             }
             
             // Show/hide request parent button
+            // Support multiple parents - show button if this node isn't already a parent
             const requestParentBtn = document.getElementById('request-parent-btn');
             if (requestParentBtn) {
                 if (currentUser && nodeData.id !== currentUser.id) {
@@ -4240,8 +4258,17 @@
                     const isAlreadyParent = currentParentIds.includes(nodeData.id);
                     if (!isAlreadyParent) {
                         requestParentBtn.style.display = 'block';
-                        requestParentBtn.onclick = async () => {
+                        // Remove old handler and add new one to avoid duplicates
+                        requestParentBtn.replaceWith(requestParentBtn.cloneNode(true));
+                        const newRequestBtn = document.getElementById('request-parent-btn');
+                        newRequestBtn.onclick = async () => {
                             await handleRequestParent(nodeData.id);
+                            // Refresh dashboard after request
+                            setTimeout(() => {
+                                if (window.updateDashboard) window.updateDashboard();
+                                // Refresh node modal to update button state
+                                showNodeModal(nodeData);
+                            }, 500);
                         };
                     } else {
                         requestParentBtn.style.display = 'none';
