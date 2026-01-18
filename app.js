@@ -11,6 +11,7 @@ class SrishtiApp {
         this.network = null;
         this.adapter = null;
         this.consensus = null;
+        this.karmaManager = null;
         this.currentUser = null;
         this.nodeId = null;
         this.keyPair = null;
@@ -50,6 +51,35 @@ class SrishtiApp {
             // Initialize consensus
             this.consensus = new window.SrishtiProofOfParticipation({ chain: this.chain });
             console.log('✅ Consensus initialized');
+            
+            // Initialize Karma Manager
+            if (window.SrishtiKarmaManager) {
+                const karmaConfig = window.SrishtiConfig?.KARMA || {};
+                this.karmaManager = new window.SrishtiKarmaManager(this.chain, {
+                    ubiDailyAmount: karmaConfig.UBI_DAILY_AMOUNT,
+                    ubiDistributionHour: karmaConfig.UBI_DISTRIBUTION_HOUR,
+                    onlinePresenceRate: karmaConfig.ONLINE_PRESENCE_RATE,
+                    networkWatchingRate: karmaConfig.NETWORK_WATCHING_RATE,
+                    nodeJoinReward: karmaConfig.REWARDS?.NODE_JOIN,
+                    blockProposalReward: karmaConfig.REWARDS?.BLOCK_PROPOSAL,
+                    institutionVerifyReward: karmaConfig.REWARDS?.INSTITUTION_VERIFY,
+                    soulboundMintReward: karmaConfig.REWARDS?.SOULBOUND_MINT,
+                    voteCastReward: karmaConfig.REWARDS?.VOTE_CAST,
+                    proposalCreateReward: karmaConfig.REWARDS?.PROPOSAL_CREATE,
+                    childRecruitedReward: karmaConfig.REWARDS?.CHILD_RECRUITED,
+                    presenceCheckInterval: karmaConfig.PRESENCE_CHECK_INTERVAL,
+                    ubiCheckInterval: karmaConfig.UBI_CHECK_INTERVAL,
+                    minimumBalance: karmaConfig.MINIMUM_BALANCE
+                });
+                
+                // Link karma manager to chain for activity rewards
+                this.chain.karmaManager = this.karmaManager;
+                
+                await this.karmaManager.init();
+                console.log('✅ Karma Manager initialized');
+            } else {
+                console.warn('⚠️ KarmaManager not available');
+            }
             
             // Check for existing node
             const savedNodeId = localStorage.getItem('srishti_node_id');
@@ -1196,6 +1226,112 @@ class SrishtiApp {
     getAccountState() {
         if (!this.chain || !this.nodeId) return null;
         return this.chain.getAccountState(this.nodeId);
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════════
+    // KARMA TOKEN METHODS
+    // ═══════════════════════════════════════════════════════════════════════
+    
+    /**
+     * Get my KARMA balance
+     * @returns {number} KARMA balance
+     */
+    getMyKarmaBalance() {
+        if (!this.chain || !this.nodeId) return 0;
+        return this.chain.getKarmaBalance(this.nodeId);
+    }
+    
+    /**
+     * Get KARMA balance for any node
+     * @param {string} nodeId - Node ID (optional, defaults to current user)
+     * @returns {number} KARMA balance
+     */
+    getKarmaBalance(nodeId = null) {
+        if (!this.chain) return 0;
+        const targetNodeId = nodeId || this.nodeId;
+        if (!targetNodeId) return 0;
+        return this.chain.getKarmaBalance(targetNodeId);
+    }
+    
+    /**
+     * Transfer KARMA to another node
+     * @param {string} recipient - Recipient node ID
+     * @param {number} amount - Amount of KARMA to transfer
+     * @param {string} reason - Optional reason for transfer
+     * @returns {Promise<Object>} Result with block info
+     */
+    async transferKarma(recipient, amount, reason = null) {
+        if (!this.chain || !this.nodeId) {
+            throw new Error('App not initialized or no node created');
+        }
+        
+        if (!recipient || amount <= 0) {
+            throw new Error('Recipient and positive amount are required');
+        }
+        
+        // Check balance
+        const myBalance = this.getMyKarmaBalance();
+        if (myBalance < amount) {
+            throw new Error(`Insufficient KARMA balance. You have ${myBalance}, trying to transfer ${amount}`);
+        }
+        
+        // Verify recipient exists
+        const nodeMap = this.chain.buildNodeMap();
+        if (!nodeMap[recipient]) {
+            throw new Error(`Recipient node ${recipient} does not exist in the network`);
+        }
+        
+        const tx = {
+            type: 'KARMA_TRANSFER',
+            sender: this.nodeId,
+            recipient: recipient,
+            payload: {
+                amount: amount,
+                reason: reason || null,
+                metadata: {}
+            },
+            timestamp: Date.now(),
+            signature: 'sig_' + Math.random().toString(36).substring(2, 10)
+        };
+        
+        const result = await this._createAndBroadcastBlock(tx);
+        console.log(`💸 KARMA transferred: ${this.nodeId} -> ${recipient} (${amount})`);
+        return result;
+    }
+    
+    /**
+     * Award KARMA for an activity (internal use, or can be called by system)
+     * @param {string} nodeId - Node to award KARMA to
+     * @param {number} amount - Amount of KARMA
+     * @param {string} activityType - Type of activity
+     * @param {Object} metadata - Additional metadata
+     * @returns {Promise<Object>} Result
+     */
+    async awardKarma(nodeId, amount, activityType, metadata = {}) {
+        if (!this.chain) {
+            throw new Error('Chain not initialized');
+        }
+        
+        if (!nodeId || amount <= 0) {
+            throw new Error('Node ID and positive amount are required');
+        }
+        
+        const tx = {
+            type: 'KARMA_EARN',
+            sender: 'SYSTEM',
+            recipient: nodeId,
+            payload: {
+                amount: amount,
+                activityType: activityType,
+                metadata: metadata
+            },
+            timestamp: Date.now(),
+            signature: 'system_' + Math.random().toString(36).substring(2, 10)
+        };
+        
+        const result = await this._createAndBroadcastBlock(tx);
+        console.log(`💰 KARMA awarded: ${nodeId} +${amount} (${activityType})`);
+        return result;
     }
     
     /**

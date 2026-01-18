@@ -29,7 +29,10 @@ class Chain {
             nodeRoles: {},           // nodeId -> role (USER, INSTITUTION, GOVERNANCE_ADMIN, ROOT)
             
             // Parent-child requests: parentId -> { childId -> { nodeId, parentId, reason, requestedAt, status } }
-            pendingParentRequests: {} // parentId -> Map of pending requests from children
+            pendingParentRequests: {}, // parentId -> Map of pending requests from children
+            
+            // KARMA token balances
+            karmaBalances: {} // nodeId -> balance (number)
         };
         
         // Only add genesis block if explicitly provided
@@ -54,7 +57,8 @@ class Chain {
             institutions: {},
             pendingInstitutions: {},
             nodeRoles: {},
-            pendingParentRequests: {}
+            pendingParentRequests: {},
+            karmaBalances: {}
         };
         
         // Clear from storage if available
@@ -225,6 +229,18 @@ class Chain {
                     await this.handleNodeParentUpdate(tx);
                     break;
                     
+                case 'KARMA_EARN':
+                    await this.handleKarmaEarn(tx);
+                    break;
+                    
+                case 'KARMA_TRANSFER':
+                    await this.handleKarmaTransfer(tx);
+                    break;
+                    
+                case 'KARMA_UBI':
+                    await this.handleKarmaUbi(tx);
+                    break;
+                    
                 default:
                     // Unknown transaction type - skip silently for forward compatibility
                     break;
@@ -257,6 +273,27 @@ class Chain {
             console.log(`👤 USER role assigned to: ${nodeId} (block ${block.index})`);
         }
         // If nodeId already has a role, don't change it (e.g., might be INSTITUTION)
+        
+        // Award KARMA for joining (if karma manager is available)
+        if (window.SrishtiKarmaManager && this.karmaManager) {
+            const joinReward = this.karmaManager.getActivityReward('nodeJoin');
+            if (joinReward > 0) {
+                // Create KARMA_EARN transaction
+                const karmaTx = {
+                    type: 'KARMA_EARN',
+                    sender: 'SYSTEM',
+                    recipient: nodeId,
+                    payload: {
+                        amount: joinReward,
+                        activityType: 'NODE_JOIN',
+                        metadata: { blockIndex: block.index }
+                    },
+                    timestamp: Date.now(),
+                    signature: 'system_' + Math.random().toString(36).substring(2, 10)
+                };
+                await this.handleKarmaEarn(karmaTx);
+            }
+        }
         
         // Persist to storage
         if (this.storage) {
@@ -348,6 +385,26 @@ class Chain {
             
             // Remove from pending
             delete this.state.pendingInstitutions[targetNodeId];
+            
+            // Award KARMA to verifier
+            if (this.karmaManager) {
+                const verifyReward = this.karmaManager.getActivityReward('institutionVerify');
+                if (verifyReward > 0) {
+                    const karmaTx = {
+                        type: 'KARMA_EARN',
+                        sender: 'SYSTEM',
+                        recipient: tx.sender,
+                        payload: {
+                            amount: verifyReward,
+                            activityType: 'INSTITUTION_VERIFY',
+                            metadata: { targetNodeId: targetNodeId }
+                        },
+                        timestamp: Date.now(),
+                        signature: 'system_' + Math.random().toString(36).substring(2, 10)
+                    };
+                    await this.handleKarmaEarn(karmaTx);
+                }
+            }
             
             console.log(`✅ Institution VERIFIED: ${pending.name} (${targetNodeId})`);
         } else {
@@ -443,6 +500,26 @@ class Chain {
         
         console.log(`🗳️ Vote recorded: ${tx.sender} voted ${vote} on ${proposalId}`);
         
+        // Award KARMA for voting
+        if (this.karmaManager) {
+            const voteReward = this.karmaManager.getActivityReward('voteCast');
+            if (voteReward > 0) {
+                const karmaTx = {
+                    type: 'KARMA_EARN',
+                    sender: 'SYSTEM',
+                    recipient: tx.sender,
+                    payload: {
+                        amount: voteReward,
+                        activityType: 'VOTE_CAST',
+                        metadata: { proposalId: proposalId }
+                    },
+                    timestamp: Date.now(),
+                    signature: 'system_' + Math.random().toString(36).substring(2, 10)
+                };
+                await this.handleKarmaEarn(karmaTx);
+            }
+        }
+        
         // Persist to storage
         if (this.storage) {
             await this.storage.saveMetadata(`proposal_${proposalId}`, proposal);
@@ -537,6 +614,31 @@ class Chain {
         
         const actionDesc = action || 'SET';
         console.log(`🔗 Parent update (${actionDesc}): ${nodeId} ${actionDesc === 'ADD' ? 'adding' : actionDesc === 'REMOVE' ? 'removing' : 'setting'} parent ${targetParentId || 'none'}${reason ? ` (${reason})` : ''}`);
+        
+        // Award KARMA to parent when child is added (if this is a new relationship)
+        if (targetParentId && (action === 'ADD' || actionDesc === 'SET')) {
+            const childNode = nodeMap[nodeId];
+            const wasAlreadyParent = Array.isArray(childNode.parentIds) && childNode.parentIds.includes(targetParentId);
+            
+            if (!wasAlreadyParent && this.karmaManager) {
+                const childReward = this.karmaManager.getActivityReward('childRecruited');
+                if (childReward > 0) {
+                    const karmaTx = {
+                        type: 'KARMA_EARN',
+                        sender: 'SYSTEM',
+                        recipient: targetParentId,
+                        payload: {
+                            amount: childReward,
+                            activityType: 'CHILD_RECRUITED',
+                            metadata: { childId: nodeId }
+                        },
+                        timestamp: Date.now(),
+                        signature: 'system_' + Math.random().toString(36).substring(2, 10)
+                    };
+                    await this.handleKarmaEarn(karmaTx);
+                }
+            }
+        }
         
         // Remove pending request when relationship is established (ADD or SET with parentId)
         if (targetParentId && (action === 'ADD' || actionDesc === 'SET')) {
@@ -691,6 +793,26 @@ class Chain {
         
         this.state.soulboundTokens[tx.recipient].tokens.push(tokenData);
         
+        // Award KARMA to institution for minting
+        if (this.karmaManager) {
+            const mintReward = this.karmaManager.getActivityReward('soulboundMint');
+            if (mintReward > 0) {
+                const karmaTx = {
+                    type: 'KARMA_EARN',
+                    sender: 'SYSTEM',
+                    recipient: tx.sender,
+                    payload: {
+                        amount: mintReward,
+                        activityType: 'SOULBOUND_MINT',
+                        metadata: { recipient: tx.recipient, achievementId: achievementId }
+                    },
+                    timestamp: Date.now(),
+                    signature: 'system_' + Math.random().toString(36).substring(2, 10)
+                };
+                await this.handleKarmaEarn(karmaTx);
+            }
+        }
+        
         // Persist to storage if available
         if (this.storage) {
             await this.storage.saveMetadata(
@@ -731,6 +853,113 @@ class Chain {
             : (childNode.parentId ? [childNode.parentId] : []);
         
         return parentIds.includes(parentId);
+    }
+    
+    /**
+     * Handle KARMA_EARN transaction
+     * @param {Object} tx - Transaction object
+     */
+    async handleKarmaEarn(tx) {
+        if (!tx.recipient || !tx.payload?.amount || tx.payload.amount <= 0) {
+            console.warn('Invalid KARMA_EARN: missing required fields');
+            return;
+        }
+        
+        const recipient = tx.recipient;
+        const amount = tx.payload.amount;
+        
+        // Initialize balance if needed
+        if (!this.state.karmaBalances[recipient]) {
+            this.state.karmaBalances[recipient] = 0;
+        }
+        
+        // Add KARMA to balance
+        this.state.karmaBalances[recipient] += amount;
+        
+        // Persist to storage
+        if (this.storage) {
+            await this.storage.saveMetadata('karma_balances', this.state.karmaBalances);
+        }
+        
+        console.log(`💰 KARMA earned: ${recipient} +${amount} (${tx.payload.activityType || 'UNKNOWN'})`);
+    }
+    
+    /**
+     * Handle KARMA_TRANSFER transaction
+     * @param {Object} tx - Transaction object
+     */
+    async handleKarmaTransfer(tx) {
+        if (!tx.sender || !tx.recipient || !tx.payload?.amount || tx.payload.amount <= 0) {
+            console.warn('Invalid KARMA_TRANSFER: missing required fields');
+            return;
+        }
+        
+        const sender = tx.sender;
+        const recipient = tx.recipient;
+        const amount = tx.payload.amount;
+        
+        // Initialize balances if needed
+        if (!this.state.karmaBalances[sender]) {
+            this.state.karmaBalances[sender] = 0;
+        }
+        if (!this.state.karmaBalances[recipient]) {
+            this.state.karmaBalances[recipient] = 0;
+        }
+        
+        // Check sender has sufficient balance
+        if (this.state.karmaBalances[sender] < amount) {
+            console.warn(`❌ KARMA_TRANSFER rejected: ${sender} has insufficient balance (${this.state.karmaBalances[sender]} < ${amount})`);
+            return;
+        }
+        
+        // Transfer KARMA
+        this.state.karmaBalances[sender] -= amount;
+        this.state.karmaBalances[recipient] += amount;
+        
+        // Persist to storage
+        if (this.storage) {
+            await this.storage.saveMetadata('karma_balances', this.state.karmaBalances);
+        }
+        
+        console.log(`💸 KARMA transferred: ${sender} -> ${recipient} (${amount})`);
+    }
+    
+    /**
+     * Handle KARMA_UBI transaction (Universal Basic Income)
+     * @param {Object} tx - Transaction object
+     */
+    async handleKarmaUbi(tx) {
+        if (!tx.recipient || !tx.payload?.amount || tx.payload.amount <= 0) {
+            console.warn('Invalid KARMA_UBI: missing required fields');
+            return;
+        }
+        
+        const recipient = tx.recipient;
+        const amount = tx.payload.amount;
+        
+        // Initialize balance if needed
+        if (!this.state.karmaBalances[recipient]) {
+            this.state.karmaBalances[recipient] = 0;
+        }
+        
+        // Add UBI to balance
+        this.state.karmaBalances[recipient] += amount;
+        
+        // Persist to storage
+        if (this.storage) {
+            await this.storage.saveMetadata('karma_balances', this.state.karmaBalances);
+        }
+        
+        console.log(`🌍 UBI distributed: ${recipient} +${amount} (${tx.payload.period || 'DAILY'})`);
+    }
+    
+    /**
+     * Get KARMA balance for a node
+     * @param {string} nodeId - Node ID
+     * @returns {number} KARMA balance
+     */
+    getKarmaBalance(nodeId) {
+        return this.state.karmaBalances[nodeId] || 0;
     }
     
     /**
@@ -797,6 +1026,26 @@ class Chain {
         
         // Add to active proposals
         this.state.activeProposals[proposalId] = proposalData;
+        
+        // Award KARMA for creating proposal
+        if (this.karmaManager) {
+            const proposalReward = this.karmaManager.getActivityReward('proposalCreate');
+            if (proposalReward > 0) {
+                const karmaTx = {
+                    type: 'KARMA_EARN',
+                    sender: 'SYSTEM',
+                    recipient: tx.sender,
+                    payload: {
+                        amount: proposalReward,
+                        activityType: 'PROPOSAL_CREATE',
+                        metadata: { proposalId: proposalId }
+                    },
+                    timestamp: Date.now(),
+                    signature: 'system_' + Math.random().toString(36).substring(2, 10)
+                };
+                await this.handleKarmaEarn(karmaTx);
+            }
+        }
         
         // Persist to storage if available
         if (this.storage) {
@@ -907,6 +1156,12 @@ class Chain {
                 if (proposal) {
                     this.state.activeProposals[proposalId] = proposal;
                 }
+            }
+            
+            // Load KARMA balances
+            const karmaBalances = await this.storage.getMetadata('karma_balances');
+            if (karmaBalances) {
+                this.state.karmaBalances = karmaBalances;
             }
             
             // Note: Account states and soulbound tokens are loaded on-demand
@@ -1121,6 +1376,33 @@ class Chain {
             
             // Update backward-compatible parentId (use first parent or null)
             nodes[nodeId].parentId = nodes[nodeId].parentIds.length > 0 ? nodes[nodeId].parentIds[0] : null;
+            
+            // Award KARMA to parent when child is added (if this is a new parent relationship)
+            if (action === 'ADD' && parentId && this.karmaManager) {
+                const childReward = this.karmaManager.getActivityReward('childRecruited');
+                if (childReward > 0) {
+                    // Check if this is a new relationship (not already a parent)
+                    const childNode = nodes[nodeId];
+                    const wasAlreadyParent = childNode.parentIds && childNode.parentIds.includes(parentId);
+                    
+                    if (!wasAlreadyParent) {
+                        const karmaTx = {
+                            type: 'KARMA_EARN',
+                            sender: 'SYSTEM',
+                            recipient: parentId,
+                            payload: {
+                                amount: childReward,
+                                activityType: 'CHILD_RECRUITED',
+                                metadata: { childId: nodeId }
+                            },
+                            timestamp: Date.now(),
+                            signature: 'system_' + Math.random().toString(36).substring(2, 10)
+                        };
+                        // Note: This will be processed when the block is added
+                        // We'll handle it in handleNodeParentUpdate
+                    }
+                }
+            }
         }
         
         // Calculate child counts (count nodes that have this node as a parent)
@@ -1202,7 +1484,8 @@ class Chain {
             institutions: {},
             pendingInstitutions: {},
             nodeRoles: {},
-            pendingParentRequests: {}
+            pendingParentRequests: {},
+            karmaBalances: {}
         };
         
         // Rebuild state by reprocessing all transactions

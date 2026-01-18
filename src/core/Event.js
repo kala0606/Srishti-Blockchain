@@ -33,7 +33,12 @@ class Event {
         VOTE_CAST: 'VOTE_CAST',                         // Cast vote on proposal
         
         // Account management
-        SOCIAL_RECOVERY_UPDATE: 'SOCIAL_RECOVERY_UPDATE' // Update recovery guardians
+        SOCIAL_RECOVERY_UPDATE: 'SOCIAL_RECOVERY_UPDATE', // Update recovery guardians
+        
+        // KARMA token system
+        KARMA_EARN: 'KARMA_EARN',           // Earn KARMA from activities
+        KARMA_TRANSFER: 'KARMA_TRANSFER',   // Transfer KARMA between nodes
+        KARMA_UBI: 'KARMA_UBI'              // Universal Basic Income distribution
     };
     
     /**
@@ -360,6 +365,75 @@ class Event {
     }
     
     /**
+     * Create a KARMA_EARN event (system-generated or activity-based)
+     * @param {Object} options
+     * @returns {Object} KARMA earn event
+     */
+    static createKarmaEarn(options) {
+        if (!options.recipient || !options.amount || options.amount <= 0) {
+            throw new Error('KARMA_EARN requires recipient and positive amount');
+        }
+        
+        return {
+            type: this.TYPES.KARMA_EARN,
+            timestamp: Date.now(),
+            sender: options.sender || 'SYSTEM',
+            recipient: options.recipient,
+            payload: {
+                amount: options.amount,
+                activityType: options.activityType || 'UNKNOWN',
+                metadata: options.metadata || {}
+            }
+        };
+    }
+    
+    /**
+     * Create a KARMA_TRANSFER event (transfer KARMA between nodes)
+     * @param {Object} options
+     * @returns {Object} KARMA transfer event
+     */
+    static createKarmaTransfer(options) {
+        if (!options.sender || !options.recipient || !options.amount || options.amount <= 0) {
+            throw new Error('KARMA_TRANSFER requires sender, recipient, and positive amount');
+        }
+        
+        return {
+            type: this.TYPES.KARMA_TRANSFER,
+            timestamp: Date.now(),
+            sender: options.sender,
+            recipient: options.recipient,
+            payload: {
+                amount: options.amount,
+                reason: options.reason || null,
+                metadata: options.metadata || {}
+            }
+        };
+    }
+    
+    /**
+     * Create a KARMA_UBI event (Universal Basic Income distribution)
+     * @param {Object} options
+     * @returns {Object} KARMA UBI event
+     */
+    static createKarmaUbi(options) {
+        if (!options.recipient || !options.amount || options.amount <= 0) {
+            throw new Error('KARMA_UBI requires recipient and positive amount');
+        }
+        
+        return {
+            type: this.TYPES.KARMA_UBI,
+            timestamp: Date.now(),
+            sender: 'SYSTEM',
+            recipient: options.recipient,
+            payload: {
+                amount: options.amount,
+                distributionDate: options.distributionDate || new Date().toISOString(),
+                period: options.period || 'DAILY'
+            }
+        };
+    }
+    
+    /**
      * Validate an event structure
      * @param {Object} event
      * @returns {boolean}
@@ -396,6 +470,12 @@ class Event {
                 return !!(event.sender && event.payload?.nodeId && 
                          (event.payload?.parentId || event.payload?.newParentId || 
                           (event.payload?.action && (event.payload?.action === 'ADD' || event.payload?.action === 'REMOVE'))));
+            case this.TYPES.KARMA_EARN:
+                return !!(event.recipient && event.payload?.amount && event.payload?.amount > 0);
+            case this.TYPES.KARMA_TRANSFER:
+                return !!(event.sender && event.recipient && event.payload?.amount && event.payload?.amount > 0);
+            case this.TYPES.KARMA_UBI:
+                return !!(event.recipient && event.payload?.amount && event.payload?.amount > 0);
             default:
                 // Allow unknown types for forward compatibility
                 return !!event.timestamp;

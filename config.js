@@ -65,6 +65,35 @@ const Config = {
     BATCH: {
         WRITE_SIZE: 50,                 // Batch write size
         READ_SIZE: 100                  // Batch read size
+    },
+    
+    // KARMA Token System
+    KARMA: {
+        // Universal Basic Income (UBI)
+        UBI_DAILY_AMOUNT: 100,          // Daily UBI per user
+        UBI_DISTRIBUTION_HOUR: 0,        // Hour of day to distribute (0 = midnight UTC)
+        
+        // Passive earning rates (per minute)
+        ONLINE_PRESENCE_RATE: 0.1,       // KARMA per minute while online
+        NETWORK_WATCHING_RATE: 0.05,     // KARMA per minute watching network
+        
+        // Activity rewards
+        REWARDS: {
+            NODE_JOIN: 50,               // Reward for joining network
+            BLOCK_PROPOSAL: 10,          // Reward for proposing a block
+            INSTITUTION_VERIFY: 25,      // Reward for verifying institution
+            SOULBOUND_MINT: 15,          // Reward for minting (institution)
+            VOTE_CAST: 5,                // Reward for voting
+            PROPOSAL_CREATE: 20,          // Reward for creating proposal
+            CHILD_RECRUITED: 30          // Reward when someone joins under you
+        },
+        
+        // Passive earning intervals (milliseconds)
+        PRESENCE_CHECK_INTERVAL: 60000,  // Check every minute
+        UBI_CHECK_INTERVAL: 3600000,     // Check UBI every hour
+        
+        // Minimum balance (can't go below this)
+        MINIMUM_BALANCE: 0
     }
 };
 
