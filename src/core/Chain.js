@@ -26,7 +26,10 @@ class Chain {
             pendingInstitutions: {}, // nodeId -> { name, category, requestedAt, status }
             
             // Role assignments (ROOT is assigned to first node)
-            nodeRoles: {}           // nodeId -> role (USER, INSTITUTION, GOVERNANCE_ADMIN, ROOT)
+            nodeRoles: {},           // nodeId -> role (USER, INSTITUTION, GOVERNANCE_ADMIN, ROOT)
+            
+            // Parent-child requests: parentId -> { childId -> { nodeId, parentId, reason, requestedAt, status } }
+            pendingParentRequests: {} // parentId -> Map of pending requests from children
         };
         
         // Only add genesis block if explicitly provided
@@ -50,7 +53,8 @@ class Chain {
             soulboundTokens: {},
             institutions: {},
             pendingInstitutions: {},
-            nodeRoles: {}
+            nodeRoles: {},
+            pendingParentRequests: {}
         };
         
         // Clear from storage if available
@@ -445,12 +449,36 @@ class Chain {
         
         console.log(`📝 Parent request: ${nodeId} wants to become child of ${parentId}${reason ? ` (${reason})` : ''}`);
         
-        // Store parent requests for approval (could be used for UI notifications)
-        // Actual relationship is established via NODE_PARENT_UPDATE
-        // This event is primarily for logging and notification purposes
+        // Store parent request for approval
+        if (!this.state.pendingParentRequests[parentId]) {
+            this.state.pendingParentRequests[parentId] = {};
+        }
         
-        // Persist to storage if needed (for UI to show pending requests)
-        // For now, we'll just log it
+        // Check if request already exists
+        if (this.state.pendingParentRequests[parentId][nodeId]) {
+            console.warn(`⚠️ Parent request already exists: ${nodeId} -> ${parentId}`);
+            return;
+        }
+        
+        // Add request
+        this.state.pendingParentRequests[parentId][nodeId] = {
+            nodeId: nodeId,
+            parentId: parentId,
+            reason: reason || null,
+            metadata: metadata || {},
+            requestedAt: tx.timestamp || Date.now(),
+            status: 'PENDING'
+        };
+        
+        // Persist to storage
+        if (this.storage) {
+            await this.storage.saveMetadata(
+                `pending_parent_requests_${parentId}`,
+                this.state.pendingParentRequests[parentId]
+            );
+        }
+        
+        console.log(`✅ Parent request stored: ${nodeId} -> ${parentId}`);
     }
     
     /**
@@ -485,8 +513,72 @@ class Chain {
         const actionDesc = action || 'SET';
         console.log(`🔗 Parent update (${actionDesc}): ${nodeId} ${actionDesc === 'ADD' ? 'adding' : actionDesc === 'REMOVE' ? 'removing' : 'setting'} parent ${targetParentId || 'none'}${reason ? ` (${reason})` : ''}`);
         
+        // Remove pending request when relationship is established (ADD or SET with parentId)
+        if (targetParentId && (action === 'ADD' || actionDesc === 'SET')) {
+            if (this.state.pendingParentRequests[targetParentId] && 
+                this.state.pendingParentRequests[targetParentId][nodeId]) {
+                // Mark as approved and remove from pending
+                delete this.state.pendingParentRequests[targetParentId][nodeId];
+                
+                // Clean up if no more pending requests for this parent
+                if (Object.keys(this.state.pendingParentRequests[targetParentId]).length === 0) {
+                    delete this.state.pendingParentRequests[targetParentId];
+                }
+                
+                // Persist to storage
+                if (this.storage) {
+                    if (this.state.pendingParentRequests[targetParentId]) {
+                        await this.storage.saveMetadata(
+                            `pending_parent_requests_${targetParentId}`,
+                            this.state.pendingParentRequests[targetParentId]
+                        );
+                    } else {
+                        await this.storage.deleteMetadata(`pending_parent_requests_${targetParentId}`);
+                    }
+                }
+                
+                console.log(`✅ Removed pending parent request: ${nodeId} -> ${targetParentId}`);
+            }
+        }
+        
         // Note: The actual parentIds in the node map is updated during buildNodeMap()
         // which reads NODE_PARENT_UPDATE events. This handler is for validation and logging.
+    }
+    
+    /**
+     * Get pending parent requests for a specific parent node
+     * @param {string} parentId - Parent node ID
+     * @returns {Object} - Map of pending requests (childId -> request data)
+     */
+    getPendingParentRequests(parentId) {
+        return this.state.pendingParentRequests[parentId] || {};
+    }
+    
+    /**
+     * Add a pending parent request (for P2P requests that haven't been added to chain yet)
+     * @param {string} parentId - Parent node ID
+     * @param {Object} requestData - Request data
+     */
+    async addPendingParentRequest(parentId, requestData) {
+        if (!this.state.pendingParentRequests[parentId]) {
+            this.state.pendingParentRequests[parentId] = {};
+        }
+        
+        this.state.pendingParentRequests[parentId][requestData.nodeId] = {
+            ...requestData,
+            requestedAt: requestData.requestedAt || Date.now(),
+            status: 'PENDING'
+        };
+        
+        // Persist to storage
+        if (this.storage) {
+            await this.storage.saveMetadata(
+                `pending_parent_requests_${parentId}`,
+                this.state.pendingParentRequests[parentId]
+            );
+        }
+        
+        console.log(`✅ Added pending parent request: ${requestData.nodeId} -> ${parentId}`);
     }
     
     /**
@@ -1071,7 +1163,8 @@ class Chain {
             soulboundTokens: {},
             institutions: {},
             pendingInstitutions: {},
-            nodeRoles: {}
+            nodeRoles: {},
+            pendingParentRequests: {}
         };
         
         // Rebuild state by reprocessing all transactions

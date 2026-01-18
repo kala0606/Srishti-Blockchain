@@ -144,9 +144,20 @@ class SrishtiApp {
                     // Update presence for peer nodes (works in guest mode too)
                     this.adapter.updatePresence(nodeId, presenceData);
                 },
-                onParentRequest: (requestData) => {
+                onParentRequest: async (requestData) => {
                     // Handle parent request received from another node
                     console.log(`📥 Parent request received from ${requestData.nodeId}`);
+                    
+                    // Store in chain state for UI display
+                    if (this.chain && requestData.parentId === this.nodeId) {
+                        await this.chain.addPendingParentRequest(requestData.parentId, requestData);
+                        
+                        // Notify adapter to update UI
+                        if (this.adapter && this.adapter.onChainUpdate) {
+                            this.adapter.onChainUpdate();
+                        }
+                    }
+                    
                     // This can be used to show notifications in the UI
                     // The parent can then call approveParentConnection() to approve it
                     if (this.onParentRequestReceived) {
@@ -654,6 +665,15 @@ class SrishtiApp {
     getPendingInstitutions() {
         if (!this.chain) return {};
         return this.chain.getPendingInstitutions();
+    }
+    
+    /**
+     * Get pending parent requests for this node (when we are the parent)
+     * @returns {Object} - Map of pending requests (childId -> request data)
+     */
+    getPendingParentRequests() {
+        if (!this.chain || !this.nodeId) return {};
+        return this.chain.getPendingParentRequests(this.nodeId);
     }
     
     /**

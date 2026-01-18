@@ -2283,6 +2283,32 @@
                 </div>
             </div>
             
+            <!-- Pending Parent Requests (when you are the parent) -->
+            <div class="dashboard-section" id="dash-parent-requests-section" style="display: none;">
+                <div class="dashboard-section-header">
+                    <span class="dashboard-section-title">📥 Parent Connection Requests</span>
+                    <div class="dashboard-section-line"></div>
+                </div>
+                <div id="dash-parent-requests-list">
+                    <!-- Will be populated by JS -->
+                </div>
+            </div>
+            
+            <!-- Pending Parent Requests -->
+            <div class="dashboard-section" id="dash-parent-requests-section" style="display: none;">
+                <div class="dashboard-section-header">
+                    <span class="dashboard-section-title">🔗 Pending Parent Requests</span>
+                    <div class="dashboard-section-line"></div>
+                </div>
+                <div id="dash-parent-requests-list">
+                    <div class="dashboard-empty" style="padding: 24px;">
+                        <div class="dashboard-empty-icon">🔗</div>
+                        <div class="dashboard-empty-title">No pending requests</div>
+                        <div style="color: rgba(255,255,255,0.4); font-size: 0.85em;">Parent connection requests will appear here</div>
+                    </div>
+                </div>
+            </div>
+            
             <!-- Admin Panel (Only visible for ROOT/GOVERNANCE_ADMIN) -->
             <div class="dashboard-section admin-section" id="dash-admin-section" style="display: none;">
                 <div class="admin-header" style="display: flex; justify-content: space-between; align-items: center;">
@@ -3183,10 +3209,101 @@
             // Role & Institution section
             updateRoleSection();
             
-            // New sections: Soulbound Tokens, Proposals, Guardians
+            // New sections: Soulbound Tokens, Proposals, Guardians, Parent Requests
             updateSoulboundTokens();
             updateProposals();
             updateGuardians();
+            updateParentRequests();
+        }
+        
+        // Update Parent Requests section
+        function updateParentRequests() {
+            if (!window.SrishtiApp || !currentUser) return;
+            
+            const container = document.getElementById('dash-parent-requests-list');
+            const section = document.getElementById('dash-parent-requests-section');
+            if (!container || !section) return;
+            
+            const pendingRequests = window.SrishtiApp.getPendingParentRequests();
+            const requestArray = Object.values(pendingRequests);
+            
+            if (requestArray.length === 0) {
+                section.style.display = 'none';
+                return;
+            }
+            
+            section.style.display = 'block';
+            
+            container.innerHTML = requestArray.map(request => {
+                const node = nodesData[request.nodeId] || {};
+                const nodeName = node.name || 'Unknown';
+                const isOnline = node.isOnline || false;
+                
+                return `
+                    <div class="parent-request-item" style="padding: 16px; background: rgba(147, 51, 234, 0.1); border: 1px solid rgba(147, 51, 234, 0.3); border-radius: 8px; margin-bottom: 12px;">
+                        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+                            <div style="width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, #9333EA, #4F46E5); display: flex; align-items: center; justify-content: center; color: white; font-weight: 600; font-size: 1.1em;">
+                                ${(nodeName || '?')[0].toUpperCase()}
+                            </div>
+                            <div style="flex: 1;">
+                                <div style="font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">${escapeHtml(nodeName)}</div>
+                                <div style="font-size: 0.85em; color: rgba(255, 255, 255, 0.6);">
+                                    ${escapeHtml(request.nodeId.substring(0, 16) + '...')}
+                                    <span style="margin-left: 8px; color: ${isOnline ? '#4ade80' : '#94a3b8'};">
+                                        ${isOnline ? '🟢 Online' : '⚫ Offline'}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                        ${request.reason ? `<div style="padding: 12px; background: rgba(255, 255, 255, 0.05); border-radius: 6px; margin-bottom: 12px; font-size: 0.9em; color: rgba(255, 255, 255, 0.8);">"${escapeHtml(request.reason)}"</div>` : ''}
+                        <div style="display: flex; gap: 8px;">
+                            <button onclick="approveParentRequest('${request.nodeId}')" style="flex: 1; padding: 10px; background: linear-gradient(135deg, #10b981, #059669); border: none; border-radius: 6px; color: white; font-weight: 600; font-size: 0.9em; cursor: pointer; transition: all 0.3s ease;">
+                                ✓ Approve
+                            </button>
+                            <button onclick="rejectParentRequest('${request.nodeId}')" style="flex: 1; padding: 10px; background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 6px; color: #fca5a5; font-weight: 600; font-size: 0.9em; cursor: pointer; transition: all 0.3s ease;">
+                                ✗ Reject
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        // Handle approve parent request
+        async function approveParentRequest(childNodeId) {
+            if (!window.SrishtiApp || !currentUser) {
+                alert('Please join the network first');
+                return;
+            }
+            
+            try {
+                const reason = prompt('Optional reason for approval:');
+                await window.SrishtiApp.approveParentConnection(childNodeId, reason || null);
+                alert('✅ Parent connection approved!');
+                updateParentRequests();
+                updateDashboard(); // Refresh dashboard
+            } catch (error) {
+                console.error('Failed to approve parent connection:', error);
+                alert(`❌ Failed to approve: ${error.message}`);
+            }
+        }
+        
+        // Handle reject parent request
+        async function rejectParentRequest(childNodeId) {
+            if (!window.SrishtiApp || !currentUser) {
+                alert('Please join the network first');
+                return;
+            }
+            
+            try {
+                const reason = prompt('Optional reason for rejection:');
+                await window.SrishtiApp.rejectParentConnection(childNodeId, reason || null);
+                alert('❌ Parent connection rejected');
+                updateParentRequests();
+            } catch (error) {
+                console.error('Failed to reject parent connection:', error);
+                alert(`❌ Failed to reject: ${error.message}`);
+            }
         }
         
         // Update Soulbound Tokens section
