@@ -533,6 +533,7 @@ class Chain {
                             this.state.pendingParentRequests[targetParentId]
                         );
                     } else {
+                        // Delete metadata if no pending requests remain
                         await this.storage.deleteMetadata(`pending_parent_requests_${targetParentId}`);
                     }
                 }

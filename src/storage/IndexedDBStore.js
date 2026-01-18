@@ -259,6 +259,23 @@ class IndexedDBStore {
     }
     
     /**
+     * Delete metadata
+     * @param {string} key
+     * @returns {Promise<void>}
+     */
+    async deleteMetadata(key) {
+        const db = await this.open();
+        const transaction = db.transaction(['metadata'], 'readwrite');
+        const store = transaction.objectStore('metadata');
+        
+        return new Promise((resolve, reject) => {
+            const request = store.delete(key);
+            request.onsuccess = () => resolve();
+            request.onerror = () => reject(request.error);
+        });
+    }
+    
+    /**
      * Prune blocks, keeping only the last N blocks
      * @param {number} keepLastN - Number of blocks to keep
      * @returns {Promise<number>} - Number of blocks pruned
