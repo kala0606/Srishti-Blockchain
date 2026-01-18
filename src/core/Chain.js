@@ -256,23 +256,27 @@ class Chain {
     async handleNodeJoin(tx, block) {
         const nodeId = tx.nodeId;
         
-        // First non-genesis node join gets ROOT role
-        // Check if this is the first NODE_JOIN in the chain
-        const existingRoles = Object.keys(this.state.nodeRoles);
+        // Check if node already has a role (prevent duplicate processing)
+        if (this.state.nodeRoles[nodeId]) {
+            console.warn(`⚠️ Node ${nodeId} already has role ${this.state.nodeRoles[nodeId]}, skipping role assignment`);
+            return; // Don't process again
+        }
         
-        // More flexible ROOT assignment:
-        // - First NODE_JOIN event in the chain gets ROOT
-        // - Check if existingRoles is empty (no other NODE_JOINs processed yet)
-        if (existingRoles.length === 0) {
+        // First non-genesis node join gets ROOT role
+        // Check if ANY ROOT already exists (prevent multiple ROOT nodes)
+        const existingRoles = Object.values(this.state.nodeRoles);
+        const hasRoot = existingRoles.includes('ROOT');
+        
+        // Only assign ROOT if no ROOT exists yet
+        if (!hasRoot) {
             // This is the first node to join - assign ROOT role
             this.state.nodeRoles[nodeId] = 'ROOT';
             console.log(`👑 ROOT role assigned to first node: ${nodeId} (block ${block.index})`);
-        } else if (!this.state.nodeRoles[nodeId]) {
+        } else {
             // New node that doesn't have a role yet - assign USER
             this.state.nodeRoles[nodeId] = 'USER';
             console.log(`👤 USER role assigned to: ${nodeId} (block ${block.index})`);
         }
-        // If nodeId already has a role, don't change it (e.g., might be INSTITUTION)
         
         // Award KARMA for joining (if karma manager is available)
         if (window.SrishtiKarmaManager && this.karmaManager) {
@@ -1307,7 +1311,13 @@ class Chain {
             
             // Skip if we've already seen this node (prevent duplicates)
             if (seenNodeIds.has(nodeId)) {
-                console.warn(`⚠️ Duplicate NODE_JOIN detected for ${nodeId}, skipping`);
+                console.warn(`⚠️ Duplicate NODE_JOIN detected for ${nodeId}, skipping (already processed)`);
+                continue;
+            }
+            
+            // Also check if node already exists in nodes object (extra safety)
+            if (nodes[nodeId]) {
+                console.warn(`⚠️ Duplicate NODE_JOIN detected for ${nodeId} in buildNodeMap, skipping`);
                 continue;
             }
             

@@ -690,21 +690,31 @@ class Network {
                 
                 // If we have different genesis blocks, check if theirs is from an old chain
                 // Genesis blocks with different hashes indicate different chains (after reset)
-                if (ourGenesis && theirGenesis && ourGenesis.hash !== theirGenesis.hash) {
+                if (ourGenesis && theirGenesis) {
                     // Extract uniqueId from genesis event if available
                     const ourUniqueId = ourGenesis.data?.uniqueId || null;
                     const theirUniqueId = theirGenesis.data?.uniqueId || null;
                     
-                    // If both have uniqueIds and they're different, reject old chain
-                    if (ourUniqueId && theirUniqueId && ourUniqueId !== theirUniqueId) {
-                        console.warn(`⚠️ Rejecting chain from ${peerId}: Different genesis signature (ours: ${ourUniqueId?.substring(0, 8)}, theirs: ${theirUniqueId?.substring(0, 8)})`);
-                        return; // Don't sync old chain
-                    }
-                    
-                    // If we have a uniqueId but they don't, prefer ours (newer chain with signature)
-                    if (ourUniqueId && !theirUniqueId) {
-                        console.warn(`⚠️ Rejecting chain from ${peerId}: Our chain has unique signature, theirs doesn't (likely old chain)`);
-                        return; // Don't sync old chain
+                    // If genesis hashes are different, they're from different chains
+                    if (ourGenesis.hash !== theirGenesis.hash) {
+                        // If both have uniqueIds and they're different, reject old chain
+                        if (ourUniqueId && theirUniqueId && ourUniqueId !== theirUniqueId) {
+                            console.warn(`⚠️ Rejecting chain from ${peerId}: Different genesis signature (ours: ${ourUniqueId?.substring(0, 8)}, theirs: ${theirUniqueId?.substring(0, 8)})`);
+                            return; // Don't sync old chain
+                        }
+                        
+                        // If we have a uniqueId but they don't, prefer ours (newer chain with signature)
+                        if (ourUniqueId && !theirUniqueId) {
+                            console.warn(`⚠️ Rejecting chain from ${peerId}: Our chain has unique signature, theirs doesn't (likely old chain)`);
+                            return; // Don't sync old chain
+                        }
+                        
+                        // If neither has uniqueId but hashes differ, be more cautious
+                        // Only sync if their chain is significantly longer (might be legitimate fork)
+                        if (!ourUniqueId && !theirUniqueId && theirLength <= ourLength) {
+                            console.warn(`⚠️ Rejecting chain from ${peerId}: Different genesis hash but no unique signatures (likely old chain after reset)`);
+                            return; // Don't sync old chain
+                        }
                     }
                 }
             }
@@ -1278,10 +1288,13 @@ class Network {
             for (const joinEvent of missingJoins) {
                 const nodeId = joinEvent.nodeId;
                 
-                // Double-check the node doesn't exist (race condition protection)
+                // Triple-check the node doesn't exist (race condition protection)
+                // Check both nodeMap and state.nodeRoles to be absolutely sure
                 const currentNodeMap = this.chain.buildNodeMap();
-                if (currentNodeMap[nodeId]) {
-                    console.log(`⏭️ Node ${nodeId} already exists, skipping merge`);
+                const existingInState = this.chain.state?.nodeRoles?.[nodeId];
+                
+                if (currentNodeMap[nodeId] || existingInState) {
+                    console.log(`⏭️ Node ${nodeId} already exists (map: ${!!currentNodeMap[nodeId]}, state: ${!!existingInState}), skipping merge`);
                     continue;
                 }
                 

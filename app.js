@@ -1445,10 +1445,30 @@ class SrishtiApp {
         // Save new genesis block
         if (this.storage) {
             await this.storage.saveBlock(genesisBlock.toJSON());
+            // Clear metadata (node roles, etc.) - clear() already did this, but ensure it's empty
+            await this.storage.saveMetadata('node_roles', {});
+            await this.storage.saveMetadata('institutions', {});
+            await this.storage.saveMetadata('pending_institutions_list', []);
+            console.log('✅ Cleared all metadata (roles, state, etc.)');
         }
         
         // Save chain
         await this.saveChain();
+        
+        // Force state rebuild to ensure clean state
+        this.chain.state = {
+            activeProposals: {},
+            accountStates: {},
+            soulboundTokens: {},
+            institutions: {},
+            pendingInstitutions: {},
+            nodeRoles: {},
+            pendingParentRequests: {},
+            karmaBalances: {}
+        };
+        
+        // Rebuild state from genesis only
+        await this.chain.processTransactions(genesisBlock);
         
         // Notify adapter
         if (this.adapter) {
