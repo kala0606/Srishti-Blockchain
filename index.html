@@ -1252,9 +1252,15 @@
         /* Stats Grid */
         .dashboard-stats {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: repeat(3, 1fr);
             gap: 14px;
             margin-bottom: 28px;
+        }
+        
+        @media (max-width: 768px) {
+            .dashboard-stats {
+                grid-template-columns: 1fr 1fr;
+            }
         }
         
         .stat-card {
@@ -2255,6 +2261,11 @@
             
             <!-- Stats Grid -->
             <div class="dashboard-stats">
+                <div class="stat-card highlight" style="background: linear-gradient(135deg, rgba(147, 51, 234, 0.2), rgba(79, 70, 229, 0.2)); border-color: rgba(147, 51, 234, 0.4);">
+                    <div class="stat-card-icon">⭐</div>
+                    <div class="stat-card-value" id="dash-karma">0</div>
+                    <div class="stat-card-label">KARMA</div>
+                </div>
                 <div class="stat-card highlight">
                     <div class="stat-card-icon">👥</div>
                     <div class="stat-card-value" id="dash-recruits">0</div>
@@ -2837,13 +2848,68 @@
 
         // Link objects storage
         let linkObjects = [];
+        
+        // Track last hierarchy signature to avoid unnecessary rebuilds
+        let lastHierarchySignature = null;
 
         // ============================================
         // Visualization Functions
         // ============================================
         
+        /**
+         * Create a signature of the hierarchy structure (nodes and relationships)
+         * This is used to detect if the structure actually changed
+         */
+        function getHierarchySignature(hierarchyData) {
+            if (!hierarchyData) return null;
+            
+            // Flatten hierarchy to get all nodes
+            function collectNodes(node, result = []) {
+                if (node.isVirtualRoot) {
+                    // For virtual root, process its children
+                    if (node.children) {
+                        node.children.forEach(child => collectNodes(child, result));
+                    }
+                } else {
+                    // Collect node ID and its parent IDs
+                    const nodeInfo = {
+                        id: node.id,
+                        parentIds: node.allParentIds || (node.parentId ? [node.parentId] : [])
+                    };
+                    result.push(nodeInfo);
+                    
+                    // Process children
+                    if (node.children) {
+                        node.children.forEach(child => collectNodes(child, result));
+                    }
+                }
+                return result;
+            }
+            
+            const nodes = collectNodes(hierarchyData);
+            
+            // Sort nodes by ID for consistent signatures
+            nodes.sort((a, b) => a.id.localeCompare(b.id));
+            
+            // Create signature string: nodeIds sorted, and parent relationships
+            const nodeIds = nodes.map(n => n.id).join(',');
+            const relationships = nodes
+                .map(n => `${n.id}:${n.parentIds.sort().join('|')}`)
+                .join(';');
+            
+            return `${nodeIds.length}:${nodeIds}|${relationships}`;
+        }
+        
         function buildVisualization(hierarchyData) {
+            // Check if hierarchy structure actually changed
+            const newSignature = getHierarchySignature(hierarchyData);
+            if (newSignature === lastHierarchySignature) {
+                console.log(`🎨 Hierarchy structure unchanged, skipping rebuild`);
+                return; // No structural changes, don't rebuild
+            }
+            
             console.log(`🎨 buildVisualization called with:`, hierarchyData);
+            lastHierarchySignature = newSignature;
             
             // Clear existing
             while (mainGroup.children.length > 0) {
@@ -3249,6 +3315,9 @@
         // Dashboard Functions
         // ============================================
         
+        // KARMA balance update interval (when dashboard is open)
+        let karmaUpdateInterval = null;
+        
         function showDashboard() {
             if (!currentUser) {
                 alert('Please join the network first to view your dashboard.');
@@ -3258,10 +3327,37 @@
             const panel = document.getElementById('dashboard-panel');
             panel.classList.add('open');
             updateDashboard();
+            
+            // Start periodic KARMA balance updates (every 10 seconds)
+            if (karmaUpdateInterval) {
+                clearInterval(karmaUpdateInterval);
+            }
+            karmaUpdateInterval = setInterval(() => {
+                if (document.getElementById('dashboard-panel').classList.contains('open')) {
+                    // Only update KARMA balance (fast update)
+                    const karmaElement = document.getElementById('dash-karma');
+                    if (karmaElement && window.SrishtiApp && window.SrishtiApp.getMyKarmaBalance) {
+                        const karmaBalance = window.SrishtiApp.getMyKarmaBalance();
+                        karmaElement.textContent = Math.floor(karmaBalance).toLocaleString();
+                    }
+                } else {
+                    // Dashboard closed, stop interval
+                    if (karmaUpdateInterval) {
+                        clearInterval(karmaUpdateInterval);
+                        karmaUpdateInterval = null;
+                    }
+                }
+            }, 10000); // Update every 10 seconds
         }
         
         function hideDashboard() {
             document.getElementById('dashboard-panel').classList.remove('open');
+            
+            // Stop KARMA update interval
+            if (karmaUpdateInterval) {
+                clearInterval(karmaUpdateInterval);
+                karmaUpdateInterval = null;
+            }
         }
         
         function updateDashboard() {
@@ -3285,6 +3381,13 @@
             const daysActive = Math.max(1, Math.floor((Date.now() - joinDate.getTime()) / (1000 * 60 * 60 * 24)));
             const rank = calculateNetworkRank(currentUser.id);
             
+            // Get KARMA balance
+            let karmaBalance = 0;
+            if (window.SrishtiApp && window.SrishtiApp.getMyKarmaBalance) {
+                karmaBalance = window.SrishtiApp.getMyKarmaBalance();
+            }
+            
+            document.getElementById('dash-karma').textContent = Math.floor(karmaBalance).toLocaleString();
             document.getElementById('dash-recruits').textContent = directRecruits;
             document.getElementById('dash-network').textContent = networkReach;
             document.getElementById('dash-days').textContent = daysActive;
@@ -4785,12 +4888,12 @@
                 nodesData = nodes;
                 updateStats();
                 
-                // Build visualization
+                // Build visualization (only rebuilds if structure changed)
                 const hierarchy = window.SrishtiApp.buildHierarchy();
                 console.log(`🌳 Hierarchy built:`, hierarchy ? 'has data' : 'null');
                 buildVisualization(hierarchy);
                 
-                // Update glows periodically
+                // Update glows (this is lightweight and can run every time)
                 updateNodeGlows();
                 
                 // Update dashboard if open
