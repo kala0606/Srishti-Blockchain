@@ -152,17 +152,71 @@ class SrishtiApp {
             } else {
                 // Will create node during onboarding
                 if (savedNodeId && (!savedPublicKey || !savedPrivateKey)) {
-                    console.warn('⚠️ Node ID found but keys missing - clearing incomplete data');
+                    console.warn('⚠️ Node ID found but keys missing');
                     console.warn('Missing:', {
                         publicKey: !savedPublicKey,
-                        privateKey: !savedPrivateKey
+                        privateKey: !savedPrivateKey,
+                        nodeId: savedNodeId ? savedNodeId.substring(0, 12) + '...' : null
                     });
-                    localStorage.removeItem('srishti_node_id');
-                    localStorage.removeItem('srishti_node_name');
-                    localStorage.removeItem('srishti_public_key');
-                    localStorage.removeItem('srishti_private_key');
+                    
+                    // Check if keys might be in IndexedDB storage
+                    if (this.storage) {
+                        try {
+                            const storedKeys = await this.storage.getKeys(savedNodeId);
+                            if (storedKeys && storedKeys.publicKey && storedKeys.privateKey) {
+                                console.log('✅ Found keys in IndexedDB, restoring to localStorage');
+                                localStorage.setItem('srishti_public_key', storedKeys.publicKey);
+                                localStorage.setItem('srishti_private_key', storedKeys.privateKey);
+                                
+                                // Retry loading with restored keys
+                                this.publicKeyBase64 = storedKeys.publicKey;
+                                try {
+                                    this.keyPair = {
+                                        publicKey: await window.SrishtiKeys.importPublicKey(storedKeys.publicKey),
+                                        privateKey: await window.SrishtiKeys.importPrivateKey(storedKeys.privateKey)
+                                    };
+                                    const generatedNodeId = await window.SrishtiKeys.generateNodeId(this.keyPair.publicKey);
+                                    if (generatedNodeId === savedNodeId) {
+                                        this.nodeId = savedNodeId;
+                                        this.currentUser = { id: savedNodeId, name: savedNodeName };
+                                        console.log('✅ Node restored from IndexedDB:', savedNodeName);
+                                    } else {
+                                        throw new Error('Node ID mismatch after restore');
+                                    }
+                                } catch (restoreError) {
+                                    console.error('❌ Failed to restore from IndexedDB:', restoreError);
+                                    // Clear everything if restore fails
+                                    localStorage.removeItem('srishti_node_id');
+                                    localStorage.removeItem('srishti_node_name');
+                                    localStorage.removeItem('srishti_public_key');
+                                    localStorage.removeItem('srishti_private_key');
+                                }
+                            } else {
+                                // No keys in IndexedDB either - clear incomplete data
+                                console.warn('⚠️ Keys not found in IndexedDB either - clearing incomplete data');
+                                localStorage.removeItem('srishti_node_id');
+                                localStorage.removeItem('srishti_node_name');
+                                localStorage.removeItem('srishti_public_key');
+                                localStorage.removeItem('srishti_private_key');
+                            }
+                        } catch (storageError) {
+                            console.error('❌ Error checking IndexedDB for keys:', storageError);
+                            // Don't clear on storage error - might be temporary
+                            console.warn('⚠️ Keeping node ID, keys may be recoverable');
+                        }
+                    } else {
+                        // No storage available - clear incomplete data
+                        console.warn('⚠️ No storage available - clearing incomplete data');
+                        localStorage.removeItem('srishti_node_id');
+                        localStorage.removeItem('srishti_node_name');
+                        localStorage.removeItem('srishti_public_key');
+                        localStorage.removeItem('srishti_private_key');
+                    }
                 }
-                console.log('📝 No existing node found');
+                
+                if (!this.nodeId) {
+                    console.log('📝 No existing node found');
+                }
             }
             
             // Initialize blockchain adapter
@@ -299,16 +353,28 @@ class SrishtiApp {
             
             // Save keys first
             const privateKeyBase64 = await window.SrishtiKeys.exportPrivateKeyBase64(this.keyPair.privateKey);
+            
+            // Save to IndexedDB
             await this.storage.saveKeys(this.nodeId, {
                 publicKey: this.publicKeyBase64,
                 privateKey: privateKeyBase64
             });
+            console.log('✅ Keys saved to IndexedDB');
             
-            // Save to localStorage
+            // Save to localStorage (backup)
             localStorage.setItem('srishti_node_id', this.nodeId);
             localStorage.setItem('srishti_node_name', name);
             localStorage.setItem('srishti_public_key', this.publicKeyBase64);
             localStorage.setItem('srishti_private_key', privateKeyBase64);
+            
+            // Verify keys were saved correctly
+            const verifyPublicKey = localStorage.getItem('srishti_public_key');
+            const verifyPrivateKey = localStorage.getItem('srishti_private_key');
+            if (verifyPublicKey !== this.publicKeyBase64 || verifyPrivateKey !== privateKeyBase64) {
+                console.error('❌ Keys not saved correctly to localStorage!');
+                throw new Error('Failed to save keys to localStorage');
+            }
+            console.log('✅ Keys saved to localStorage and verified');
             
             this.currentUser = { id: this.nodeId, name: name };
             
