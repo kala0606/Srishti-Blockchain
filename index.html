@@ -4878,9 +4878,14 @@
                 }
             }
             
-            // Check for existing user
+            // Check for existing user - do this AFTER app.init() to ensure app has loaded keys
             const savedNodeId = localStorage.getItem('srishti_node_id');
             const savedNodeName = localStorage.getItem('srishti_node_name');
+            const savedPrivateKey = localStorage.getItem('srishti_private_key');
+            
+            // Also verify app has loaded the node correctly
+            const appHasNode = window.SrishtiApp && window.SrishtiApp.nodeId && window.SrishtiApp.keyPair;
+            console.log(`🔍 Initialization check: savedNodeId=${savedNodeId}, appHasNode=${appHasNode}, app.nodeId=${window.SrishtiApp?.nodeId}`);
             
             // Subscribe to nodes from blockchain
             unsubscribeNodes = window.SrishtiApp.subscribeToNodes((nodes) => {
@@ -4918,8 +4923,17 @@
             document.getElementById('loading').style.display = 'none';
             
             // Check if returning user - trust localStorage if we have valid data
-            const hasValidLocalData = savedNodeId && savedNodeName && localStorage.getItem('srishti_private_key');
-            console.log(`🔍 Checking returning user: savedNodeId=${savedNodeId}, hasValidLocalData=${hasValidLocalData}`);
+            // Note: We check localStorage directly here (not app.nodeId) because app.js loads from localStorage
+            // during init, so they should match. If they don't, we still trust localStorage as source of truth.
+            const hasValidLocalData = savedNodeId && savedNodeName && savedPrivateKey;
+            const appHasNode = window.SrishtiApp?.nodeId === savedNodeId;
+            console.log(`🔍 Checking returning user: savedNodeId=${savedNodeId}, savedName=${savedNodeName}, hasPrivateKey=${!!savedPrivateKey}, app.nodeId=${window.SrishtiApp?.nodeId}, appMatches=${appHasNode}, hasValidLocalData=${hasValidLocalData}`);
+            
+            if (savedNodeId && !appHasNode && window.SrishtiApp?.nodeId) {
+                console.warn(`⚠️ Mismatch detected: localStorage has ${savedNodeId} but app has ${window.SrishtiApp.nodeId}. App may not have loaded from localStorage correctly.`);
+            } else if (savedNodeId && !window.SrishtiApp?.nodeId) {
+                console.warn(`⚠️ localStorage has node ID ${savedNodeId} but app.nodeId is not set. This may indicate an error during app.js initialization.`);
+            }
             
             if (hasValidLocalData) {
                 // User has valid identity in localStorage - they're a returning user
