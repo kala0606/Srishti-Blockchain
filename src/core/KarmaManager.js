@@ -10,9 +10,11 @@ class KarmaManager {
      * Create a new Karma Manager
      * @param {Chain} chain - Chain instance
      * @param {Object} config - Configuration options
+     * @param {BlockchainAdapter} adapter - Optional adapter for presence data
      */
-    constructor(chain, config = {}) {
+    constructor(chain, config = {}, adapter = null) {
         this.chain = chain;
+        this.adapter = adapter; // Adapter has presence cache
         
         // KARMA configuration
         this.config = {
@@ -126,13 +128,36 @@ class KarmaManager {
                 continue;
             }
             
-            // Check if node is online (from presence cache or adapter)
-            const isOnline = node.isOnline || false;
-            const lastSeen = node.lastSeen || 0;
+            // Get presence data from adapter if available (more accurate)
+            let isOnline = false;
+            let lastSeen = 0;
+            
+            if (this.adapter) {
+                // Check adapter's presence cache first (most accurate)
+                const presenceData = this.adapter.presenceCache?.[nodeId];
+                const nodeCacheData = this.adapter.nodeCache?.[nodeId];
+                
+                if (presenceData) {
+                    isOnline = presenceData.isOnline || false;
+                    lastSeen = presenceData.lastSeen || 0;
+                } else if (nodeCacheData) {
+                    isOnline = nodeCacheData.isOnline || false;
+                    lastSeen = nodeCacheData.lastSeen || 0;
+                }
+            }
+            
+            // Fallback to node data from chain
+            if (!lastSeen) {
+                isOnline = node.isOnline || false;
+                lastSeen = node.lastSeen || 0;
+            }
+            
             const timeSinceSeen = now - lastSeen;
             
-            // Consider online if seen within last 5 minutes
-            const consideredOnline = isOnline || timeSinceSeen < 300000;
+            // Consider online if:
+            // 1. Explicitly marked as online, OR
+            // 2. Seen within last 5 minutes (for active nodes)
+            const consideredOnline = isOnline || (lastSeen > 0 && timeSinceSeen < 300000);
             
             if (consideredOnline) {
                 // Calculate minutes online since last check
@@ -155,7 +180,15 @@ class KarmaManager {
                         
                         this.pendingEarnings[nodeId].amount += totalEarning;
                         this.pendingEarnings[nodeId].lastUpdate = now;
+                        
+                        // Debug logging
+                        console.log(`⏱️ KARMA pending for ${nodeId}: +${totalEarning.toFixed(3)} (${minutesOnline} min online)`);
                     }
+                }
+            } else {
+                // Debug: log why node is not considered online
+                if (timeSinceCheck >= this.config.presenceCheckInterval) {
+                    console.log(`⚠️ Node ${nodeId} not earning: isOnline=${isOnline}, lastSeen=${lastSeen ? new Date(lastSeen).toISOString() : 'never'}, timeSinceSeen=${Math.floor(timeSinceSeen / 1000)}s`);
                 }
             }
             
@@ -180,20 +213,23 @@ class KarmaManager {
      */
     async processPendingEarnings() {
         const now = Date.now();
-        const minEarning = 1; // Minimum KARMA to batch into transaction
+        const minEarning = 0.1; // Lower threshold: award when >= 0.1 KARMA (was 1)
         
         for (const nodeId in this.pendingEarnings) {
             const pending = this.pendingEarnings[nodeId];
             
-            // Only process if enough accumulated and hasn't been updated recently
-            if (pending.amount >= minEarning && (now - pending.lastUpdate) > 60000) {
+            // Process if enough accumulated (lowered threshold) OR if it's been 5 minutes since last update
+            const shouldProcess = pending.amount >= minEarning && 
+                                 ((now - pending.lastUpdate) > 60000 || pending.amount >= 1);
+            
+            if (shouldProcess) {
                 const amount = Math.floor(pending.amount * 100) / 100; // Round to 2 decimals
                 
                 if (amount > 0) {
                     // Award KARMA directly (updates state without creating block for efficiency)
                     await this.awardKarma(nodeId, amount, 'PRESENCE', {
                         source: 'passive_earning',
-                        minutes: Math.floor((pending.lastUpdate - (this.lastPresenceCheck[nodeId] || pending.lastUpdate)) / 60000)
+                        minutes: Math.floor((now - (this.lastPresenceCheck[nodeId] || pending.lastUpdate)) / 60000)
                     });
                     
                     // Reset pending

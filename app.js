@@ -52,35 +52,6 @@ class SrishtiApp {
             this.consensus = new window.SrishtiProofOfParticipation({ chain: this.chain });
             console.log('✅ Consensus initialized');
             
-            // Initialize Karma Manager
-            if (window.SrishtiKarmaManager) {
-                const karmaConfig = window.SrishtiConfig?.KARMA || {};
-                this.karmaManager = new window.SrishtiKarmaManager(this.chain, {
-                    ubiDailyAmount: karmaConfig.UBI_DAILY_AMOUNT,
-                    ubiDistributionHour: karmaConfig.UBI_DISTRIBUTION_HOUR,
-                    onlinePresenceRate: karmaConfig.ONLINE_PRESENCE_RATE,
-                    networkWatchingRate: karmaConfig.NETWORK_WATCHING_RATE,
-                    nodeJoinReward: karmaConfig.REWARDS?.NODE_JOIN,
-                    blockProposalReward: karmaConfig.REWARDS?.BLOCK_PROPOSAL,
-                    institutionVerifyReward: karmaConfig.REWARDS?.INSTITUTION_VERIFY,
-                    soulboundMintReward: karmaConfig.REWARDS?.SOULBOUND_MINT,
-                    voteCastReward: karmaConfig.REWARDS?.VOTE_CAST,
-                    proposalCreateReward: karmaConfig.REWARDS?.PROPOSAL_CREATE,
-                    childRecruitedReward: karmaConfig.REWARDS?.CHILD_RECRUITED,
-                    presenceCheckInterval: karmaConfig.PRESENCE_CHECK_INTERVAL,
-                    ubiCheckInterval: karmaConfig.UBI_CHECK_INTERVAL,
-                    minimumBalance: karmaConfig.MINIMUM_BALANCE
-                });
-                
-                // Link karma manager to chain for activity rewards
-                this.chain.karmaManager = this.karmaManager;
-                
-                await this.karmaManager.init();
-                console.log('✅ Karma Manager initialized');
-            } else {
-                console.warn('⚠️ KarmaManager not available');
-            }
-            
             // Check for existing node
             const savedNodeId = localStorage.getItem('srishti_node_id');
             const savedNodeName = localStorage.getItem('srishti_node_name');
@@ -102,10 +73,39 @@ class SrishtiApp {
                 console.log('📝 No existing node found');
             }
             
-            // Initialize blockchain adapter
+            // Initialize blockchain adapter (needed before KarmaManager)
             this.adapter = new window.SrishtiBlockchainAdapter({ chain: this.chain });
             await this.adapter.init();
             console.log('✅ Blockchain adapter initialized');
+            
+            // Initialize Karma Manager (after adapter is initialized)
+            if (window.SrishtiKarmaManager) {
+                const karmaConfig = window.SrishtiConfig?.KARMA || {};
+                this.karmaManager = new window.SrishtiKarmaManager(this.chain, {
+                    ubiDailyAmount: karmaConfig.UBI_DAILY_AMOUNT,
+                    ubiDistributionHour: karmaConfig.UBI_DISTRIBUTION_HOUR,
+                    onlinePresenceRate: karmaConfig.ONLINE_PRESENCE_RATE,
+                    networkWatchingRate: karmaConfig.NETWORK_WATCHING_RATE,
+                    nodeJoinReward: karmaConfig.REWARDS?.NODE_JOIN,
+                    blockProposalReward: karmaConfig.REWARDS?.BLOCK_PROPOSAL,
+                    institutionVerifyReward: karmaConfig.REWARDS?.INSTITUTION_VERIFY,
+                    soulboundMintReward: karmaConfig.REWARDS?.SOULBOUND_MINT,
+                    voteCastReward: karmaConfig.REWARDS?.VOTE_CAST,
+                    proposalCreateReward: karmaConfig.REWARDS?.PROPOSAL_CREATE,
+                    childRecruitedReward: karmaConfig.REWARDS?.CHILD_RECRUITED,
+                    presenceCheckInterval: karmaConfig.PRESENCE_CHECK_INTERVAL,
+                    ubiCheckInterval: karmaConfig.UBI_CHECK_INTERVAL,
+                    minimumBalance: karmaConfig.MINIMUM_BALANCE
+                }, this.adapter); // Pass adapter for presence data
+                
+                // Link karma manager to chain for activity rewards
+                this.chain.karmaManager = this.karmaManager;
+                
+                await this.karmaManager.init();
+                console.log('✅ Karma Manager initialized');
+            } else {
+                console.warn('⚠️ KarmaManager not available');
+            }
             
             // Initialize network (if we have a node)
             if (this.nodeId && this.keyPair) {
