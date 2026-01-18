@@ -55,7 +55,7 @@ class QRScanner {
             </div>
         `;
         
-        // Add styles (same as original)
+        // Add styles matching profile modal design
         const styles = document.createElement('style');
         styles.textContent = `
             #qr-scanner-modal {
@@ -81,62 +81,89 @@ class QRScanner {
                 left: 0;
                 width: 100%;
                 height: 100%;
-                background: rgba(0, 0, 0, 0.9);
-                backdrop-filter: blur(10px);
+                background: rgba(5, 5, 16, 0.8);
+                backdrop-filter: blur(12px);
+                -webkit-backdrop-filter: blur(12px);
             }
             
             .scanner-content {
                 position: relative;
-                background: linear-gradient(145deg, #000033, #000022);
-                border: 2px solid #FFD700;
-                border-radius: 20px;
-                padding: 30px;
-                max-width: 400px;
+                background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.03) 100%);
+                backdrop-filter: blur(40px);
+                -webkit-backdrop-filter: blur(40px);
+                border: 1px solid rgba(255, 255, 255, 0.15);
+                border-radius: 32px;
+                padding: 40px;
+                max-width: 450px;
                 width: 90%;
                 color: #fff;
                 text-align: center;
-                box-shadow: 0 0 60px rgba(255, 215, 0, 0.2);
+                box-shadow: 
+                    0 24px 80px rgba(0, 0, 0, 0.5),
+                    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+                animation: modalAppear 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            }
+            
+            @keyframes modalAppear {
+                from {
+                    opacity: 0;
+                    transform: scale(0.9) translateY(30px);
+                }
+                to {
+                    opacity: 1;
+                    transform: scale(1) translateY(0);
+                }
             }
             
             .scanner-close {
                 position: absolute;
-                top: 15px;
-                right: 20px;
+                top: 18px;
+                right: 22px;
                 background: none;
                 border: none;
-                color: #FFD700;
-                font-size: 32px;
+                color: rgba(255, 255, 255, 0.6);
+                font-size: 28px;
+                font-weight: 300;
                 cursor: pointer;
-                transition: all 0.3s;
+                transition: all 0.3s ease;
+                width: 36px;
+                height: 36px;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
                 line-height: 1;
             }
             
             .scanner-close:hover {
                 color: #fff;
+                background: rgba(255, 255, 255, 0.1);
                 transform: rotate(90deg);
             }
             
             .scanner-title {
-                color: #FFD700;
-                margin: 0 0 10px 0;
-                font-size: 1.8em;
-                text-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
+                font-family: 'Syne', sans-serif;
+                color: #fff;
+                margin: 0 0 8px 0;
+                font-size: 1.6em;
+                font-weight: 700;
             }
             
             .scanner-subtitle {
-                color: #aaa;
-                margin: 0 0 20px 0;
+                color: rgba(255, 255, 255, 0.6);
+                margin: 0 0 28px 0;
                 font-size: 0.9em;
             }
             
             .scanner-viewport {
                 width: 100%;
-                min-height: 250px;
-                background: #000;
-                border-radius: 15px;
+                min-height: 280px;
+                background: rgba(0, 0, 0, 0.3);
+                border-radius: 20px;
                 overflow: hidden;
-                margin-bottom: 20px;
+                margin-bottom: 24px;
                 position: relative;
+                border: 1px solid rgba(255, 255, 255, 0.05);
             }
             
             .scanner-viewport video {
@@ -147,37 +174,45 @@ class QRScanner {
             
             .scanner-actions {
                 display: flex;
-                gap: 10px;
+                gap: 12px;
                 justify-content: center;
-                margin-bottom: 15px;
+                margin-bottom: 20px;
+                flex-wrap: wrap;
             }
             
             .scanner-btn {
-                background: linear-gradient(145deg, #FFD700, #FFA500);
-                color: #000033;
-                border: none;
+                background: rgba(255, 255, 255, 0.06);
+                color: #fff;
+                border: 1px solid rgba(255, 255, 255, 0.12);
                 padding: 12px 24px;
-                border-radius: 25px;
-                font-weight: bold;
+                border-radius: 50px;
+                font-weight: 500;
                 cursor: pointer;
-                transition: all 0.3s;
-                font-size: 14px;
+                transition: all 0.3s ease;
+                font-size: 0.9em;
+                font-family: 'Outfit', sans-serif;
+                backdrop-filter: blur(10px);
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
             }
             
             .scanner-btn:hover {
-                transform: scale(1.05);
-                box-shadow: 0 0 20px rgba(255, 215, 0, 0.5);
+                background: rgba(255, 255, 255, 0.12);
+                border-color: rgba(255, 255, 255, 0.2);
+                transform: translateY(-2px);
             }
             
             .scanner-btn.secondary {
-                background: transparent;
-                color: #FFD700;
-                border: 2px solid #FFD700;
+                background: rgba(255, 255, 255, 0.06);
+                color: #fff;
+                border: 1px solid rgba(255, 255, 255, 0.12);
             }
             
             .scanner-hint {
-                color: #666;
+                color: rgba(255, 255, 255, 0.5);
                 font-size: 0.85em;
+                margin: 0;
             }
         `;
         
