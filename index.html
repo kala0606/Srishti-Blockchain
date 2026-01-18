@@ -2407,6 +2407,11 @@
                         <span class="blockchain-label">Network Status</span>
                         <span class="blockchain-value" id="dash-network-status">🟢 Online</span>
                     </div>
+                    <div class="blockchain-row" id="reset-chain-row" style="margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.1); display: none;">
+                        <button id="reset-chain-btn" style="width: 100%; padding: 10px; background: rgba(220, 38, 38, 0.2); border: 1px solid rgba(220, 38, 38, 0.4); border-radius: 8px; color: #fca5a5; font-size: 0.9em; font-weight: 600; cursor: pointer; transition: all 0.3s ease;">
+                            🔄 Reset Chain (Clear All Nodes)
+                        </button>
+                    </div>
                 </div>
             </div>
             
@@ -3843,6 +3848,12 @@
             } else {
                 adminSection.style.display = 'none';
             }
+            
+            // Show reset chain button only for ROOT users
+            const resetChainRow = document.getElementById('reset-chain-row');
+            if (resetChainRow) {
+                resetChainRow.style.display = (myRole === 'ROOT') ? 'block' : 'none';
+            }
         }
         
         // Update Admin Section (pending institutions)
@@ -5174,7 +5185,57 @@
             }
         });
         
-        // Reset chain button
+        // Reset chain button (only visible to ROOT users)
+        document.getElementById('reset-chain-btn')?.addEventListener('click', async () => {
+            try {
+                if (!window.SrishtiApp || !window.SrishtiApp.resetChain) {
+                    alert('❌ Reset chain function not available. Please refresh the page.');
+                    return;
+                }
+                
+                const confirmed = confirm(
+                    '⚠️ WARNING: This will delete ALL blocks and chain data!\n\n' +
+                    'This includes:\n' +
+                    '- All nodes\n' +
+                    '- All soulbound tokens\n' +
+                    '- All proposals\n' +
+                    '- All institution registrations\n\n' +
+                    'This will clear old nodes visible to guests.\n\n' +
+                    'Are you sure you want to reset the chain?'
+                );
+                
+                if (!confirmed) {
+                    return;
+                }
+                
+                const btn = document.getElementById('reset-chain-btn');
+                btn.disabled = true;
+                btn.innerHTML = '🔄 Resetting...';
+                
+                const genesis = await window.SrishtiApp.resetChain({ 
+                    message: 'Srishti timeline begins - Fresh start'
+                });
+                
+                if (genesis) {
+                    btn.innerHTML = '✅ Reset Complete!';
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1500);
+                } else {
+                    btn.disabled = false;
+                    btn.innerHTML = '🔄 Reset Chain (Clear All Nodes)';
+                }
+            } catch (error) {
+                console.error('Failed to reset chain:', error);
+                alert(`❌ Failed to reset chain: ${error.message}`);
+                const btn = document.getElementById('reset-chain-btn');
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = '🔄 Reset Chain (Clear All Nodes)';
+                }
+            }
+        });
+        
         // Download chain data button
         document.getElementById('download-chain-btn')?.addEventListener('click', async () => {
             try {
@@ -5220,8 +5281,29 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
         });
         
-        // Start
-        init();
+            // Expose resetChain to console for easy access
+            window.resetChain = async () => {
+                if (!window.SrishtiApp || !window.SrishtiApp.resetChain) {
+                    console.error('❌ SrishtiApp.resetChain not available');
+                    return;
+                }
+                console.log('🔄 Resetting chain...');
+                try {
+                    const genesis = await window.SrishtiApp.resetChain({ 
+                        message: 'Srishti timeline begins - Fresh start',
+                        skipConfirmation: false // Will still show confirmation
+                    });
+                    if (genesis) {
+                        console.log('✅ Chain reset complete! Refreshing page...');
+                        setTimeout(() => window.location.reload(), 1500);
+                    }
+                } catch (error) {
+                    console.error('❌ Failed to reset chain:', error);
+                }
+            };
+            
+            // Start
+            init();
     </script>
 </body>
 

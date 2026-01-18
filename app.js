@@ -1404,19 +1404,23 @@ class SrishtiApp {
             throw new Error('Chain not initialized');
         }
         
-        const confirmed = confirm(
-            '⚠️ WARNING: This will delete ALL blocks and chain data!\n\n' +
-            'This includes:\n' +
-            '- All nodes\n' +
-            '- All soulbound tokens\n' +
-            '- All proposals\n' +
-            '- All institution registrations\n\n' +
-            'Are you sure you want to reset the chain?'
-        );
-        
-        if (!confirmed) {
-            console.log('Chain reset cancelled');
-            return null;
+        // Skip confirmation if called from console or if skipConfirmation is set
+        if (!options.skipConfirmation) {
+            const confirmed = confirm(
+                '⚠️ WARNING: This will delete ALL blocks and chain data!\n\n' +
+                'This includes:\n' +
+                '- All nodes\n' +
+                '- All soulbound tokens\n' +
+                '- All proposals\n' +
+                '- All institution registrations\n\n' +
+                'This will clear old nodes visible to guests.\n\n' +
+                'Are you sure you want to reset the chain?'
+            );
+            
+            if (!confirmed) {
+                console.log('Chain reset cancelled');
+                return null;
+            }
         }
         
         // Clear storage first
