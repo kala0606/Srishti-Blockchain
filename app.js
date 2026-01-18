@@ -87,18 +87,81 @@ class SrishtiApp {
             const savedPublicKey = localStorage.getItem('srishti_public_key');
             const savedPrivateKey = localStorage.getItem('srishti_private_key');
             
+            console.log('🔍 Checking for saved node:', {
+                hasNodeId: !!savedNodeId,
+                hasNodeName: !!savedNodeName,
+                hasPublicKey: !!savedPublicKey,
+                hasPrivateKey: !!savedPrivateKey,
+                nodeId: savedNodeId ? savedNodeId.substring(0, 12) + '...' : null
+            });
+            
             if (savedNodeId && savedPublicKey && savedPrivateKey) {
-                // Load existing keys
-                this.nodeId = savedNodeId;
-                this.currentUser = { id: savedNodeId, name: savedNodeName };
-                this.publicKeyBase64 = savedPublicKey;
-                this.keyPair = {
-                    publicKey: await window.SrishtiKeys.importPublicKey(savedPublicKey),
-                    privateKey: await window.SrishtiKeys.importPrivateKey(savedPrivateKey)
-                };
-                console.log('✅ Existing node loaded:', savedNodeName);
+                try {
+                    // Load existing keys with error handling
+                    this.nodeId = savedNodeId;
+                    this.currentUser = { id: savedNodeId, name: savedNodeName };
+                    this.publicKeyBase64 = savedPublicKey;
+                    
+                    console.log('🔑 Attempting to import keys...');
+                    // Try to import keys - if this fails, the keys are invalid
+                    this.keyPair = {
+                        publicKey: await window.SrishtiKeys.importPublicKey(savedPublicKey),
+                        privateKey: await window.SrishtiKeys.importPrivateKey(savedPrivateKey)
+                    };
+                    console.log('✅ Keys imported successfully');
+                    
+                    // Verify the keys are valid by generating node ID
+                    console.log('🔍 Verifying node ID matches...');
+                    const generatedNodeId = await window.SrishtiKeys.generateNodeId(this.keyPair.publicKey);
+                    if (generatedNodeId !== savedNodeId) {
+                        console.warn('⚠️ Node ID mismatch:', {
+                            saved: savedNodeId.substring(0, 12) + '...',
+                            generated: generatedNodeId.substring(0, 12) + '...'
+                        });
+                        console.warn('⚠️ Keys may be corrupted. Clearing localStorage.');
+                        localStorage.removeItem('srishti_node_id');
+                        localStorage.removeItem('srishti_node_name');
+                        localStorage.removeItem('srishti_public_key');
+                        localStorage.removeItem('srishti_private_key');
+                        this.nodeId = null;
+                        this.currentUser = null;
+                        this.keyPair = null;
+                        this.publicKeyBase64 = null;
+                        console.log('📝 Cleared invalid node data');
+                    } else {
+                        console.log('✅ Existing node loaded:', savedNodeName, `(${savedNodeId.substring(0, 12)}...)`);
+                    }
+                } catch (error) {
+                    console.error('❌ Failed to load existing node keys:', error);
+                    console.error('Error details:', {
+                        message: error.message,
+                        stack: error.stack
+                    });
+                    console.warn('⚠️ Keys may be corrupted or invalid. Clearing localStorage.');
+                    // Clear corrupted data
+                    localStorage.removeItem('srishti_node_id');
+                    localStorage.removeItem('srishti_node_name');
+                    localStorage.removeItem('srishti_public_key');
+                    localStorage.removeItem('srishti_private_key');
+                    this.nodeId = null;
+                    this.currentUser = null;
+                    this.keyPair = null;
+                    this.publicKeyBase64 = null;
+                    console.log('📝 Cleared corrupted node data');
+                }
             } else {
                 // Will create node during onboarding
+                if (savedNodeId && (!savedPublicKey || !savedPrivateKey)) {
+                    console.warn('⚠️ Node ID found but keys missing - clearing incomplete data');
+                    console.warn('Missing:', {
+                        publicKey: !savedPublicKey,
+                        privateKey: !savedPrivateKey
+                    });
+                    localStorage.removeItem('srishti_node_id');
+                    localStorage.removeItem('srishti_node_name');
+                    localStorage.removeItem('srishti_public_key');
+                    localStorage.removeItem('srishti_private_key');
+                }
                 console.log('📝 No existing node found');
             }
             
