@@ -2045,6 +2045,17 @@
                     <div class="node-stat-label">Joined</div>
                 </div>
             </div>
+            <div id="node-modal-actions" style="margin-top: 24px; padding-top: 24px; border-top: 1px solid rgba(255,255,255,0.1);">
+                <button id="request-parent-btn" class="node-action-btn" style="display: none; width: 100%; padding: 12px; background: linear-gradient(135deg, #9333EA, #4F46E5); border: none; border-radius: 8px; color: white; font-size: 0.95em; font-weight: 600; cursor: pointer; transition: all 0.3s ease;">
+                    <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 16px; height: 16px; margin-right: 8px; vertical-align: middle;">
+                        <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                        <circle cx="8.5" cy="7" r="4"></circle>
+                        <line x1="20" y1="8" x2="20" y2="14"></line>
+                        <line x1="23" y1="11" x2="17" y2="11"></line>
+                    </svg>
+                    Request Parent Connection
+                </button>
+            </div>
         </div>
     </div>
 
@@ -2190,6 +2201,20 @@
                     <!-- Children preview -->
                     <div id="dash-children-container"></div>
                 </div>
+                
+                <!-- Request Parent Connection Section -->
+                <div id="request-parent-section" style="margin-top: 24px; padding: 20px; background: rgba(147, 51, 234, 0.1); border: 1px solid rgba(147, 51, 234, 0.3); border-radius: 12px; display: none;">
+                    <h3 style="margin: 0 0 12px 0; font-size: 1.1em; font-weight: 600; color: var(--text-primary);">🔗 Connect to a Parent</h3>
+                    <p style="margin: 0 0 16px 0; color: rgba(255, 255, 255, 0.7); font-size: 0.9em;">Request to become a child of another node (e.g., an institution) to receive tokens and credentials.</p>
+                    <div style="display: flex; gap: 12px;">
+                        <select id="parent-request-select" style="flex: 1; padding: 10px; background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 8px; color: var(--text-primary); font-size: 0.95em; outline: none;">
+                            <option value="">Select a node...</option>
+                        </select>
+                        <button id="request-parent-submit-btn" style="padding: 10px 20px; background: linear-gradient(135deg, #9333EA, #4F46E5); border: none; border-radius: 8px; color: white; font-size: 0.95em; font-weight: 600; cursor: pointer; transition: all 0.3s ease;" disabled>
+                            Request
+                        </button>
+                    </div>
+                </div>
             </div>
             
             <!-- Activity Timeline -->
@@ -2231,6 +2256,11 @@
                     <div class="blockchain-row">
                         <span class="blockchain-label">Network Status</span>
                         <span class="blockchain-value" id="dash-network-status">🟢 Online</span>
+                    </div>
+                    <div class="blockchain-row" style="margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.1);">
+                        <button id="reset-chain-btn" style="width: 100%; padding: 10px; background: rgba(220, 38, 38, 0.2); border: 1px solid rgba(220, 38, 38, 0.4); border-radius: 8px; color: #fca5a5; font-size: 0.9em; font-weight: 600; cursor: pointer; transition: all 0.3s ease;">
+                            🔄 Reset Chain (Create New Genesis)
+                        </button>
                     </div>
                 </div>
             </div>
@@ -3051,6 +3081,13 @@
             
             // Parent node
             const parentNode = document.getElementById('dash-parent-node');
+            const requestParentSection = document.getElementById('request-parent-section');
+            const nodeMap = window.SrishtiApp?.chain?.buildNodeMap() || {};
+            const currentNode = nodeMap[currentUser.id];
+            const currentParentIds = Array.isArray(currentNode?.parentIds) 
+                ? currentNode.parentIds 
+                : (currentNode?.parentId ? [currentNode.parentId] : []);
+            
             if (userData.parentId && nodesData[userData.parentId]) {
                 const parent = nodesData[userData.parentId];
                 parentNode.style.display = 'flex';
@@ -3058,8 +3095,50 @@
                 document.getElementById('dash-parent-name').textContent = parent.name || 'Unknown';
                 const parentStatus = document.getElementById('dash-parent-status');
                 parentStatus.className = 'network-node-status' + (parent.isOnline ? ' online' : '');
+                // Hide request section if already has parent
+                if (requestParentSection) requestParentSection.style.display = 'none';
             } else {
                 parentNode.style.display = 'none';
+                // Show request section if no parent
+                if (requestParentSection && currentParentIds.length === 0) {
+                    requestParentSection.style.display = 'block';
+                    
+                    // Populate parent request dropdown
+                    const parentSelect = document.getElementById('parent-request-select');
+                    if (parentSelect) {
+                        parentSelect.innerHTML = '<option value="">Select a node...</option>';
+                        const availableNodes = nodes.filter(n => 
+                            n.id !== currentUser.id && 
+                            !currentParentIds.includes(n.id)
+                        );
+                        availableNodes.forEach(node => {
+                            const option = document.createElement('option');
+                            option.value = node.id;
+                            option.textContent = `${node.name || 'Unknown'} ${node.isInstitution ? '🏛️' : ''}`;
+                            parentSelect.appendChild(option);
+                        });
+                        
+                        parentSelect.onchange = () => {
+                            const submitBtn = document.getElementById('request-parent-submit-btn');
+                            if (submitBtn) {
+                                submitBtn.disabled = !parentSelect.value;
+                            }
+                        };
+                    }
+                    
+                    // Handler for submit button
+                    const submitBtn = document.getElementById('request-parent-submit-btn');
+                    if (submitBtn) {
+                        submitBtn.onclick = async () => {
+                            const selectedParentId = parentSelect.value;
+                            if (selectedParentId) {
+                                await handleRequestParent(selectedParentId);
+                            }
+                        };
+                    }
+                } else if (requestParentSection) {
+                    requestParentSection.style.display = 'none';
+                }
             }
             
             // Children nodes
@@ -4030,7 +4109,59 @@
                 document.getElementById('node-joined').textContent = '-';
             }
             
+            // Show/hide request parent button
+            const requestParentBtn = document.getElementById('request-parent-btn');
+            if (requestParentBtn) {
+                if (currentUser && nodeData.id !== currentUser.id) {
+                    // Check if this node is already a parent
+                    const nodeMap = window.SrishtiApp?.chain?.buildNodeMap();
+                    const currentNode = nodeMap?.[currentUser.id];
+                    const currentParentIds = Array.isArray(currentNode?.parentIds) 
+                        ? currentNode.parentIds 
+                        : (currentNode?.parentId ? [currentNode.parentId] : []);
+                    
+                    const isAlreadyParent = currentParentIds.includes(nodeData.id);
+                    if (!isAlreadyParent) {
+                        requestParentBtn.style.display = 'block';
+                        requestParentBtn.onclick = async () => {
+                            await handleRequestParent(nodeData.id);
+                        };
+                    } else {
+                        requestParentBtn.style.display = 'none';
+                    }
+                } else {
+                    requestParentBtn.style.display = 'none';
+                }
+            }
+            
             modal.classList.add('active');
+        }
+        
+        async function handleRequestParent(parentId) {
+            if (!window.SrishtiApp || !currentUser) {
+                alert('Please join the network first');
+                return;
+            }
+            
+            if (!parentId) {
+                alert('Please select a parent node');
+                return;
+            }
+            
+            try {
+                const reason = prompt('Why do you want to become a child of this node? (optional)');
+                
+                await window.SrishtiApp.requestParentConnection(parentId, {
+                    reason: reason || null,
+                    metadata: {}
+                });
+                
+                alert('✅ Parent connection request submitted! The parent will need to approve your request.');
+                hideNodeModal();
+            } catch (error) {
+                console.error('Failed to request parent connection:', error);
+                alert(`❌ Failed to request parent connection: ${error.message}`);
+            }
         }
         
         function hideNodeModal() {
@@ -4379,6 +4510,61 @@
                 window.SrishtiRecovery.showPhraseModal(phrase);
             } else {
                 alert('No recovery phrase available');
+            }
+        });
+        
+        // Reset chain button
+        document.getElementById('reset-chain-btn')?.addEventListener('click', async () => {
+            try {
+                if (!window.SrishtiApp || !window.SrishtiApp.resetChain) {
+                    alert('❌ Reset chain function not available. Please refresh the page.');
+                    console.error('SrishtiApp.resetChain is not available:', {
+                        hasApp: !!window.SrishtiApp,
+                        hasResetChain: !!(window.SrishtiApp && window.SrishtiApp.resetChain),
+                        methods: window.SrishtiApp ? Object.getOwnPropertyNames(Object.getPrototypeOf(window.SrishtiApp)) : []
+                    });
+                    return;
+                }
+                
+                const confirmed = confirm(
+                    '⚠️ WARNING: This will delete ALL blocks and chain data!\n\n' +
+                    'This includes:\n' +
+                    '- All nodes\n' +
+                    '- All soulbound tokens\n' +
+                    '- All proposals\n' +
+                    '- All institution registrations\n\n' +
+                    'Are you sure you want to reset the chain?'
+                );
+                
+                if (!confirmed) {
+                    return;
+                }
+                
+                const btn = document.getElementById('reset-chain-btn');
+                btn.disabled = true;
+                btn.innerHTML = '🔄 Resetting...';
+                
+                const genesis = await window.SrishtiApp.resetChain({ 
+                    message: 'Srishti timeline begins - Fresh start'
+                });
+                
+                if (genesis) {
+                    btn.innerHTML = '✅ Reset Complete!';
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1500);
+                } else {
+                    btn.disabled = false;
+                    btn.innerHTML = '🔄 Reset Chain (Create New Genesis)';
+                }
+            } catch (error) {
+                console.error('Failed to reset chain:', error);
+                alert(`❌ Failed to reset chain: ${error.message}`);
+                const btn = document.getElementById('reset-chain-btn');
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = '🔄 Reset Chain (Create New Genesis)';
+                }
             }
         });
         

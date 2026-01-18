@@ -955,6 +955,21 @@ class SrishtiApp {
             throw new Error('Cannot mint soulbound tokens to yourself. Specify a different recipient.');
         }
         
+        // Pre-check: Verify recipient is a child of this institution
+        if (!this.chain.isChildOf(recipient, this.nodeId)) {
+            const nodeMap = this.chain.buildNodeMap();
+            const recipientNode = nodeMap[recipient];
+            const recipientParentIds = Array.isArray(recipientNode?.parentIds) 
+                ? recipientNode.parentIds 
+                : (recipientNode?.parentId ? [recipientNode.parentId] : []);
+            
+            throw new Error(
+                `Cannot mint token: Recipient ${recipient} is not a registered child of this institution. ` +
+                `The recipient must first request to become a child and be approved. ` +
+                `Current parents of recipient: ${recipientParentIds.length > 0 ? recipientParentIds.join(', ') : 'none'}`
+            );
+        }
+        
         const tx = {
             type: 'SOULBOUND_MINT',
             sender: this.nodeId,

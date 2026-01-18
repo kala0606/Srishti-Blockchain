@@ -529,6 +529,23 @@ class Chain {
             return;
         }
         
+        // ═══════════════════════════════════════════════════════════════
+        // VERIFY PARENT-CHILD RELATIONSHIP: Recipient must be a child of the institution
+        // ═══════════════════════════════════════════════════════════════
+        const recipientNode = nodes[tx.recipient];
+        const recipientParentIds = Array.isArray(recipientNode.parentIds) 
+            ? recipientNode.parentIds 
+            : (recipientNode.parentId ? [recipientNode.parentId] : []);
+        
+        if (!recipientParentIds.includes(tx.sender)) {
+            console.warn(`❌ SOULBOUND_MINT REJECTED: Recipient ${tx.recipient} is not a registered child of institution ${tx.sender}`);
+            console.warn(`   To receive tokens from an institution, the recipient must:`);
+            console.warn(`   1. Request to become a child of the institution via NODE_PARENT_REQUEST`);
+            console.warn(`   2. Be approved by the institution (via NODE_PARENT_UPDATE)`);
+            console.warn(`   Current parents of ${tx.recipient}: ${recipientParentIds.length > 0 ? recipientParentIds.join(', ') : 'none'}`);
+            return;
+        }
+        
         const { achievementId, title, description, ipfsProof, revocable, metadata } = tx.payload;
         
         // Initialize recipient's soulbound tokens if needed
@@ -575,6 +592,27 @@ class Chain {
     isVerifiedInstitution(nodeId) {
         const institution = this.state.institutions[nodeId];
         return institution?.verified === true;
+    }
+    
+    /**
+     * Check if a node is a child of another node (has parent-child relationship)
+     * @param {string} childId - Child node ID
+     * @param {string} parentId - Parent node ID
+     * @returns {boolean}
+     */
+    isChildOf(childId, parentId) {
+        const nodes = this.buildNodeMap();
+        const childNode = nodes[childId];
+        
+        if (!childNode) {
+            return false;
+        }
+        
+        const parentIds = Array.isArray(childNode.parentIds) 
+            ? childNode.parentIds 
+            : (childNode.parentId ? [childNode.parentId] : []);
+        
+        return parentIds.includes(parentId);
     }
     
     /**
