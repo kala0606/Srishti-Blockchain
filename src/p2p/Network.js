@@ -682,6 +682,33 @@ class Network {
             
             console.log(`📊 Chain comparison: ours=${ourLength}, theirs=${theirLength}`);
             
+            // Validate genesis signature to prevent syncing old chains after reset
+            // Only validate if both chains have at least one block (genesis)
+            if (ourLength > 0 && theirLength > 0) {
+                const ourGenesis = this.chain.blocks[0];
+                const theirGenesis = receivedBlocks[0];
+                
+                // If we have different genesis blocks, check if theirs is from an old chain
+                // Genesis blocks with different hashes indicate different chains (after reset)
+                if (ourGenesis && theirGenesis && ourGenesis.hash !== theirGenesis.hash) {
+                    // Extract uniqueId from genesis event if available
+                    const ourUniqueId = ourGenesis.data?.uniqueId || null;
+                    const theirUniqueId = theirGenesis.data?.uniqueId || null;
+                    
+                    // If both have uniqueIds and they're different, reject old chain
+                    if (ourUniqueId && theirUniqueId && ourUniqueId !== theirUniqueId) {
+                        console.warn(`⚠️ Rejecting chain from ${peerId}: Different genesis signature (ours: ${ourUniqueId?.substring(0, 8)}, theirs: ${theirUniqueId?.substring(0, 8)})`);
+                        return; // Don't sync old chain
+                    }
+                    
+                    // If we have a uniqueId but they don't, prefer ours (newer chain with signature)
+                    if (ourUniqueId && !theirUniqueId) {
+                        console.warn(`⚠️ Rejecting chain from ${peerId}: Our chain has unique signature, theirs doesn't (likely old chain)`);
+                        return; // Don't sync old chain
+                    }
+                }
+            }
+            
             // If their chain is longer, replace ours
             if (theirLength > ourLength) {
                 console.log(`📥 Their chain is longer, replacing ours...`);
@@ -704,8 +731,25 @@ class Network {
             } 
             // If same length, use deterministic tie-breaker (earlier genesis timestamp wins)
             else if (theirLength === ourLength && theirLength > 1) {
+                // Get genesis blocks for comparison
                 const ourGenesis = this.chain.blocks[0];
                 const theirGenesis = receivedBlocks[0];
+                
+                if (!ourGenesis || !theirGenesis) {
+                    console.warn(`⚠️ Cannot compare chains: missing genesis blocks`);
+                    return;
+                }
+                
+                // If genesis hashes are different, don't sync (different chains after reset)
+                if (ourGenesis.hash !== theirGenesis.hash) {
+                    const ourUniqueId = ourGenesis.data?.uniqueId || null;
+                    const theirUniqueId = theirGenesis.data?.uniqueId || null;
+                    
+                    if (ourUniqueId && theirUniqueId && ourUniqueId !== theirUniqueId) {
+                        console.warn(`⚠️ Rejecting chain from ${peerId}: Different genesis signature (same length but different chains)`);
+                        return; // Don't sync old chain
+                    }
+                }
                 
                 // Compare genesis timestamps (earlier wins) or hash as tie-breaker
                 if (theirGenesis.timestamp < ourGenesis.timestamp ||

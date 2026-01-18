@@ -83,14 +83,14 @@ class SrishtiApp {
             
             // Check for existing node
             const savedNodeId = localStorage.getItem('srishti_node_id');
-            const savedNodeName = localStorage.getItem('srishti_node_name');
+            const savedNodeName = (localStorage.getItem('srishti_node_name') || '').trim();
             const savedPublicKey = localStorage.getItem('srishti_public_key');
             const savedPrivateKey = localStorage.getItem('srishti_private_key');
             
             if (savedNodeId && savedPublicKey && savedPrivateKey) {
                 // Load existing keys
                 this.nodeId = savedNodeId;
-                this.currentUser = { id: savedNodeId, name: savedNodeName };
+                this.currentUser = { id: savedNodeId, name: savedNodeName || 'Unknown' };
                 this.publicKeyBase64 = savedPublicKey;
                 this.keyPair = {
                     publicKey: await window.SrishtiKeys.importPublicKey(savedPublicKey),
@@ -229,10 +229,27 @@ class SrishtiApp {
      */
     async createNode(name, parentId = null) {
         try {
+            // Check if node already exists in chain (prevent double creation)
+            const existingNodeId = localStorage.getItem('srishti_node_id');
+            if (existingNodeId) {
+                const nodeMap = this.chain.buildNodeMap();
+                if (nodeMap[existingNodeId]) {
+                    console.warn(`⚠️ Node ${existingNodeId} already exists in chain. Skipping creation.`);
+                    throw new Error('Node already exists. Please refresh the page or use recovery if needed.');
+                }
+            }
+            
             // Generate key pair FIRST
             this.keyPair = await window.SrishtiKeys.generateKeyPair();
             this.publicKeyBase64 = await window.SrishtiKeys.exportPublicKeyBase64(this.keyPair.publicKey);
             this.nodeId = await window.SrishtiKeys.generateNodeId(this.keyPair.publicKey);
+            
+            // Double-check this nodeId doesn't already exist in chain
+            const nodeMap = this.chain.buildNodeMap();
+            if (nodeMap[this.nodeId]) {
+                console.error(`❌ Node ID ${this.nodeId} already exists in chain! This should not happen.`);
+                throw new Error('Generated node ID already exists. Please try again.');
+            }
             
             // Save keys first
             const privateKeyBase64 = await window.SrishtiKeys.exportPrivateKeyBase64(this.keyPair.privateKey);
@@ -241,13 +258,17 @@ class SrishtiApp {
                 privateKey: privateKeyBase64
             });
             
-            // Save to localStorage
+            // Save to localStorage (trim name to prevent space-related issues)
+            const trimmedName = (name || '').trim();
+            if (!trimmedName) {
+                throw new Error('Node name cannot be empty');
+            }
             localStorage.setItem('srishti_node_id', this.nodeId);
-            localStorage.setItem('srishti_node_name', name);
+            localStorage.setItem('srishti_node_name', trimmedName);
             localStorage.setItem('srishti_public_key', this.publicKeyBase64);
             localStorage.setItem('srishti_private_key', privateKeyBase64);
             
-            this.currentUser = { id: this.nodeId, name: name };
+            this.currentUser = { id: this.nodeId, name: trimmedName };
             
             // Initialize network FIRST and sync with existing peers
             if (!this.network) {
@@ -272,10 +293,17 @@ class SrishtiApp {
             const recoveryPhrase = window.SrishtiRecovery.generatePhrase(privateKeyBase64);
             const recoveryPhraseHash = await window.SrishtiRecovery.hashPhrase(recoveryPhrase);
             
+            // Final check: ensure node doesn't exist before creating join block
+            const finalNodeMap = this.chain.buildNodeMap();
+            if (finalNodeMap[this.nodeId]) {
+                console.error(`❌ Node ${this.nodeId} appeared in chain during sync. Aborting creation.`);
+                throw new Error('Node already exists in network. Please refresh the page.');
+            }
+            
             // NOW create the join block (after syncing, so we have the correct chain state)
             const joinEvent = window.SrishtiEvent.createNodeJoin({
                 nodeId: this.nodeId,
-                name: name,
+                name: trimmedName,
                 parentId: parentId,
                 publicKey: this.publicKeyBase64,
                 recoveryPhraseHash: recoveryPhraseHash

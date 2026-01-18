@@ -2407,11 +2407,6 @@
                         <span class="blockchain-label">Network Status</span>
                         <span class="blockchain-value" id="dash-network-status">🟢 Online</span>
                     </div>
-                    <div class="blockchain-row" style="margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.1);">
-                        <button id="reset-chain-btn" style="width: 100%; padding: 10px; background: rgba(220, 38, 38, 0.2); border: 1px solid rgba(220, 38, 38, 0.4); border-radius: 8px; color: #fca5a5; font-size: 0.9em; font-weight: 600; cursor: pointer; transition: all 0.3s ease;">
-                            🔄 Reset Chain (Create New Genesis)
-                        </button>
-                    </div>
                 </div>
             </div>
             
@@ -4387,12 +4382,13 @@
                 // - Node name (from chain or user input)
                 // - Public key (from chain)
                 
-                // Set current user
-                currentUser = { id: foundNode.id, name: foundNode.name || name };
+                // Set current user (trim name to prevent space-related issues)
+                const recoveredName = ((foundNode.name || name || '').trim()) || 'Unknown';
+                currentUser = { id: foundNode.id, name: recoveredName };
                 
                 // Save to localStorage (but note: we don't have the private key)
                 localStorage.setItem('srishti_node_id', foundNode.id);
-                localStorage.setItem('srishti_node_name', foundNode.name || name);
+                localStorage.setItem('srishti_node_name', recoveredName);
                 localStorage.setItem('srishti_public_key', foundNode.publicKey || '');
                 
                 // Note: We can't restore the private key from just the recovery phrase
@@ -4925,12 +4921,12 @@
             
             // Check for existing user - do this AFTER app.init() to ensure app has loaded keys
             const savedNodeId = localStorage.getItem('srishti_node_id');
-            const savedNodeName = localStorage.getItem('srishti_node_name');
+            const savedNodeName = (localStorage.getItem('srishti_node_name') || '').trim();
             const savedPrivateKey = localStorage.getItem('srishti_private_key');
             
             // Also verify app has loaded the node correctly
             const appHasLoadedNode = window.SrishtiApp && window.SrishtiApp.nodeId && window.SrishtiApp.keyPair;
-            console.log(`🔍 Initialization check: savedNodeId=${savedNodeId}, appHasLoadedNode=${appHasLoadedNode}, app.nodeId=${window.SrishtiApp?.nodeId}`);
+            console.log(`🔍 Initialization check: savedNodeId=${savedNodeId}, savedNodeName="${savedNodeName}", appHasLoadedNode=${appHasLoadedNode}, app.nodeId=${window.SrishtiApp?.nodeId}`);
             
             // Subscribe to nodes from blockchain
             unsubscribeNodes = window.SrishtiApp.subscribeToNodes((nodes) => {
@@ -4972,7 +4968,8 @@
             // during init, so they should match. If they don't, we still trust localStorage as source of truth.
             // IMPORTANT: We allow login with just nodeId and name, even without private key (for recovery cases)
             // Users without private key will be in read-only mode but still recognized as logged in
-            const hasValidLocalData = savedNodeId && savedNodeName; // Don't require private key for login
+            // Fix: Trim and validate node name to handle spaces properly
+            const hasValidLocalData = savedNodeId && savedNodeName && savedNodeName.length > 0; // Don't require private key for login
             const hasPrivateKey = !!savedPrivateKey;
             const appHasNode = window.SrishtiApp?.nodeId === savedNodeId;
             console.log(`🔍 Checking returning user: savedNodeId=${savedNodeId}, savedName=${savedNodeName}, hasPrivateKey=${hasPrivateKey}, app.nodeId=${window.SrishtiApp?.nodeId}, appMatches=${appHasNode}, hasValidLocalData=${hasValidLocalData}`);
@@ -5178,60 +5175,6 @@
         });
         
         // Reset chain button
-        document.getElementById('reset-chain-btn')?.addEventListener('click', async () => {
-            try {
-                if (!window.SrishtiApp || !window.SrishtiApp.resetChain) {
-                    alert('❌ Reset chain function not available. Please refresh the page.');
-                    console.error('SrishtiApp.resetChain is not available:', {
-                        hasApp: !!window.SrishtiApp,
-                        hasResetChain: !!(window.SrishtiApp && window.SrishtiApp.resetChain),
-                        methods: window.SrishtiApp ? Object.getOwnPropertyNames(Object.getPrototypeOf(window.SrishtiApp)) : []
-                    });
-                    return;
-                }
-                
-                const confirmed = confirm(
-                    '⚠️ WARNING: This will delete ALL blocks and chain data!\n\n' +
-                    'This includes:\n' +
-                    '- All nodes\n' +
-                    '- All soulbound tokens\n' +
-                    '- All proposals\n' +
-                    '- All institution registrations\n\n' +
-                    'Are you sure you want to reset the chain?'
-                );
-                
-                if (!confirmed) {
-                    return;
-                }
-                
-                const btn = document.getElementById('reset-chain-btn');
-                btn.disabled = true;
-                btn.innerHTML = '🔄 Resetting...';
-                
-                const genesis = await window.SrishtiApp.resetChain({ 
-                    message: 'Srishti timeline begins - Fresh start'
-                });
-                
-                if (genesis) {
-                    btn.innerHTML = '✅ Reset Complete!';
-                    setTimeout(() => {
-                        window.location.reload();
-                    }, 1500);
-                } else {
-                    btn.disabled = false;
-                    btn.innerHTML = '🔄 Reset Chain (Create New Genesis)';
-                }
-            } catch (error) {
-                console.error('Failed to reset chain:', error);
-                alert(`❌ Failed to reset chain: ${error.message}`);
-                const btn = document.getElementById('reset-chain-btn');
-                if (btn) {
-                    btn.disabled = false;
-                    btn.innerHTML = '🔄 Reset Chain (Create New Genesis)';
-                }
-            }
-        });
-        
         // Download chain data button
         document.getElementById('download-chain-btn')?.addEventListener('click', async () => {
             try {
