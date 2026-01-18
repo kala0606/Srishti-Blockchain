@@ -96,6 +96,14 @@
             box-sizing: border-box;
         }
 
+        /* Mobile touch improvements for all buttons */
+        button {
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: rgba(255, 255, 255, 0.2);
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
         body {
             overflow: hidden;
             font-family: 'Outfit', sans-serif;
@@ -296,6 +304,11 @@
             font-family: 'Outfit', sans-serif;
             letter-spacing: 1px;
             text-transform: uppercase;
+            /* Mobile touch improvements */
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: rgba(255, 255, 255, 0.2);
+            user-select: none;
+            -webkit-user-select: none;
         }
 
         .onboarding-btn:hover {
@@ -346,6 +359,11 @@
             display: inline-flex;
             align-items: center;
             gap: 8px;
+            /* Mobile touch improvements */
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: rgba(255, 255, 255, 0.2);
+            user-select: none;
+            -webkit-user-select: none;
         }
         
         .onboarding-recover-btn .icon {
@@ -410,6 +428,11 @@
             box-shadow: 
                 0 8px 32px rgba(0, 0, 0, 0.3),
                 inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            /* Mobile touch improvements */
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: rgba(255, 255, 255, 0.2);
+            user-select: none;
+            -webkit-user-select: none;
         }
         
         .fab .icon {
@@ -555,6 +578,11 @@
             display: inline-flex;
             align-items: center;
             gap: 8px;
+            /* Mobile touch improvements */
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: rgba(255, 255, 255, 0.2);
+            user-select: none;
+            -webkit-user-select: none;
         }
         
         .qr-btn .icon {
@@ -953,6 +981,11 @@
                 inset 0 1px 0 rgba(255, 255, 255, 0.08);
             cursor: pointer;
             transition: all 0.3s ease;
+            /* Mobile touch improvements */
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: rgba(255, 255, 255, 0.2);
+            user-select: none;
+            -webkit-user-select: none;
         }
         
         .your-node-indicator:hover {
@@ -3162,21 +3195,33 @@
         const TOUCH_DELAY = 300; // Prevent double-tap
         
         function onTouchEnd(event) {
-            // Prevent default to avoid double-tap zoom
-            event.preventDefault();
-            
             const now = Date.now();
             if (now - lastTouchTime < TOUCH_DELAY) {
                 return; // Ignore rapid touches
             }
             lastTouchTime = now;
             
-            if (event.target.closest('.fab-container') || 
-                event.target.closest('#qr-modal') || 
-                event.target.closest('#node-modal') ||
-                event.target.closest('#onboarding-modal') ||
-                event.target.closest('#mint-token-modal')) {
-                return;
+            // Check if touch is on a button or interactive element first
+            // Don't preventDefault for buttons so they can handle their own click events
+            const target = event.target;
+            const isButton = target.closest('button') || 
+                            target.closest('.fab') ||
+                            target.closest('.fab-container') || 
+                            target.closest('#qr-modal') || 
+                            target.closest('#node-modal') ||
+                            target.closest('#onboarding-modal') ||
+                            target.closest('#mint-token-modal') ||
+                            target.closest('.onboarding-btn') ||
+                            target.closest('.qr-btn') ||
+                            target.closest('.your-node-indicator');
+            
+            // Only preventDefault if NOT touching a button (to avoid double-tap zoom on canvas)
+            if (!isButton) {
+                event.preventDefault();
+            }
+            
+            if (isButton) {
+                return; // Let buttons handle their own click/touch events
             }
             
             const touch = event.changedTouches[0];
