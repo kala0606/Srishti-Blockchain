@@ -126,9 +126,35 @@ class PeerConnection {
         };
         
         this.dataChannel.onerror = (error) => {
-            console.error('📡 Data channel error:', error);
-            this.connected = false;
-            this.onConnectionStateChange('data_channel_error');
+            // Filter out expected errors (normal connection lifecycle)
+            const errorInfo = error.error || error;
+            const errorMessage = errorInfo?.message || errorInfo?.toString() || '';
+            const errorReason = errorInfo?.reason || '';
+            
+            // These are expected errors during normal connection cleanup
+            const isExpectedError = 
+                errorMessage.includes('User-Initiated Abort') ||
+                errorMessage.includes('Close called') ||
+                errorReason.includes('Close called') ||
+                errorMessage.includes('Connection closed') ||
+                (this.dataChannel && this.dataChannel.readyState === 'closing');
+            
+            if (isExpectedError) {
+                // Silently handle expected errors (just update state)
+                this.connected = false;
+                this.onConnectionStateChange('data_channel_closed');
+            } else {
+                // Log unexpected errors
+                console.error('📡 Data channel error:', error);
+                console.error('Error details:', {
+                    message: errorMessage,
+                    reason: errorReason,
+                    readyState: this.dataChannel?.readyState,
+                    connectionState: this.pc?.connectionState
+                });
+                this.connected = false;
+                this.onConnectionStateChange('data_channel_error');
+            }
         };
         
         this.dataChannel.onmessage = (event) => {
@@ -212,16 +238,37 @@ class PeerConnection {
     }
     
     /**
-     * Close the connection
+     * Close the connection gracefully
      */
     close() {
-        if (this.dataChannel) {
-            this.dataChannel.close();
-        }
-        if (this.pc) {
-            this.pc.close();
-        }
+        // Mark as closing to suppress expected errors
         this.connected = false;
+        
+        // Close data channel gracefully
+        if (this.dataChannel) {
+            try {
+                // Only close if not already closing/closed
+                if (this.dataChannel.readyState === 'open' || this.dataChannel.readyState === 'connecting') {
+                    this.dataChannel.close();
+                }
+            } catch (error) {
+                // Ignore errors during close (expected)
+                console.debug('Data channel close error (expected):', error.message);
+            }
+        }
+        
+        // Close peer connection gracefully
+        if (this.pc) {
+            try {
+                // Only close if not already closed
+                if (this.pc.connectionState !== 'closed') {
+                    this.pc.close();
+                }
+            } catch (error) {
+                // Ignore errors during close (expected)
+                console.debug('Peer connection close error (expected):', error.message);
+            }
+        }
     }
     
     /**
