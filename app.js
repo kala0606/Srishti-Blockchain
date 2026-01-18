@@ -151,6 +151,7 @@ class SrishtiApp {
                 }
             } else {
                 // Will create node during onboarding
+                // Check if we have a node ID but missing keys (might be from recovery)
                 if (savedNodeId && (!savedPublicKey || !savedPrivateKey)) {
                     console.warn('⚠️ Node ID found but keys missing');
                     console.warn('Missing:', {
