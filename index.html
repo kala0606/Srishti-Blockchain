@@ -4332,79 +4332,41 @@
                 // Step 3: Restore node identity
                 console.log('🔑 Step 3: Restoring node identity...');
                 
-                // Try to restore keys from IndexedDB first
-                let restoredKeys = null;
-                if (window.SrishtiApp && window.SrishtiApp.storage) {
-                    try {
-                        restoredKeys = await window.SrishtiApp.storage.getKeys(foundNode.id);
-                        if (restoredKeys && restoredKeys.publicKey && restoredKeys.privateKey) {
-                            console.log('✅ Found keys in IndexedDB for recovered node');
-                        } else {
-                            console.log('📝 No keys found in IndexedDB for this node');
-                            restoredKeys = null;
-                        }
-                    } catch (error) {
-                        console.warn('⚠️ Error checking IndexedDB for keys:', error);
-                        restoredKeys = null;
-                    }
-                }
+                // We found the node, but we can't restore the private key from just the phrase
+                // (the phrase only encodes part of the key). However, we can restore the identity.
+                // For now, we'll need to generate a new key pair and update the node.
+                // In a full implementation, we'd need to store the encrypted private key.
+                
+                // For now, restore what we can:
+                // - Node ID (from chain)
+                // - Node name (from chain or user input)
+                // - Public key (from chain)
                 
                 // Set current user
                 currentUser = { id: foundNode.id, name: foundNode.name || name };
                 
-                if (restoredKeys && restoredKeys.privateKey) {
-                    // We have the keys! Restore fully
-                    console.log('✅ Restoring full node identity with keys');
-                    localStorage.setItem('srishti_node_id', foundNode.id);
-                    localStorage.setItem('srishti_node_name', foundNode.name || name);
-                    localStorage.setItem('srishti_public_key', restoredKeys.publicKey);
-                    localStorage.setItem('srishti_private_key', restoredKeys.privateKey);
-                    
-                    // Import keys into app
-                    window.SrishtiApp.nodeId = foundNode.id;
-                    window.SrishtiApp.currentUser = currentUser;
-                    window.SrishtiApp.publicKeyBase64 = restoredKeys.publicKey;
-                    window.SrishtiApp.keyPair = {
-                        publicKey: await window.SrishtiKeys.importPublicKey(restoredKeys.publicKey),
-                        privateKey: await window.SrishtiKeys.importPrivateKey(restoredKeys.privateKey)
-                    };
-                    
-                    // Verify node ID matches
-                    const generatedNodeId = await window.SrishtiKeys.generateNodeId(window.SrishtiApp.keyPair.publicKey);
-                    if (generatedNodeId !== foundNode.id) {
-                        throw new Error('Node ID mismatch after key restore');
-                    }
-                    
-                    // Reinitialize network with restored keys
-                    if (window.SrishtiApp.network) {
-                        // Close existing network
-                        if (window.SrishtiApp.network.signaling) {
-                            window.SrishtiApp.network.signaling.close();
-                        }
-                    }
-                    await window.SrishtiApp.initNetwork(false); // false = not guest mode
-                    
-                    console.log('✅ Full node identity restored with keys');
-                } else {
-                    // We don't have the private key - restore what we can
-                    console.warn('⚠️ Private key not found in IndexedDB - restoring partial identity');
-                    localStorage.setItem('srishti_node_id', foundNode.id);
-                    localStorage.setItem('srishti_node_name', foundNode.name || name);
-                    localStorage.setItem('srishti_public_key', foundNode.publicKey || '');
-                    
-                    // Update the app's nodeId to match the recovered node
-                    window.SrishtiApp.nodeId = foundNode.id;
-                    window.SrishtiApp.currentUser = currentUser;
-                    window.SrishtiApp.publicKeyBase64 = foundNode.publicKey || '';
-                    
-                    // Keep using temp keys for network (limited functionality)
-                    console.warn('⚠️ Note: Private key not restored. Some features may be limited.');
-                }
+                // Save to localStorage (but note: we don't have the private key)
+                localStorage.setItem('srishti_node_id', foundNode.id);
+                localStorage.setItem('srishti_node_name', foundNode.name || name);
+                localStorage.setItem('srishti_public_key', foundNode.publicKey || '');
+                
+                // Note: We can't restore the private key from just the recovery phrase
+                // The user will need to re-join or we'd need a different recovery mechanism
+                console.warn('⚠️ Private key cannot be restored from recovery phrase alone');
                 
                 // Initialize QR with the public key from chain
-                if (window.SrishtiQRCode && (foundNode.publicKey || window.SrishtiApp.publicKeyBase64)) {
-                    window.SrishtiQRCode.init(foundNode.id, foundNode.publicKey || window.SrishtiApp.publicKeyBase64);
+                if (window.SrishtiQRCode && foundNode.publicKey) {
+                    window.SrishtiQRCode.init(foundNode.id, foundNode.publicKey);
                 }
+                
+                // Update the app's nodeId to match the recovered node
+                window.SrishtiApp.nodeId = foundNode.id;
+                window.SrishtiApp.currentUser = currentUser;
+                window.SrishtiApp.publicKeyBase64 = foundNode.publicKey || '';
+                
+                // Reinitialize network with the correct node ID
+                // (We'll keep using the temp keys for now since we don't have the real private key)
+                // In a production system, we'd need to store encrypted private keys or use deterministic key derivation
                 
                 hideOnboardingModal();
                 showWelcome(foundNode.name || name);
@@ -4964,6 +4926,42 @@
                 currentUser = { id: savedNodeId, name: savedNodeName };
                 console.log(`✅ Returning user set: ${savedNodeName} (${savedNodeId})`);
                 
+                // Clean up any guest mode UI if present (in case it was shown during loading)
+                const guestBtn = document.getElementById('guest-join-btn');
+                const guestIndicator = document.getElementById('guest-indicator');
+                const qrHint = document.getElementById('qr-join-hint');
+                if (guestBtn) guestBtn.remove();
+                if (guestIndicator) guestIndicator.remove();
+                if (qrHint) qrHint.remove();
+                
+                // Ensure FAB icons are visible for logged-in users
+                const fabContainer = document.querySelector('.fab-container');
+                if (fabContainer) {
+                    fabContainer.style.display = 'flex';
+                }
+                
+                // If they were in guest mode, disconnect guest network and reinitialize with real identity
+                if (window.SrishtiApp && window.SrishtiApp.isGuest) {
+                    console.log('🔄 Disconnecting guest network for returning user...');
+                    if (window.SrishtiApp.network) {
+                        try {
+                            window.SrishtiApp.network.disconnect();
+                        } catch (e) {
+                            console.warn('Error disconnecting guest network:', e);
+                        }
+                        window.SrishtiApp.network = null;
+                    }
+                    window.SrishtiApp.isGuest = false;
+                    // Reinitialize network with real identity
+                    if (window.SrishtiApp.nodeId && window.SrishtiApp.keyPair) {
+                        await window.SrishtiApp.initNetwork(false); // false = not guest mode
+                    }
+                } else if (window.SrishtiApp && !window.SrishtiApp.network && window.SrishtiApp.nodeId && window.SrishtiApp.keyPair) {
+                    // Network wasn't initialized for some reason - initialize it now
+                    console.log('🔄 Initializing network for returning user...');
+                    await window.SrishtiApp.initNetwork(false); // false = not guest mode
+                }
+                
                 // Mark ourselves as online
                 if (window.SrishtiApp) {
                     window.SrishtiApp.updatePresence(savedNodeId, { isOnline: true, lastSeen: Date.now() });
@@ -4994,24 +4992,6 @@
                     try {
                         await window.SrishtiApp.initNetwork(true); // true = guest mode
                         console.log('✅ Guest mode network initialized - you can now see the network');
-                        
-                        // Wait a bit for chain sync in guest mode
-                        setTimeout(async () => {
-                            if (window.SrishtiApp && window.SrishtiApp.network) {
-                                // Request sync from peers to get latest chain
-                                const peers = Array.from(window.SrishtiApp.network.peers.keys());
-                                if (peers.length > 0) {
-                                    console.log(`🔄 Guest mode: Requesting chain sync from ${peers.length} peers`);
-                                    for (const peerId of peers) {
-                                        try {
-                                            await window.SrishtiApp.network.requestSync(peerId);
-                                        } catch (error) {
-                                            console.debug('Sync request failed (expected in guest mode):', error);
-                                        }
-                                    }
-                                }
-                            }
-                        }, 2000); // Wait 2 seconds for connections to establish
                     } catch (error) {
                         console.warn('⚠️ Guest mode network initialization failed:', error);
                         // Continue anyway - they can still view local chain
