@@ -112,7 +112,9 @@ class Recovery {
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0, 0, 0, 0.9);
+            background: rgba(5, 5, 16, 0.8);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
             display: flex;
             justify-content: center;
             align-items: center;
@@ -128,34 +130,149 @@ class Recovery {
         ).join('');
 
         overlay.innerHTML = `
-            <div style="background: #1a1a2e; padding: 30px; border-radius: 16px; max-width: 500px; text-align: center;">
-                <h2 style="color: #fff; margin-bottom: 10px;">🔐 Your Recovery Phrase</h2>
-                <p style="color: #888; margin-bottom: 20px; font-size: 14px;">
+            <div style="background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.03) 100%);
+                backdrop-filter: blur(40px);
+                -webkit-backdrop-filter: blur(40px);
+                border: 1px solid rgba(255, 255, 255, 0.15);
+                border-radius: 32px;
+                padding: 40px;
+                max-width: 500px;
+                width: 90%;
+                text-align: center;
+                box-shadow: 
+                    0 24px 80px rgba(0, 0, 0, 0.5),
+                    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+                position: relative;
+                animation: modalAppear 0.4s cubic-bezier(0.16, 1, 0.3, 1);">
+                <style>
+                    @keyframes modalAppear {
+                        from {
+                            opacity: 0;
+                            transform: scale(0.9) translateY(30px);
+                        }
+                        to {
+                            opacity: 1;
+                            transform: scale(1) translateY(0);
+                        }
+                    }
+                </style>
+                <h2 style="font-family: 'Syne', sans-serif; color: #fff; margin: 0 0 8px 0; font-size: 1.6em; font-weight: 700;">🔐 Your Recovery Phrase</h2>
+                <p style="color: rgba(255, 255, 255, 0.6); margin: 0 0 28px 0; font-size: 0.9em;">
                     Write down these 12 words in order. This is the ONLY way to recover your node if you lose access.
                 </p>
-                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 20px;">
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 24px;">
                     ${wordGrid}
                 </div>
-                <p style="color: #f44; font-size: 12px; margin-bottom: 20px;">
+                <button id="recovery-phrase-copy" style="
+                    background: rgba(255, 255, 255, 0.06);
+                    color: #fff;
+                    border: 1px solid rgba(255, 255, 255, 0.12);
+                    padding: 12px 24px;
+                    border-radius: 50px;
+                    font-weight: 500;
+                    cursor: pointer;
+                    transition: all 0.3s ease;
+                    font-family: 'Outfit', sans-serif;
+                    font-size: 0.9em;
+                    backdrop-filter: blur(10px);
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 8px;
+                    margin-bottom: 20px;
+                    width: 100%;
+                    justify-content: center;
+                ">📋 Copy Phrase</button>
+                <p style="color: #ff6b6b; font-size: 12px; margin: 0 0 24px 0;">
                     ⚠️ Never share this phrase. Anyone with it can control your node.
                 </p>
                 <button id="recovery-phrase-confirm" style="
-                    background: linear-gradient(135deg, #667eea, #764ba2);
+                    background: linear-gradient(135deg, #9333EA, #4F46E5);
                     color: white;
                     border: none;
-                    padding: 12px 30px;
-                    border-radius: 8px;
-                    font-size: 16px;
+                    padding: 14px 32px;
+                    border-radius: 50px;
+                    font-size: 0.95em;
+                    font-weight: 600;
                     cursor: pointer;
+                    transition: all 0.3s ease;
+                    font-family: 'Outfit', sans-serif;
+                    width: 100%;
                 ">I've saved my phrase</button>
             </div>
         `;
 
         document.body.appendChild(overlay);
 
+        // Add copy functionality
+        const copyButton = document.getElementById('recovery-phrase-copy');
+        copyButton.onclick = async () => {
+            try {
+                await navigator.clipboard.writeText(phrase);
+                const originalText = copyButton.innerHTML;
+                copyButton.innerHTML = '✓ Copied!';
+                copyButton.style.background = 'rgba(0, 255, 136, 0.2)';
+                copyButton.style.borderColor = 'rgba(0, 255, 136, 0.4)';
+                copyButton.style.color = '#00ff88';
+                
+                setTimeout(() => {
+                    copyButton.innerHTML = originalText;
+                    copyButton.style.background = 'rgba(255, 255, 255, 0.06)';
+                    copyButton.style.borderColor = 'rgba(255, 255, 255, 0.12)';
+                    copyButton.style.color = '#fff';
+                }, 2000);
+            } catch (err) {
+                console.error('Failed to copy:', err);
+                // Fallback: select text in a temporary textarea
+                const textarea = document.createElement('textarea');
+                textarea.value = phrase;
+                textarea.style.position = 'fixed';
+                textarea.style.opacity = '0';
+                document.body.appendChild(textarea);
+                textarea.select();
+                try {
+                    document.execCommand('copy');
+                    copyButton.innerHTML = '✓ Copied!';
+                    setTimeout(() => {
+                        copyButton.innerHTML = '📋 Copy Phrase';
+                    }, 2000);
+                } catch (fallbackErr) {
+                    alert('Failed to copy. Please manually copy the phrase.');
+                }
+                document.body.removeChild(textarea);
+            }
+        };
+
+        // Add hover effect for copy button
+        copyButton.onmouseenter = () => {
+            if (copyButton.innerHTML.includes('Copy')) {
+                copyButton.style.background = 'rgba(255, 255, 255, 0.12)';
+                copyButton.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+                copyButton.style.transform = 'translateY(-2px)';
+            }
+        };
+
+        copyButton.onmouseleave = () => {
+            if (copyButton.innerHTML.includes('Copy')) {
+                copyButton.style.background = 'rgba(255, 255, 255, 0.06)';
+                copyButton.style.borderColor = 'rgba(255, 255, 255, 0.12)';
+                copyButton.style.transform = 'translateY(0)';
+            }
+        };
+
         document.getElementById('recovery-phrase-confirm').onclick = () => {
             overlay.remove();
             if (onClose) onClose();
+        };
+
+        // Add hover effect for confirm button
+        const confirmButton = document.getElementById('recovery-phrase-confirm');
+        confirmButton.onmouseenter = () => {
+            confirmButton.style.transform = 'translateY(-2px)';
+            confirmButton.style.boxShadow = '0 8px 24px rgba(147, 51, 234, 0.4)';
+        };
+        confirmButton.onmouseleave = () => {
+            confirmButton.style.transform = 'translateY(0)';
+            confirmButton.style.boxShadow = 'none';
         };
     }
 
