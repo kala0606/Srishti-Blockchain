@@ -80,17 +80,27 @@ class Chain {
         // Clear existing chain first
         await this.clearChain();
         
+        // Generate unique message to ensure each genesis block is different
+        // This prevents nodes from syncing old chains after reset
+        const uniqueId = options.uniqueId || Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+        const timestamp = Date.now();
+        const uniqueMessage = options.message 
+            ? `${options.message} [${uniqueId}]` 
+            : `Srishti timeline begins - ${timestamp} [${uniqueId}]`;
+        
         const genesisEvent = window.SrishtiEvent.createGenesis({
-            message: options.message || 'Srishti timeline begins',
-            creatorId: options.creatorId || 'genesis'
+            message: uniqueMessage,
+            creatorId: options.creatorId || 'genesis',
+            uniqueId: uniqueId // Store unique ID for reference
         });
         
         const genesisBlock = new window.SrishtiBlock({
             index: 0,
-            timestamp: Date.now(),
+            timestamp: timestamp, // Use the timestamp we generated
             previousHash: null,
             data: genesisEvent,
-            proposer: 'genesis'
+            proposer: 'genesis',
+            nonce: Math.floor(Math.random() * 1000000) // Add random nonce for extra uniqueness
         });
         
         await genesisBlock.computeHash();
@@ -101,7 +111,8 @@ class Chain {
             await this.storage.saveBlock(genesisBlock.toJSON());
         }
         
-        console.log('🌱 Genesis block created');
+        console.log('🌱 Genesis block created with unique signature:', genesisBlock.hash.substring(0, 16) + '...');
+        console.log('   Unique ID:', uniqueId);
         return genesisBlock;
     }
     
@@ -204,6 +215,10 @@ class Chain {
                     
                 case 'NODE_PARENT_REQUEST':
                     await this.handleNodeParentRequest(tx);
+                    // Notify listeners that a parent request was processed
+                    if (this.onParentRequestProcessed) {
+                        this.onParentRequestProcessed(tx);
+                    }
                     break;
                     
                 case 'NODE_PARENT_UPDATE':
@@ -479,6 +494,16 @@ class Chain {
         }
         
         console.log(`✅ Parent request stored: ${nodeId} -> ${parentId}`);
+        
+        // Trigger callback if set (for UI updates)
+        if (this.onParentRequestProcessed) {
+            this.onParentRequestProcessed({
+                nodeId: nodeId,
+                parentId: parentId,
+                reason: reason,
+                requestedAt: tx.timestamp || Date.now()
+            });
+        }
     }
     
     /**
@@ -1018,13 +1043,25 @@ class Chain {
     buildNodeMap() {
         const nodes = {};
         const joins = this.getNodeJoins();
+        const seenNodeIds = new Set(); // Track nodes we've already processed
         
         // First, initialize nodes from NODE_JOIN events
+        // Process in order and skip duplicates (use first occurrence)
         for (const joinEvent of joins) {
+            const nodeId = joinEvent.nodeId;
+            
+            // Skip if we've already seen this node (prevent duplicates)
+            if (seenNodeIds.has(nodeId)) {
+                console.warn(`⚠️ Duplicate NODE_JOIN detected for ${nodeId}, skipping`);
+                continue;
+            }
+            
+            seenNodeIds.add(nodeId);
+            
             // Initialize with parentIds as an array (backward compatible with single parentId)
             const initialParentIds = joinEvent.parentId ? [joinEvent.parentId] : [];
-            nodes[joinEvent.nodeId] = {
-                id: joinEvent.nodeId,
+            nodes[nodeId] = {
+                id: nodeId,
                 name: joinEvent.name,
                 parentId: joinEvent.parentId || null, // Keep for backward compatibility
                 parentIds: initialParentIds, // New: array of parent IDs

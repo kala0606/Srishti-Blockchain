@@ -68,7 +68,8 @@ class Event {
             type: this.TYPES.GENESIS,
             timestamp: Date.now(),
             message: options.message || 'Srishti timeline begins',
-            creator: options.creatorId || 'genesis'
+            creator: options.creatorId || 'genesis',
+            uniqueId: options.uniqueId || null // Optional unique identifier for genesis blocks
         };
     }
     

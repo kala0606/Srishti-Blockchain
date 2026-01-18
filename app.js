@@ -146,15 +146,28 @@ class SrishtiApp {
                 },
                 onParentRequest: async (requestData) => {
                     // Handle parent request received from another node
-                    console.log(`📥 Parent request received from ${requestData.nodeId}`);
+                    console.log(`📥 Parent request received from ${requestData.nodeId} via P2P`);
                     
                     // Store in chain state for UI display
                     if (this.chain && requestData.parentId === this.nodeId) {
-                        await this.chain.addPendingParentRequest(requestData.parentId, requestData);
-                        
-                        // Notify adapter to update UI
-                        if (this.adapter && this.adapter.onChainUpdate) {
-                            this.adapter.onChainUpdate();
+                        try {
+                            await this.chain.addPendingParentRequest(requestData.parentId, {
+                                ...requestData,
+                                requestedAt: requestData.requestedAt || Date.now()
+                            });
+                            console.log(`✅ Stored parent request from ${requestData.nodeId}`);
+                            
+                            // Notify adapter to update UI
+                            if (this.adapter && this.adapter.onChainUpdate) {
+                                this.adapter.onChainUpdate();
+                            }
+                            
+                            // Also trigger dashboard update if available
+                            if (typeof updatePendingParentRequests === 'function') {
+                                updatePendingParentRequests();
+                            }
+                        } catch (error) {
+                            console.error('Failed to store parent request:', error);
                         }
                     }
                     
@@ -1252,8 +1265,14 @@ class SrishtiApp {
             }
         }
         
-        // Reset chain and create new genesis
-        const genesisBlock = await this.chain.resetChain(options);
+        // Reset chain and create new genesis with fresh unique signature
+        const uniqueId = Date.now().toString(36) + Math.random().toString(36).substring(2, 15);
+        const resetOptions = {
+            ...options,
+            uniqueId: uniqueId,
+            message: options.message || `Srishti timeline begins - Fresh start [${uniqueId}]`
+        };
+        const genesisBlock = await this.chain.resetChain(resetOptions);
         
         // Save new genesis block
         if (this.storage) {

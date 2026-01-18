@@ -1232,6 +1232,15 @@ class Network {
             
             // Add each missing node as a new block
             for (const joinEvent of missingJoins) {
+                const nodeId = joinEvent.nodeId;
+                
+                // Double-check the node doesn't exist (race condition protection)
+                const currentNodeMap = this.chain.buildNodeMap();
+                if (currentNodeMap[nodeId]) {
+                    console.log(`⏭️ Node ${nodeId} already exists, skipping merge`);
+                    continue;
+                }
+                
                 // Update timestamp to now (it's being added to our chain now)
                 const updatedJoinEvent = {
                     ...joinEvent,
@@ -1248,20 +1257,20 @@ class Network {
                     previousHash: latestBlock.hash,
                     data: updatedJoinEvent,
                     proposer: peerId,
-                    participationProof: { nodeId: joinEvent.nodeId, score: 0.5, timestamp: Date.now() }
+                    participationProof: { nodeId: nodeId, score: 0.5, timestamp: Date.now() }
                 });
                 
                 await newBlock.computeHash();
                 await this.chain.addBlock(newBlock);
                 
                 // Add to our known nodes for next iteration
-                ourNodeIds.add(joinEvent.nodeId);
+                ourNodeIds.add(nodeId);
                 
                 // Broadcast the new block to other peers (exclude the peer we got it from)
                 const newBlockMessage = window.SrishtiProtocol.createNewBlock(newBlock.toJSON());
                 this.broadcast(newBlockMessage, peerId);
                 
-                console.log(`✅ Added missing node ${joinEvent.name} (${joinEvent.nodeId}) at index ${newBlock.index}`);
+                console.log(`✅ Added missing node ${joinEvent.name} (${nodeId}) at index ${newBlock.index}`);
             }
             
             // Save updated chain
