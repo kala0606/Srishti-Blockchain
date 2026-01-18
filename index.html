@@ -604,6 +604,8 @@
             padding: 40px;
             max-width: 450px;
             width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
             color: var(--text-primary);
             position: relative;
             box-shadow: 
@@ -636,6 +638,82 @@
             color: var(--text-primary);
             background: rgba(255, 255, 255, 0.1);
             transform: rotate(90deg);
+        }
+
+        .node-info-badge {
+            white-space: nowrap;
+        }
+
+        .node-token-item {
+            padding: 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            text-align: left;
+            transition: all 0.2s ease;
+        }
+
+        .node-token-item:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .node-token-title {
+            font-weight: 600;
+            font-size: 0.95em;
+            margin-bottom: 4px;
+            color: var(--text-primary);
+        }
+
+        .node-token-issuer {
+            font-size: 0.8em;
+            color: rgba(255, 255, 255, 0.6);
+            margin-bottom: 2px;
+        }
+
+        .node-token-date {
+            font-size: 0.75em;
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        /* Mobile responsive for node modal */
+        @media (max-width: 768px) {
+            .node-content {
+                padding: 30px 24px;
+                max-width: 95%;
+                border-radius: 24px;
+            }
+
+            .node-stats {
+                gap: 16px;
+            }
+
+            #node-tokens-list {
+                max-height: 150px;
+            }
+
+            /* Custom scrollbar for mobile */
+            .node-content::-webkit-scrollbar,
+            #node-tokens-list::-webkit-scrollbar {
+                width: 6px;
+            }
+
+            .node-content::-webkit-scrollbar-track,
+            #node-tokens-list::-webkit-scrollbar-track {
+                background: rgba(255, 255, 255, 0.05);
+                border-radius: 3px;
+            }
+
+            .node-content::-webkit-scrollbar-thumb,
+            #node-tokens-list::-webkit-scrollbar-thumb {
+                background: rgba(255, 255, 255, 0.2);
+                border-radius: 3px;
+            }
+
+            .node-content::-webkit-scrollbar-thumb:hover,
+            #node-tokens-list::-webkit-scrollbar-thumb:hover {
+                background: rgba(255, 255, 255, 0.3);
+            }
         }
 
         /* Mint Token Modal */
@@ -2030,6 +2108,19 @@
                 <span class="status-dot"></span>
                 <span id="node-status-text">Offline</span>
             </div>
+            
+            <!-- Role and Rank Section -->
+            <div class="node-info-section" style="margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
+                <div style="display: flex; gap: 16px; justify-content: center; flex-wrap: wrap;">
+                    <div class="node-info-badge" id="node-role-badge" style="padding: 8px 16px; background: rgba(147, 51, 234, 0.2); border: 1px solid rgba(147, 51, 234, 0.4); border-radius: 20px; font-size: 0.85em; font-weight: 600;">
+                        <span id="node-role-text">Role</span>
+                    </div>
+                    <div class="node-info-badge" id="node-rank-badge" style="padding: 8px 16px; background: rgba(255, 215, 0, 0.2); border: 1px solid rgba(255, 215, 0, 0.4); border-radius: 20px; font-size: 0.85em; font-weight: 600;">
+                        <span id="node-rank-text">Rank</span>
+                    </div>
+                </div>
+            </div>
+            
             <div class="node-stats">
                 <div class="node-stat">
                     <div class="node-stat-value" id="node-children">0</div>
@@ -2040,6 +2131,22 @@
                     <div class="node-stat-label">Joined</div>
                 </div>
             </div>
+            
+            <!-- Institution Info Section -->
+            <div id="node-institution-section" style="display: none; margin-top: 20px; padding: 16px; background: rgba(147, 51, 234, 0.1); border: 1px solid rgba(147, 51, 234, 0.3); border-radius: 12px;">
+                <div style="font-size: 0.85em; color: rgba(255, 255, 255, 0.6); margin-bottom: 8px;">Institution</div>
+                <div id="node-institution-name" style="font-weight: 600; font-size: 1.05em; margin-bottom: 4px;"></div>
+                <div id="node-institution-category" style="font-size: 0.85em; color: rgba(255, 255, 255, 0.7);"></div>
+            </div>
+            
+            <!-- Soulbound Tokens Section -->
+            <div id="node-tokens-section" style="display: none; margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
+                <div style="font-size: 0.9em; font-weight: 600; margin-bottom: 12px; color: rgba(255, 255, 255, 0.8);">🎓 Soulbound Tokens</div>
+                <div id="node-tokens-list" style="display: flex; flex-direction: column; gap: 10px; max-height: 200px; overflow-y: auto; padding-right: 8px;">
+                    <!-- Tokens will be populated here -->
+                </div>
+            </div>
+            
             <div id="node-modal-actions" style="margin-top: 24px; padding-top: 24px; border-top: 1px solid rgba(255,255,255,0.1);">
                 <button id="request-parent-btn" class="node-action-btn" style="display: none; width: 100%; padding: 12px; background: linear-gradient(135deg, #9333EA, #4F46E5); border: none; border-radius: 8px; color: white; font-size: 0.95em; font-weight: 600; cursor: pointer; transition: all 0.3s ease;">
                     <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 16px; height: 16px; margin-right: 8px; vertical-align: middle;">
@@ -2979,8 +3086,51 @@
             }
         }
         
+        // Touch event handler for mobile devices
+        const touchMouse = new THREE.Vector2();
+        let lastTouchTime = 0;
+        const TOUCH_DELAY = 300; // Prevent double-tap
+        
+        function onTouchEnd(event) {
+            // Prevent default to avoid double-tap zoom
+            event.preventDefault();
+            
+            const now = Date.now();
+            if (now - lastTouchTime < TOUCH_DELAY) {
+                return; // Ignore rapid touches
+            }
+            lastTouchTime = now;
+            
+            if (event.target.closest('.fab-container') || 
+                event.target.closest('#qr-modal') || 
+                event.target.closest('#node-modal') ||
+                event.target.closest('#onboarding-modal') ||
+                event.target.closest('#mint-token-modal')) {
+                return;
+            }
+            
+            const touch = event.changedTouches[0];
+            if (!touch) return;
+            
+            touchMouse.x = (touch.clientX / window.innerWidth) * 2 - 1;
+            touchMouse.y = -(touch.clientY / window.innerHeight) * 2 + 1;
+            
+            raycaster.setFromCamera(touchMouse, camera);
+            const intersects = raycaster.intersectObjects(nodeMeshes);
+            
+            if (intersects.length > 0) {
+                const mesh = intersects[0].object;
+                const nodeInfo = mesh.userData.nodeData;
+                if (nodeInfo) {
+                    showNodeModal(nodeInfo);
+                }
+            }
+        }
+        
         window.addEventListener('mousemove', onMouseMove);
         window.addEventListener('click', onClick);
+        // Add touch support for mobile
+        window.addEventListener('touchend', onTouchEnd, { passive: false });
         
         function animate() {
             requestAnimationFrame(animate);
@@ -4248,6 +4398,8 @@
         
         function showNodeModal(nodeData) {
             const modal = document.getElementById('node-modal');
+            const nodeId = nodeData.id;
+            const chain = window.SrishtiApp?.chain;
             
             document.getElementById('node-avatar').textContent = (nodeData.name || '?')[0].toUpperCase();
             document.getElementById('node-name').textContent = nodeData.name || 'Unknown';
@@ -4283,13 +4435,92 @@
                 document.getElementById('node-joined').textContent = '-';
             }
             
+            // Display Role
+            let role = 'USER';
+            if (chain) {
+                role = chain.getNodeRole(nodeId) || 'USER';
+            }
+            const roleText = role === 'ROOT' ? '👑 ROOT' : 
+                            role === 'INSTITUTION' ? '🏛️ INSTITUTION' : 
+                            role === 'GOVERNANCE_ADMIN' ? '⚖️ GOVERNANCE_ADMIN' : 
+                            '👤 USER';
+            document.getElementById('node-role-text').textContent = roleText;
+            
+            // Display Rank/Participation Score
+            let rankText = 'N/A';
+            let rankValue = 0;
+            if (window.SrishtiGlow && nodeData) {
+                const glow = window.SrishtiGlow.calculateGlow(nodeData);
+                rankValue = Math.round(glow.composite * 100);
+                rankText = `Rank: ${rankValue}%`;
+            } else if (window.SrishtiApp?.consensus) {
+                try {
+                    rankValue = Math.round((window.SrishtiApp.consensus.getParticipationScore(nodeId) || 0) * 100);
+                    rankText = `Rank: ${rankValue}%`;
+                } catch (e) {
+                    rankText = 'Rank: N/A';
+                }
+            }
+            document.getElementById('node-rank-text').textContent = rankText;
+            
+            // Display Institution Info
+            const institutionSection = document.getElementById('node-institution-section');
+            if (chain && role === 'INSTITUTION') {
+                const institutions = chain.getInstitutions();
+                const institution = institutions.verified[nodeId];
+                if (institution) {
+                    institutionSection.style.display = 'block';
+                    document.getElementById('node-institution-name').textContent = institution.name || 'Unknown Institution';
+                    document.getElementById('node-institution-category').textContent = institution.category || '';
+                } else {
+                    institutionSection.style.display = 'none';
+                }
+            } else {
+                institutionSection.style.display = 'none';
+            }
+            
+            // Display Soulbound Tokens
+            const tokensSection = document.getElementById('node-tokens-section');
+            const tokensList = document.getElementById('node-tokens-list');
+            if (chain && nodeId) {
+                const tokens = chain.getSoulboundTokens(nodeId) || [];
+                if (tokens.length > 0) {
+                    tokensSection.style.display = 'block';
+                    tokensList.innerHTML = '';
+                    
+                    tokens.forEach(token => {
+                        const tokenItem = document.createElement('div');
+                        tokenItem.className = 'node-token-item';
+                        
+                        const date = new Date(token.mintedAt || Date.now());
+                        const dateStr = date.toLocaleDateString('en-US', { 
+                            year: 'numeric', 
+                            month: 'short', 
+                            day: 'numeric' 
+                        });
+                        
+                        tokenItem.innerHTML = `
+                            <div class="node-token-title">${escapeHtml(token.title || token.achievementId || 'Token')}</div>
+                            <div class="node-token-issuer">Issued by: ${escapeHtml(token.issuerName || 'Unknown')}</div>
+                            ${token.description ? `<div class="node-token-issuer" style="margin-top: 4px;">${escapeHtml(token.description)}</div>` : ''}
+                            <div class="node-token-date">Minted: ${dateStr}</div>
+                        `;
+                        tokensList.appendChild(tokenItem);
+                    });
+                } else {
+                    tokensSection.style.display = 'none';
+                }
+            } else {
+                tokensSection.style.display = 'none';
+            }
+            
             // Show/hide request parent button
             // Support multiple parents - show button if this node isn't already a parent
             const requestParentBtn = document.getElementById('request-parent-btn');
             if (requestParentBtn) {
                 if (currentUser && nodeData.id !== currentUser.id) {
                     // Check if this node is already a parent
-                    const nodeMap = window.SrishtiApp?.chain?.buildNodeMap();
+                    const nodeMap = chain?.buildNodeMap();
                     const currentNode = nodeMap?.[currentUser.id];
                     const currentParentIds = Array.isArray(currentNode?.parentIds) 
                         ? currentNode.parentIds 
