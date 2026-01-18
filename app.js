@@ -96,7 +96,7 @@ class SrishtiApp {
                     presenceCheckInterval: karmaConfig.PRESENCE_CHECK_INTERVAL,
                     ubiCheckInterval: karmaConfig.UBI_CHECK_INTERVAL,
                     minimumBalance: karmaConfig.MINIMUM_BALANCE
-                }, this.adapter, this.nodeId); // Pass adapter and current node ID
+                }, this.adapter); // Pass adapter for presence data
                 
                 // Link karma manager to chain for activity rewards
                 this.chain.karmaManager = this.karmaManager;
