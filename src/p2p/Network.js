@@ -443,7 +443,8 @@ class Network {
         const ourChainLength = this.chain.getLength();
         const ourLatestHash = this.chain.getLatestBlock()?.hash || null;
         
-        // Wait a bit for HELLO exchange, then check if sync is needed
+        // Wait a bit for HELLO exchange, then always sync to ensure we have all nodes
+        // This is important because nodes might have been added concurrently
         setTimeout(async () => {
             if (!this.peers.has(nodeId)) {
                 return; // Peer disconnected
@@ -451,27 +452,20 @@ class Network {
             
             const peerInfo = this.peerInfo.get(nodeId);
             if (!peerInfo) {
-                return; // No peer info yet
+                // If we don't have peer info yet, request sync anyway - it will help discover new nodes
+                console.log(`🔄 Requesting sync from ${nodeId} (peer info not yet available)...`);
+                await this.requestSync(nodeId);
+                return;
             }
             
             const theirChainLength = peerInfo.chainLength || 0;
             const theirLatestHash = peerInfo.latestHash || null;
             
-            // Sync if:
-            // 1. Their chain is longer, OR
-            // 2. Chains have same length but different latest hash (divergent chains), OR
-            // 3. We only have genesis and they have more
-            const shouldSync = theirChainLength > ourChainLength || 
-                             (theirChainLength === ourChainLength && theirLatestHash && ourLatestHash && theirLatestHash !== ourLatestHash) ||
-                             (ourChainLength <= 1 && theirChainLength > 1);
-            
-            if (shouldSync) {
-                console.log(`🔄 Auto-requesting sync from ${nodeId} (ours: ${ourChainLength}/${ourLatestHash?.substring(0, 8)}, theirs: ${theirChainLength}/${theirLatestHash?.substring(0, 8)})`);
-                await this.requestSync(nodeId);
-            } else {
-                console.log(`✓ Chains in sync with ${nodeId} (${ourChainLength} blocks, hash: ${ourLatestHash?.substring(0, 8)})`);
-            }
-        }, 1000);
+            // Always sync when peer connects to ensure we discover all nodes
+            // The sync response handler will merge unique nodes even if chains have same length
+            console.log(`🔄 Auto-requesting sync from ${nodeId} (ours: ${ourChainLength}/${ourLatestHash?.substring(0, 8)}, theirs: ${theirChainLength}/${theirLatestHash?.substring(0, 8)})`);
+            await this.requestSync(nodeId);
+        }, 500); // Reduced from 1000ms for faster sync
     }
     
     /**
@@ -622,7 +616,10 @@ class Network {
             console.log(`📥 Requesting sync: our chain=${ourChainLength}/${ourLatestHash?.substring(0, 8)}, their chain=${message.chainLength}/${theirLatestHash?.substring(0, 8)}`);
             await this.requestSync(peerId);
         } else {
-            console.log(`✓ Chains appear in sync with ${peerId} (${ourChainLength} blocks)`);
+            // Even if chains appear in sync, always do a sync request to ensure we have all nodes
+            // This is important because nodes might have been added concurrently and we need to merge unique nodes
+            console.log(`🔍 Chains appear in sync with ${peerId} (${ourChainLength} blocks), but verifying all nodes are present...`);
+            await this.requestSync(peerId);
         }
     }
     
@@ -1368,8 +1365,14 @@ class Network {
                         }
                         // Send immediate heartbeat
                         this.sendHeartbeat();
-                        // Request sync
-                        this.requestSync(nodeId);
+                        // Wait a moment for HELLO exchange before requesting sync
+                        // This ensures we have accurate chain info from the peer
+                        setTimeout(async () => {
+                            if (this.peers.has(nodeId) && this.peers.get(nodeId).isConnected()) {
+                                console.log(`🔄 Requesting sync from ${nodeId} after connection established...`);
+                                await this.requestSync(nodeId);
+                            }
+                        }, 500);
                     } else if (state === 'data_channel_closed' || state === 'data_channel_error' ||
                                state === 'disconnected' || state === 'failed') {
                         this.pendingOffers.delete(nodeId);
