@@ -99,18 +99,39 @@ class BlockchainAdapter {
         }
         
         // Build children map (supporting multiple parents)
+        // For visualization, we need to prevent duplicate nodes when a node has multiple parents
+        // We'll build a tree using the FIRST parent for tree structure, but store all parents in metadata
         const childrenMap = {};
+        const allParentsMap = {}; // Store ALL parents for each node (for multi-parent links)
+        const seenNodes = new Set(); // Track nodes we've already added to tree
+        
         nodesArray.forEach(node => {
             // Get parentIds array (support both old parentId and new parentIds)
             const parentIds = Array.isArray(node.parentIds) ? node.parentIds : (node.parentId ? [node.parentId] : []);
             
-            // Add this node to each of its parents' children lists
-            parentIds.forEach(parentId => {
-                if (!childrenMap[parentId]) {
-                    childrenMap[parentId] = [];
+            // Store all parents for this node
+            allParentsMap[node.id] = parentIds;
+            
+            // For tree structure, use FIRST parent only to prevent duplicates
+            // But we'll use allParentsMap when creating links
+            if (parentIds.length > 0) {
+                const firstParentId = parentIds[0];
+                if (!childrenMap[firstParentId]) {
+                    childrenMap[firstParentId] = [];
                 }
-                childrenMap[parentId].push(node);
-            });
+                // Only add if we haven't seen this node yet (prevent duplicates)
+                if (!seenNodes.has(node.id)) {
+                    childrenMap[firstParentId].push(node);
+                    seenNodes.add(node.id);
+                }
+            }
+        });
+        
+        // Add root nodes that haven't been added yet
+        rootNodes.forEach(rootNode => {
+            if (!seenNodes.has(rootNode.id)) {
+                seenNodes.add(rootNode.id);
+            }
         });
         
         // Log children map for debugging
@@ -119,15 +140,21 @@ class BlockchainAdapter {
             children: children.map(c => ({ id: c.id.substring(0, 12), name: c.name }))
         })));
         
-        // Recursive function to build tree
+        // Recursive function to build tree (using first parent only to prevent duplicates)
+        // But we'll attach allParentsMap to each node for link creation
         function buildTree(node) {
             const children = childrenMap[node.id] || [];
             return {
                 ...node,
                 name: node.name,
+                // Store all parents in node data so visualization can create links to all parents
+                allParentIds: allParentsMap[node.id] || [],
                 children: children.length > 0 ? children.map(buildTree) : undefined
             };
         }
+        
+        // Build tree for each root
+        const rootTrees = rootNodes.map(buildTree);
         
         // If multiple roots, create a virtual root
         if (rootNodes.length > 1) {
@@ -135,11 +162,12 @@ class BlockchainAdapter {
                 id: 'srishti-root',
                 name: 'Srishti',
                 isVirtualRoot: true,
-                children: rootNodes.map(buildTree)
+                allParentIds: [], // Virtual root has no parents
+                children: rootTrees
             };
         }
         
-        return buildTree(rootNodes[0]);
+        return rootTrees[0];
     }
     
     /**

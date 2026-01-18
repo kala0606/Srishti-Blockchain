@@ -2822,14 +2822,54 @@
                 opacity: 0.3
             });
             
+            // Track created links to avoid duplicates (for multiple parents)
+            const linkSet = new Set();
+            const nodeIdToHierarchyNode = new Map();
+            nodes.forEach(node => {
+                nodeIdToHierarchyNode.set(node.data.id, node);
+            });
+            
+            // First, create links from D3 tree (covers first parent for each node)
             filteredLinks.forEach(link => {
-                const geometry = new THREE.BufferGeometry();
-                const positions = new Float32Array(6);
-                geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                const linkKey = `${link.source.data.id}-${link.target.data.id}`;
+                if (!linkSet.has(linkKey)) {
+                    linkSet.add(linkKey);
+                    
+                    const geometry = new THREE.BufferGeometry();
+                    const positions = new Float32Array(6);
+                    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                    
+                    const line = new THREE.Line(geometry, linkMaterial.clone());
+                    mainGroup.add(line);
+                    linkObjects.push({ line, source: link.source, target: link.target });
+                }
+            });
+            
+            // Now, add links for ALL other parents (supporting multiple parents)
+            nodes.forEach(node => {
+                const nodeData = node.data;
+                const allParentIds = nodeData.allParentIds || [];
                 
-                const line = new THREE.Line(geometry, linkMaterial.clone());
-                mainGroup.add(line);
-                linkObjects.push({ line, source: link.source, target: link.target });
+                // Create links to all parents (child -> parent)
+                allParentIds.forEach(parentId => {
+                    const parentNode = nodeIdToHierarchyNode.get(parentId);
+                    if (parentNode) {
+                        // Link from child (this node) to parent
+                        const linkKey = `${node.data.id}-${parentId}`;
+                        if (!linkSet.has(linkKey)) {
+                            linkSet.add(linkKey);
+                            
+                            const geometry = new THREE.BufferGeometry();
+                            const positions = new Float32Array(6);
+                            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                            
+                            const line = new THREE.Line(geometry, linkMaterial.clone());
+                            mainGroup.add(line);
+                            // Note: source is child (this node), target is parent
+                            linkObjects.push({ line, source: node, target: parentNode });
+                        }
+                    }
+                });
             });
             
             // Create node meshes
