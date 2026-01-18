@@ -549,6 +549,12 @@ class Network {
             case window.SrishtiProtocol.MESSAGE_TYPES.HEARTBEAT:
                 this.handleHeartbeat(message, peerId);
                 break;
+            case window.SrishtiProtocol.MESSAGE_TYPES.PARENT_REQUEST:
+                await this.handleParentRequest(message, peerId);
+                break;
+            case window.SrishtiProtocol.MESSAGE_TYPES.PARENT_RESPONSE:
+                await this.handleParentResponse(message, peerId);
+                break;
             default:
                 console.warn(`Unknown message type: ${message.type}`);
         }
@@ -962,6 +968,138 @@ class Network {
                 }
             }
         }
+    }
+    
+    /**
+     * Handle PARENT_REQUEST message
+     * @param {Object} message - Parent request message
+     * @param {string} peerId - Peer's node ID (the node requesting to be child)
+     */
+    async handleParentRequest(message, peerId) {
+        console.log(`📥 Received PARENT_REQUEST from ${peerId} to become child of ${message.parentId}`);
+        
+        // Check if the request is for us to be the parent
+        if (message.parentId !== this.nodeId) {
+            console.log(`⏭️ Parent request not for us (requested: ${message.parentId}, we are: ${this.nodeId})`);
+            return;
+        }
+        
+        // This is a callback - the actual approval happens in the UI/app layer
+        // We'll just notify that a request was received
+        if (this.onParentRequest) {
+            this.onParentRequest({
+                nodeId: message.nodeId || peerId,
+                parentId: message.parentId,
+                reason: message.reason,
+                metadata: message.metadata
+            });
+        } else {
+            console.log(`ℹ️ Parent request received from ${peerId}, but no handler registered`);
+        }
+    }
+    
+    /**
+     * Handle PARENT_RESPONSE message
+     * @param {Object} message - Parent response message
+     * @param {string} peerId - Peer's node ID (the parent who responded)
+     */
+    async handleParentResponse(message, peerId) {
+        console.log(`📥 Received PARENT_RESPONSE from ${peerId}: ${message.approved ? 'approved' : 'rejected'}`);
+        
+        // Check if the response is for our request
+        if (message.requestNodeId !== this.nodeId) {
+            console.log(`⏭️ Parent response not for us (requested: ${message.requestNodeId}, we are: ${this.nodeId})`);
+            return;
+        }
+        
+        // Notify the app layer
+        if (this.onParentResponse) {
+            this.onParentResponse({
+                parentId: message.parentId,
+                approved: message.approved,
+                reason: message.reason
+            });
+        } else {
+            console.log(`ℹ️ Parent response received from ${peerId}, but no handler registered`);
+        }
+    }
+    
+    /**
+     * Send parent request to a node
+     * @param {string} parentId - Node ID of the parent we want to connect to
+     * @param {Object} options - Request options
+     * @returns {Promise<boolean>} - Success status
+     */
+    async sendParentRequest(parentId, options = {}) {
+        console.log(`📤 Sending PARENT_REQUEST to ${parentId}...`);
+        
+        const connection = this.peers.get(parentId);
+        if (!connection || !connection.isConnected()) {
+            console.warn(`❌ Cannot send parent request: not connected to ${parentId}`);
+            // Try to connect first
+            const nodeMap = this.chain.buildNodeMap();
+            const parentNode = nodeMap[parentId];
+            if (parentNode && parentNode.publicKey) {
+                await this.addPendingConnection(parentId, parentNode.publicKey);
+                await this.attemptConnection(parentId, parentNode.publicKey);
+                // Wait a bit for connection to establish
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                // Retry after connection
+                if (this.peers.has(parentId) && this.peers.get(parentId).isConnected()) {
+                    return await this.sendParentRequest(parentId, options);
+                }
+            }
+            return false;
+        }
+        
+        const request = window.SrishtiProtocol.createParentRequest({
+            nodeId: this.nodeId,
+            parentId: parentId,
+            reason: options.reason || null,
+            metadata: options.metadata || {}
+        });
+        
+        const sent = connection.send(request);
+        if (sent) {
+            console.log(`✅ Parent request sent to ${parentId}`);
+        } else {
+            console.error(`❌ Failed to send parent request to ${parentId}`);
+        }
+        
+        return sent;
+    }
+    
+    /**
+     * Send parent response (approve/reject) to a requesting node
+     * @param {string} requestNodeId - Node ID that requested to be child
+     * @param {boolean} approved - Whether to approve the request
+     * @param {string} reason - Optional reason
+     * @returns {Promise<boolean>} - Success status
+     */
+    async sendParentResponse(requestNodeId, approved, reason = null) {
+        console.log(`📤 Sending PARENT_RESPONSE to ${requestNodeId}: ${approved ? 'approved' : 'rejected'}`);
+        
+        const connection = this.peers.get(requestNodeId);
+        if (!connection || !connection.isConnected()) {
+            console.warn(`❌ Cannot send parent response: not connected to ${requestNodeId}`);
+            return false;
+        }
+        
+        const response = window.SrishtiProtocol.createParentResponse({
+            requestNodeId: requestNodeId,
+            parentId: this.nodeId,
+            approved: approved,
+            reason: reason
+        });
+        
+        const sent = connection.send(response);
+        if (sent) {
+            console.log(`✅ Parent response sent to ${requestNodeId}`);
+        } else {
+            console.error(`❌ Failed to send parent response to ${requestNodeId}`);
+        }
+        
+        return sent;
     }
     
     /**

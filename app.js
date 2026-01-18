@@ -143,6 +143,23 @@ class SrishtiApp {
                 onPresenceUpdate: (nodeId, presenceData) => {
                     // Update presence for peer nodes (works in guest mode too)
                     this.adapter.updatePresence(nodeId, presenceData);
+                },
+                onParentRequest: (requestData) => {
+                    // Handle parent request received from another node
+                    console.log(`📥 Parent request received from ${requestData.nodeId}`);
+                    // This can be used to show notifications in the UI
+                    // The parent can then call approveParentConnection() to approve it
+                    if (this.onParentRequestReceived) {
+                        this.onParentRequestReceived(requestData);
+                    }
+                },
+                onParentResponse: (responseData) => {
+                    // Handle parent response received from a parent node
+                    console.log(`📥 Parent response received: ${responseData.approved ? 'approved' : 'rejected'}`);
+                    // This can be used to show notifications in the UI
+                    if (this.onParentResponseReceived) {
+                        this.onParentResponseReceived(responseData);
+                    }
                 }
             });
             
@@ -637,6 +654,279 @@ class SrishtiApp {
     getPendingInstitutions() {
         if (!this.chain) return {};
         return this.chain.getPendingInstitutions();
+    }
+    
+    /**
+     * Request to become a child of another node
+     * @param {string} parentId - Node ID of the parent we want to connect to
+     * @param {Object} options - Request options
+     * @returns {Promise<Object>} - Result with request info
+     */
+    async requestParentConnection(parentId, options = {}) {
+        if (!this.chain || !this.nodeId) {
+            throw new Error('App not initialized or no node created');
+        }
+        
+        if (!parentId) {
+            throw new Error('Parent ID is required');
+        }
+        
+        // Check if parent node exists
+        const nodeMap = this.chain.buildNodeMap();
+        if (!nodeMap[parentId]) {
+            throw new Error(`Parent node ${parentId} does not exist in the network`);
+        }
+        
+        // First, send the request via P2P to the parent node
+        if (this.network) {
+            console.log(`📤 Sending parent request to ${parentId} via P2P...`);
+            const sent = await this.network.sendParentRequest(parentId, {
+                reason: options.reason || null,
+                metadata: options.metadata || {}
+            });
+            
+            if (!sent) {
+                console.warn(`⚠️ Could not send parent request via P2P, will create blockchain event instead`);
+            }
+        }
+        
+        // Also create a blockchain event for the request (for record-keeping and offline scenarios)
+        const requestEvent = window.SrishtiEvent.createNodeParentRequest({
+            nodeId: this.nodeId,
+            parentId: parentId,
+            reason: options.reason || null,
+            metadata: options.metadata || {}
+        });
+        
+        const tx = {
+            ...requestEvent,
+            timestamp: Date.now(),
+            signature: 'sig_' + Math.random().toString(36).substring(2, 10)
+        };
+        
+        const result = await this._createAndBroadcastBlock(tx);
+        console.log(`📋 Parent connection request submitted: ${this.nodeId} -> ${parentId}`);
+        return result;
+    }
+    
+    /**
+     * Approve a parent connection request (parent approves child's request)
+     * @param {string} childNodeId - Node ID of the child requesting to connect
+     * @param {string} reason - Reason for approval (optional)
+     * @returns {Promise<Object>} - Result with block info
+     */
+    async approveParentConnection(childNodeId, reason = null) {
+        if (!this.chain || !this.nodeId) {
+            throw new Error('App not initialized or no node created');
+        }
+        
+        if (!childNodeId) {
+            throw new Error('Child node ID is required');
+        }
+        
+        // Check if child node exists
+        const nodeMap = this.chain.buildNodeMap();
+        if (!nodeMap[childNodeId]) {
+            throw new Error(`Child node ${childNodeId} does not exist in the network`);
+        }
+        
+        // Get current parents of the child node
+        const childNode = nodeMap[childNodeId];
+        const currentParentIds = Array.isArray(childNode.parentIds) ? childNode.parentIds : 
+                                 (childNode.parentId ? [childNode.parentId] : []);
+        
+        // Check if this parent is already in the list
+        if (currentParentIds.includes(this.nodeId)) {
+            console.log(`ℹ️ ${childNodeId} already has ${this.nodeId} as a parent`);
+            return { success: true, message: 'Already a parent' };
+        }
+        
+        // Send response via P2P first
+        if (this.network) {
+            console.log(`📤 Sending parent approval to ${childNodeId} via P2P...`);
+            await this.network.sendParentResponse(childNodeId, true, reason);
+        }
+        
+        // Create the parent update event on the blockchain (ADD action to support multiple parents)
+        const updateEvent = window.SrishtiEvent.createNodeParentUpdate({
+            nodeId: childNodeId,
+            action: 'ADD',
+            parentId: this.nodeId,
+            approverId: this.nodeId,
+            reason: reason || 'Parent connection approved'
+        });
+        
+        const tx = {
+            ...updateEvent,
+            timestamp: Date.now(),
+            signature: 'sig_' + Math.random().toString(36).substring(2, 10)
+        };
+        
+        const result = await this._createAndBroadcastBlock(tx);
+        console.log(`✅ Parent connection approved: ${childNodeId} -> ${this.nodeId}`);
+        return result;
+    }
+    
+    /**
+     * Reject a parent connection request
+     * @param {string} childNodeId - Node ID of the child requesting to connect
+     * @param {string} reason - Reason for rejection (optional)
+     * @returns {Promise<boolean>} - Success status
+     */
+    async rejectParentConnection(childNodeId, reason = null) {
+        if (!this.network) {
+            console.warn('Network not initialized, cannot send rejection');
+            return false;
+        }
+        
+        // Send rejection via P2P (no blockchain event needed for rejection)
+        const sent = await this.network.sendParentResponse(childNodeId, false, reason);
+        if (sent) {
+            console.log(`❌ Parent connection rejected: ${childNodeId}`);
+        }
+        return sent;
+    }
+    
+    /**
+     * Add a parent to myself (self-update, doesn't require approval)
+     * @param {string} parentId - Parent node ID to add
+     * @param {string} reason - Reason for update (optional)
+     * @returns {Promise<Object>} - Result with block info
+     */
+    async addMyParent(parentId, reason = null) {
+        if (!this.chain || !this.nodeId) {
+            throw new Error('App not initialized or no node created');
+        }
+        
+        if (!parentId) {
+            throw new Error('Parent ID is required');
+        }
+        
+        // Verify parent exists
+        const nodeMap = this.chain.buildNodeMap();
+        if (!nodeMap[parentId]) {
+            throw new Error(`Parent node ${parentId} does not exist in the network`);
+        }
+        
+        // Check if already a parent
+        const currentNode = nodeMap[this.nodeId];
+        const currentParentIds = Array.isArray(currentNode?.parentIds) ? currentNode.parentIds : 
+                                 (currentNode?.parentId ? [currentNode.parentId] : []);
+        if (currentParentIds.includes(parentId)) {
+            console.log(`ℹ️ ${parentId} is already a parent of ${this.nodeId}`);
+            return { success: true, message: 'Already a parent' };
+        }
+        
+        // Create the parent update event (ADD action)
+        const updateEvent = window.SrishtiEvent.createNodeParentUpdate({
+            nodeId: this.nodeId,
+            action: 'ADD',
+            parentId: parentId,
+            approverId: this.nodeId, // Self-update
+            reason: reason || 'Self-added parent connection'
+        });
+        
+        const tx = {
+            ...updateEvent,
+            timestamp: Date.now(),
+            signature: 'sig_' + Math.random().toString(36).substring(2, 10)
+        };
+        
+        const result = await this._createAndBroadcastBlock(tx);
+        console.log(`➕ Added parent: ${this.nodeId} -> ${parentId}`);
+        return result;
+    }
+    
+    /**
+     * Remove a parent from myself
+     * @param {string} parentId - Parent node ID to remove
+     * @param {string} reason - Reason for removal (optional)
+     * @returns {Promise<Object>} - Result with block info
+     */
+    async removeMyParent(parentId, reason = null) {
+        if (!this.chain || !this.nodeId) {
+            throw new Error('App not initialized or no node created');
+        }
+        
+        if (!parentId) {
+            throw new Error('Parent ID is required');
+        }
+        
+        // Verify parent exists in our current parents
+        const nodeMap = this.chain.buildNodeMap();
+        const currentNode = nodeMap[this.nodeId];
+        const currentParentIds = Array.isArray(currentNode?.parentIds) ? currentNode.parentIds : 
+                                 (currentNode?.parentId ? [currentNode.parentId] : []);
+        
+        if (!currentParentIds.includes(parentId)) {
+            throw new Error(`${parentId} is not a parent of ${this.nodeId}`);
+        }
+        
+        // Create the parent update event (REMOVE action)
+        const updateEvent = window.SrishtiEvent.createNodeParentUpdate({
+            nodeId: this.nodeId,
+            action: 'REMOVE',
+            parentId: parentId,
+            approverId: this.nodeId, // Self-update
+            reason: reason || 'Self-removed parent connection'
+        });
+        
+        const tx = {
+            ...updateEvent,
+            timestamp: Date.now(),
+            signature: 'sig_' + Math.random().toString(36).substring(2, 10)
+        };
+        
+        const result = await this._createAndBroadcastBlock(tx);
+        console.log(`➖ Removed parent: ${this.nodeId} removed ${parentId}`);
+        return result;
+    }
+    
+    /**
+     * Update my own parent (self-update, doesn't require approval)
+     * For backward compatibility - this replaces all parents with a single parent
+     * Use addMyParent/removeMyParent for multiple parents
+     * @param {string} newParentId - New parent node ID (or null to become independent)
+     * @param {string} reason - Reason for update (optional)
+     * @returns {Promise<Object>} - Result with block info
+     */
+    async updateMyParent(newParentId, reason = null) {
+        if (!this.chain || !this.nodeId) {
+            throw new Error('App not initialized or no node created');
+        }
+        
+        // If newParentId is provided, verify it exists
+        if (newParentId) {
+            const nodeMap = this.chain.buildNodeMap();
+            if (!nodeMap[newParentId]) {
+                throw new Error(`Parent node ${newParentId} does not exist in the network`);
+            }
+        }
+        
+        // Get current parents
+        const nodeMap = this.chain.buildNodeMap();
+        const currentNode = nodeMap[this.nodeId];
+        const oldParentId = currentNode?.parentId || null;
+        
+        // Create the parent update event (SET action for backward compatibility)
+        const updateEvent = window.SrishtiEvent.createNodeParentUpdate({
+            nodeId: this.nodeId,
+            action: 'SET',
+            newParentId: newParentId || null,
+            oldParentId: oldParentId,
+            approverId: this.nodeId, // Self-update
+            reason: reason || 'Self-update parent connection'
+        });
+        
+        const tx = {
+            ...updateEvent,
+            timestamp: Date.now(),
+            signature: 'sig_' + Math.random().toString(36).substring(2, 10)
+        };
+        
+        const result = await this._createAndBroadcastBlock(tx);
+        console.log(`🔗 Parent updated: ${this.nodeId} -> ${newParentId || 'independent'}`);
+        return result;
     }
     
     // ═══════════════════════════════════════════════════════════════════════

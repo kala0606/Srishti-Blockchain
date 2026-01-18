@@ -23,7 +23,11 @@ class Protocol {
         HEARTBEAT: 'HEARTBEAT',
         PEER_LIST: 'PEER_LIST',
         PING: 'PING',
-        PONG: 'PONG'
+        PONG: 'PONG',
+        
+        // Parent-child relationship management
+        PARENT_REQUEST: 'PARENT_REQUEST',       // Request to become child of another node
+        PARENT_RESPONSE: 'PARENT_RESPONSE'      // Response to parent request (approve/reject)
     };
     
     /**
@@ -176,6 +180,38 @@ class Protocol {
         return {
             type: this.MESSAGE_TYPES.PONG,
             timestamp: Date.now()
+        };
+    }
+    
+    /**
+     * Create a PARENT_REQUEST message (request to become child)
+     * @param {Object} info - Request info
+     * @returns {Object}
+     */
+    static createParentRequest(info) {
+        return {
+            type: this.MESSAGE_TYPES.PARENT_REQUEST,
+            timestamp: Date.now(),
+            nodeId: info.nodeId,
+            parentId: info.parentId,
+            reason: info.reason || null,
+            metadata: info.metadata || {}
+        };
+    }
+    
+    /**
+     * Create a PARENT_RESPONSE message (response to parent request)
+     * @param {Object} info - Response info
+     * @returns {Object}
+     */
+    static createParentResponse(info) {
+        return {
+            type: this.MESSAGE_TYPES.PARENT_RESPONSE,
+            timestamp: Date.now(),
+            requestNodeId: info.requestNodeId,
+            parentId: info.parentId,
+            approved: info.approved !== undefined ? info.approved : false,
+            reason: info.reason || null
         };
     }
 

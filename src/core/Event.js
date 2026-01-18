@@ -16,6 +16,10 @@ class Event {
         NODE_ATTEST: 'NODE_ATTEST',
         PRESENCE_UPDATE: 'PRESENCE_UPDATE',
         
+        // Parent-child relationship management
+        NODE_PARENT_REQUEST: 'NODE_PARENT_REQUEST',   // Request to become child of another node
+        NODE_PARENT_UPDATE: 'NODE_PARENT_UPDATE',     // Update parent-child relationship (after approval)
+        
         // Institution management
         INSTITUTION_REGISTER: 'INSTITUTION_REGISTER',   // Request to become an issuer
         INSTITUTION_VERIFY: 'INSTITUTION_VERIFY',       // Approve institution (by ROOT/governance)
@@ -274,6 +278,58 @@ class Event {
     }
     
     /**
+     * Create a NODE_PARENT_REQUEST event (request to become child of another node)
+     * @param {Object} options
+     * @returns {Object} Parent request event
+     */
+    static createNodeParentRequest(options) {
+        if (!options.nodeId || !options.parentId) {
+            throw new Error('NODE_PARENT_REQUEST requires nodeId and parentId');
+        }
+        
+        return {
+            type: this.TYPES.NODE_PARENT_REQUEST,
+            timestamp: Date.now(),
+            sender: options.nodeId,
+            payload: {
+                parentId: options.parentId,
+                reason: options.reason || null,
+                metadata: options.metadata || {}
+            }
+        };
+    }
+    
+    /**
+     * Create a NODE_PARENT_UPDATE event (update parent-child relationship)
+     * Supports multiple parents with ADD/REMOVE actions
+     * @param {Object} options
+     * @returns {Object} Parent update event
+     */
+    static createNodeParentUpdate(options) {
+        if (!options.nodeId || (options.action !== 'ADD' && options.action !== 'REMOVE' && !options.newParentId)) {
+            throw new Error('NODE_PARENT_UPDATE requires nodeId and either (action and parentId) or newParentId for backward compatibility');
+        }
+        
+        // For backward compatibility, if newParentId is provided without action, use SET action
+        const action = options.action || (options.newParentId ? 'SET' : null);
+        const parentId = options.parentId || options.newParentId;
+        
+        return {
+            type: this.TYPES.NODE_PARENT_UPDATE,
+            timestamp: Date.now(),
+            sender: options.approverId || options.nodeId, // Can be approved by parent or self-updated
+            payload: {
+                nodeId: options.nodeId,
+                action: action, // 'ADD', 'REMOVE', or 'SET' (for backward compatibility)
+                parentId: parentId, // The parent being added/removed/set
+                newParentId: options.newParentId || null, // For backward compatibility
+                oldParentId: options.oldParentId || null, // For backward compatibility
+                reason: options.reason || null
+            }
+        };
+    }
+    
+    /**
      * Create a SOCIAL_RECOVERY_UPDATE event
      * @param {Object} options
      * @returns {Object} Social recovery update event
@@ -333,6 +389,12 @@ class Event {
                 return !!(event.sender && event.payload?.proposalId && event.payload?.vote);
             case this.TYPES.SOCIAL_RECOVERY_UPDATE:
                 return !!(event.sender && event.payload?.guardians && event.payload?.recoveryThreshold);
+            case this.TYPES.NODE_PARENT_REQUEST:
+                return !!(event.sender && event.payload?.parentId);
+            case this.TYPES.NODE_PARENT_UPDATE:
+                return !!(event.sender && event.payload?.nodeId && 
+                         (event.payload?.parentId || event.payload?.newParentId || 
+                          (event.payload?.action && (event.payload?.action === 'ADD' || event.payload?.action === 'REMOVE'))));
             default:
                 // Allow unknown types for forward compatibility
                 return !!event.timestamp;

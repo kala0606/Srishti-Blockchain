@@ -198,6 +198,14 @@ class Chain {
                     await this.handleVoteCast(tx);
                     break;
                     
+                case 'NODE_PARENT_REQUEST':
+                    await this.handleNodeParentRequest(tx);
+                    break;
+                    
+                case 'NODE_PARENT_UPDATE':
+                    await this.handleNodeParentUpdate(tx);
+                    break;
+                    
                 default:
                     // Unknown transaction type - skip silently for forward compatibility
                     break;
@@ -420,6 +428,65 @@ class Chain {
         if (this.storage) {
             await this.storage.saveMetadata(`proposal_${proposalId}`, proposal);
         }
+    }
+    
+    /**
+     * Handle NODE_PARENT_REQUEST - request to become child of another node
+     * @param {Object} tx - Transaction object
+     */
+    async handleNodeParentRequest(tx) {
+        if (!tx.sender || !tx.payload?.parentId) {
+            console.warn('Invalid NODE_PARENT_REQUEST: missing required fields');
+            return;
+        }
+        
+        const { parentId, reason, metadata } = tx.payload;
+        const nodeId = tx.sender;
+        
+        console.log(`📝 Parent request: ${nodeId} wants to become child of ${parentId}${reason ? ` (${reason})` : ''}`);
+        
+        // Store parent requests for approval (could be used for UI notifications)
+        // Actual relationship is established via NODE_PARENT_UPDATE
+        // This event is primarily for logging and notification purposes
+        
+        // Persist to storage if needed (for UI to show pending requests)
+        // For now, we'll just log it
+    }
+    
+    /**
+     * Handle NODE_PARENT_UPDATE - update parent-child relationship
+     * Supports multiple parents with ADD/REMOVE actions
+     * @param {Object} tx - Transaction object
+     */
+    async handleNodeParentUpdate(tx) {
+        if (!tx.sender || !tx.payload?.nodeId) {
+            console.warn('Invalid NODE_PARENT_UPDATE: missing required fields');
+            return;
+        }
+        
+        const { nodeId, action, parentId, newParentId, oldParentId, reason } = tx.payload;
+        
+        // Verify the node exists
+        const nodeMap = this.buildNodeMap();
+        if (!nodeMap[nodeId]) {
+            console.warn(`NODE_PARENT_UPDATE: Node ${nodeId} does not exist`);
+            return;
+        }
+        
+        // Determine which parent ID to validate
+        const targetParentId = parentId || newParentId;
+        
+        // Verify the parent exists (if not null and not REMOVE action)
+        if (targetParentId && action !== 'REMOVE' && !nodeMap[targetParentId]) {
+            console.warn(`NODE_PARENT_UPDATE: Parent ${targetParentId} does not exist`);
+            return;
+        }
+        
+        const actionDesc = action || 'SET';
+        console.log(`🔗 Parent update (${actionDesc}): ${nodeId} ${actionDesc === 'ADD' ? 'adding' : actionDesc === 'REMOVE' ? 'removing' : 'setting'} parent ${targetParentId || 'none'}${reason ? ` (${reason})` : ''}`);
+        
+        // Note: The actual parentIds in the node map is updated during buildNodeMap()
+        // which reads NODE_PARENT_UPDATE events. This handler is for validation and logging.
     }
     
     /**
@@ -797,28 +864,103 @@ class Chain {
     }
     
     /**
+     * Get all NODE_PARENT_REQUEST events
+     * @returns {Array}
+     */
+    getNodeParentRequests() {
+        return this.getEvents(window.SrishtiEvent?.TYPES?.NODE_PARENT_REQUEST || 'NODE_PARENT_REQUEST');
+    }
+    
+    /**
+     * Get all NODE_PARENT_UPDATE events
+     * @returns {Array}
+     */
+    getNodeParentUpdates() {
+        return this.getEvents(window.SrishtiEvent?.TYPES?.NODE_PARENT_UPDATE || 'NODE_PARENT_UPDATE');
+    }
+    
+    /**
      * Build node hierarchy from chain
+     * Supports multiple parents per node
      * @returns {Object} - Nodes object with node data indexed by nodeId
      */
     buildNodeMap() {
         const nodes = {};
         const joins = this.getNodeJoins();
         
+        // First, initialize nodes from NODE_JOIN events
         for (const joinEvent of joins) {
+            // Initialize with parentIds as an array (backward compatible with single parentId)
+            const initialParentIds = joinEvent.parentId ? [joinEvent.parentId] : [];
             nodes[joinEvent.nodeId] = {
                 id: joinEvent.nodeId,
                 name: joinEvent.name,
-                parentId: joinEvent.parentId,
+                parentId: joinEvent.parentId || null, // Keep for backward compatibility
+                parentIds: initialParentIds, // New: array of parent IDs
                 createdAt: joinEvent.timestamp,
                 publicKey: joinEvent.publicKey,
                 recoveryPhraseHash: joinEvent.recoveryPhraseHash || null
             };
         }
         
-        // Calculate child counts
+        // Get all NODE_PARENT_UPDATE events and process them chronologically
+        const parentUpdates = this.getEvents(window.SrishtiEvent?.TYPES?.NODE_PARENT_UPDATE || 'NODE_PARENT_UPDATE');
+        
+        // Sort by timestamp to process in chronological order
+        parentUpdates.sort((a, b) => a.timestamp - b.timestamp);
+        
+        // Process all parent updates in order
+        for (const updateEvent of parentUpdates) {
+            const nodeId = updateEvent.payload?.nodeId;
+            if (!nodeId || !nodes[nodeId]) continue;
+            
+            const action = updateEvent.payload?.action || 
+                          (updateEvent.payload?.newParentId ? 'SET' : null);
+            const parentId = updateEvent.payload?.parentId || updateEvent.payload?.newParentId;
+            
+            if (!parentId && action !== 'REMOVE') continue;
+            
+            // Ensure parentIds array exists
+            if (!Array.isArray(nodes[nodeId].parentIds)) {
+                nodes[nodeId].parentIds = nodes[nodeId].parentId ? [nodes[nodeId].parentId] : [];
+            }
+            
+            switch (action) {
+                case 'ADD':
+                    // Add parent if not already present
+                    if (!nodes[nodeId].parentIds.includes(parentId)) {
+                        nodes[nodeId].parentIds.push(parentId);
+                        console.log(`➕ Added parent ${parentId} to ${nodeId}`);
+                    }
+                    break;
+                    
+                case 'REMOVE':
+                    // Remove parent from array
+                    const index = nodes[nodeId].parentIds.indexOf(parentId);
+                    if (index > -1) {
+                        nodes[nodeId].parentIds.splice(index, 1);
+                        console.log(`➖ Removed parent ${parentId} from ${nodeId}`);
+                    }
+                    break;
+                    
+                case 'SET':
+                default:
+                    // For backward compatibility: SET replaces all parents with a single parent
+                    nodes[nodeId].parentIds = parentId ? [parentId] : [];
+                    console.log(`🔗 Set parent for ${nodeId}: ${parentId || 'independent'}`);
+                    break;
+            }
+            
+            // Update backward-compatible parentId (use first parent or null)
+            nodes[nodeId].parentId = nodes[nodeId].parentIds.length > 0 ? nodes[nodeId].parentIds[0] : null;
+        }
+        
+        // Calculate child counts (count nodes that have this node as a parent)
         for (const nodeId in nodes) {
             const node = nodes[nodeId];
-            node.childCount = Object.values(nodes).filter(n => n.parentId === nodeId).length;
+            node.childCount = Object.values(nodes).filter(n => 
+                Array.isArray(n.parentIds) && n.parentIds.includes(nodeId)
+            ).length;
         }
         
         return nodes;

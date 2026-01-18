@@ -76,11 +76,18 @@ class BlockchainAdapter {
             return null;
         }
         
-        // Log all nodes with their parentId for debugging
-        console.log('🌳 Nodes in cache:', nodesArray.map(n => ({ id: n.id.substring(0, 12), name: n.name, parentId: n.parentId?.substring(0, 12) || 'null' })));
+        // Log all nodes with their parentIds for debugging
+        console.log('🌳 Nodes in cache:', nodesArray.map(n => ({ 
+            id: n.id.substring(0, 12), 
+            name: n.name, 
+            parentIds: (Array.isArray(n.parentIds) ? n.parentIds : (n.parentId ? [n.parentId] : [])).map(p => p.substring(0, 12))
+        })));
         
-        // Find root nodes (no parent)
-        const rootNodes = nodesArray.filter(n => !n.parentId);
+        // Find root nodes (no parents)
+        const rootNodes = nodesArray.filter(n => {
+            const parentIds = Array.isArray(n.parentIds) ? n.parentIds : (n.parentId ? [n.parentId] : []);
+            return parentIds.length === 0;
+        });
         
         console.log(`🌳 Found ${rootNodes.length} root nodes:`, rootNodes.map(n => ({ id: n.id.substring(0, 12), name: n.name })));
         
@@ -91,15 +98,19 @@ class BlockchainAdapter {
             console.log(`🌳 No root found, using oldest node as root:`, rootNodes[0].name);
         }
         
-        // Build children map
+        // Build children map (supporting multiple parents)
         const childrenMap = {};
         nodesArray.forEach(node => {
-            if (node.parentId) {
-                if (!childrenMap[node.parentId]) {
-                    childrenMap[node.parentId] = [];
+            // Get parentIds array (support both old parentId and new parentIds)
+            const parentIds = Array.isArray(node.parentIds) ? node.parentIds : (node.parentId ? [node.parentId] : []);
+            
+            // Add this node to each of its parents' children lists
+            parentIds.forEach(parentId => {
+                if (!childrenMap[parentId]) {
+                    childrenMap[parentId] = [];
                 }
-                childrenMap[node.parentId].push(node);
-            }
+                childrenMap[parentId].push(node);
+            });
         });
         
         // Log children map for debugging

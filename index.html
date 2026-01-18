@@ -643,6 +643,84 @@
             transform: rotate(90deg);
         }
 
+        /* Mint Token Modal */
+        #mint-token-modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(5, 5, 16, 0.8);
+            justify-content: center;
+            align-items: center;
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+        }
+
+        #mint-token-modal.active {
+            display: flex;
+        }
+
+        .mint-token-content {
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.03) 100%);
+            backdrop-filter: blur(40px);
+            -webkit-backdrop-filter: blur(40px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 32px;
+            padding: 40px;
+            max-width: 500px;
+            width: 90%;
+            color: var(--text-primary);
+            position: relative;
+            box-shadow: 
+                0 24px 80px rgba(0, 0, 0, 0.5),
+                inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            animation: modalAppear 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .mint-token-close {
+            position: absolute;
+            top: 18px;
+            right: 22px;
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 28px;
+            font-weight: 300;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: none;
+            border: none;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .mint-token-close:hover {
+            color: var(--text-primary);
+            background: rgba(255, 255, 255, 0.1);
+            transform: rotate(90deg);
+        }
+
+        #mint-token-form input:focus,
+        #mint-token-form select:focus,
+        #mint-token-form textarea:focus {
+            border-color: rgba(147, 51, 234, 0.5);
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        .mint-token-cancel:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .mint-token-submit:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(147, 51, 234, 0.4);
+        }
+
         .node-avatar {
             width: 100px;
             height: 100px;
@@ -1970,6 +2048,51 @@
         </div>
     </div>
 
+    <!-- Mint Token Modal -->
+    <div id="mint-token-modal">
+        <div class="mint-token-content">
+            <button class="mint-token-close">&times;</button>
+            <h2 style="margin: 0 0 8px 0; font-size: 1.5em; font-weight: 700; color: var(--text-primary);">🎓 Issue Token</h2>
+            <p style="margin: 0 0 24px 0; color: rgba(255, 255, 255, 0.6); font-size: 0.9em;">Mint a soulbound token to a user</p>
+            
+            <form id="mint-token-form">
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; margin-bottom: 8px; color: rgba(255, 255, 255, 0.8); font-size: 0.9em; font-weight: 500;">Recipient *</label>
+                    <select id="mint-recipient" required style="width: 100%; padding: 12px; background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 8px; color: var(--text-primary); font-size: 0.95em; outline: none; transition: all 0.3s ease;">
+                        <option value="">Select a recipient...</option>
+                    </select>
+                </div>
+                
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; margin-bottom: 8px; color: rgba(255, 255, 255, 0.8); font-size: 0.9em; font-weight: 500;">Achievement ID *</label>
+                    <input type="text" id="mint-achievement-id" required placeholder="e.g., DEGREE_2026_CSE" style="width: 100%; padding: 12px; background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 8px; color: var(--text-primary); font-size: 0.95em; outline: none; transition: all 0.3s ease;">
+                </div>
+                
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; margin-bottom: 8px; color: rgba(255, 255, 255, 0.8); font-size: 0.9em; font-weight: 500;">Title *</label>
+                    <input type="text" id="mint-title" required placeholder="e.g., B.Tech Computer Science" style="width: 100%; padding: 12px; background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 8px; color: var(--text-primary); font-size: 0.95em; outline: none; transition: all 0.3s ease;">
+                </div>
+                
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; margin-bottom: 8px; color: rgba(255, 255, 255, 0.8); font-size: 0.9em; font-weight: 500;">Description</label>
+                    <textarea id="mint-description" placeholder="Optional description..." rows="3" style="width: 100%; padding: 12px; background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 8px; color: var(--text-primary); font-size: 0.95em; outline: none; transition: all 0.3s ease; resize: vertical; font-family: inherit;"></textarea>
+                </div>
+                
+                <div style="margin-bottom: 24px;">
+                    <label style="display: flex; align-items: center; gap: 8px; color: rgba(255, 255, 255, 0.8); font-size: 0.9em; cursor: pointer;">
+                        <input type="checkbox" id="mint-revocable" checked style="width: 18px; height: 18px; cursor: pointer;">
+                        <span>Revocable (can be revoked later)</span>
+                    </label>
+                </div>
+                
+                <div style="display: flex; gap: 12px;">
+                    <button type="button" class="mint-token-cancel" style="flex: 1; padding: 12px; background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 8px; color: var(--text-primary); font-size: 0.95em; font-weight: 600; cursor: pointer; transition: all 0.3s ease;">Cancel</button>
+                    <button type="submit" class="mint-token-submit" style="flex: 1; padding: 12px; background: linear-gradient(135deg, #9333EA, #4F46E5); border: none; border-radius: 8px; color: white; font-size: 0.95em; font-weight: 600; cursor: pointer; transition: all 0.3s ease;">Issue Token</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- Stats Bar -->
     <div class="stats-bar">
         <div class="stat-item">
@@ -2748,7 +2871,8 @@
             if (event.target.closest('.fab-container') || 
                 event.target.closest('#qr-modal') || 
                 event.target.closest('#node-modal') ||
-                event.target.closest('#onboarding-modal')) {
+                event.target.closest('#onboarding-modal') ||
+                event.target.closest('#mint-token-modal')) {
                 return;
             }
             
@@ -3140,9 +3264,10 @@
                         <div class="institution-name">${escapeHtml(myInstitution.name)}</div>
                         <div class="institution-category">${myInstitution.category} • Verified ✓</div>
                     </div>
-                    <div style="color: rgba(255,255,255,0.5); font-size: 0.85em; text-align: center;">
-                        You can issue soulbound tokens to users
-                    </div>
+                    <button class="register-institution-btn" id="issue-token-btn" style="margin-top: 12px;">
+                        <span>🎓</span>
+                        <span>Issue Token</span>
+                    </button>
                 `;
             } else if (myPending) {
                 html += `
@@ -3162,8 +3287,9 @@
             
             container.innerHTML = html;
             
-            // Re-attach event listener for register button
+            // Re-attach event listeners
             document.getElementById('register-institution-btn')?.addEventListener('click', showRegisterInstitutionModal);
+            document.getElementById('issue-token-btn')?.addEventListener('click', showMintTokenModal);
             
             // Show/hide admin section
             if (myRole === 'ROOT' || myRole === 'GOVERNANCE_ADMIN') {
@@ -3269,6 +3395,91 @@
             } catch (error) {
                 console.error('Failed to register:', error);
                 alert('Failed to register: ' + error.message);
+            }
+        }
+        
+        // Show Mint Token Modal
+        function showMintTokenModal() {
+            if (!window.SrishtiApp || !window.SrishtiApp.isInstitution()) {
+                alert('Only verified institutions can issue tokens.');
+                return;
+            }
+            
+            // Get all nodes in the network
+            const nodes = window.SrishtiApp.getNodes();
+            const recipientSelect = document.getElementById('mint-recipient');
+            
+            // Clear existing options except the first one
+            recipientSelect.innerHTML = '<option value="">Select a recipient...</option>';
+            
+            // Add all nodes except self as recipients
+            const currentUserId = window.SrishtiApp.nodeId;
+            Object.entries(nodes).forEach(([nodeId, node]) => {
+                if (nodeId !== currentUserId && !node.isVirtualRoot) {
+                    const option = document.createElement('option');
+                    option.value = nodeId;
+                    option.textContent = `${node.name || 'Unknown'} (${shortenAddress(nodeId)})`;
+                    recipientSelect.appendChild(option);
+                }
+            });
+            
+            if (recipientSelect.options.length === 1) {
+                recipientSelect.innerHTML = '<option value="">No recipients available</option>';
+                recipientSelect.disabled = true;
+            } else {
+                recipientSelect.disabled = false;
+            }
+            
+            // Reset form
+            document.getElementById('mint-token-form').reset();
+            document.getElementById('mint-revocable').checked = true;
+            
+            // Show modal
+            document.getElementById('mint-token-modal').classList.add('active');
+        }
+        
+        // Hide Mint Token Modal
+        function hideMintTokenModal() {
+            document.getElementById('mint-token-modal').classList.remove('active');
+        }
+        
+        // Handle Mint Token Form Submission
+        async function handleMintTokenSubmit(event) {
+            event.preventDefault();
+            
+            const recipient = document.getElementById('mint-recipient').value;
+            const achievementId = document.getElementById('mint-achievement-id').value.trim();
+            const title = document.getElementById('mint-title').value.trim();
+            const description = document.getElementById('mint-description').value.trim();
+            const revocable = document.getElementById('mint-revocable').checked;
+            
+            if (!recipient || !achievementId || !title) {
+                alert('Please fill in all required fields.');
+                return;
+            }
+            
+            try {
+                const submitBtn = document.querySelector('.mint-token-submit');
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Issuing...';
+                
+                await window.SrishtiApp.mintSoulboundToken(recipient, {
+                    achievementId: achievementId,
+                    title: title,
+                    description: description,
+                    revocable: revocable
+                });
+                
+                hideMintTokenModal();
+                updateSoulboundTokens(); // Update the recipient's view (if they're viewing)
+                alert(`Token "${title}" successfully issued!`);
+            } catch (error) {
+                console.error('Failed to mint token:', error);
+                alert('Failed to issue token: ' + error.message);
+            } finally {
+                const submitBtn = document.querySelector('.mint-token-submit');
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Issue Token';
             }
         }
         
@@ -4195,6 +4406,14 @@
         document.getElementById('node-modal').addEventListener('click', (e) => {
             if (e.target.id === 'node-modal') hideNodeModal();
         });
+        
+        // Mint Token Modal
+        document.querySelector('#mint-token-modal .mint-token-close').addEventListener('click', hideMintTokenModal);
+        document.querySelector('.mint-token-cancel').addEventListener('click', hideMintTokenModal);
+        document.getElementById('mint-token-modal').addEventListener('click', (e) => {
+            if (e.target.id === 'mint-token-modal') hideMintTokenModal();
+        });
+        document.getElementById('mint-token-form').addEventListener('submit', handleMintTokenSubmit);
         
         // QR Modal backdrop
         document.getElementById('qr-modal').addEventListener('click', (e) => {
