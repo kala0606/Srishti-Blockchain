@@ -4917,56 +4917,35 @@
             // Hide loading
             document.getElementById('loading').style.display = 'none';
             
-            // Check if returning user - verify both localStorage AND SrishtiApp state
-            const hasLocalStorageData = savedNodeId && savedNodeName && localStorage.getItem('srishti_private_key');
-            const hasAppNodeData = window.SrishtiApp && window.SrishtiApp.nodeId && window.SrishtiApp.keyPair;
-            let hasValidLocalData = hasLocalStorageData && hasAppNodeData;
-            
-            console.log(`🔍 Checking returning user:`, {
-                savedNodeId: savedNodeId,
-                hasLocalStorageData: hasLocalStorageData,
-                appNodeId: window.SrishtiApp?.nodeId,
-                appHasKeyPair: !!window.SrishtiApp?.keyPair,
-                hasValidLocalData: hasValidLocalData
-            });
+            // Check if returning user - trust localStorage if we have valid data
+            const hasValidLocalData = savedNodeId && savedNodeName && localStorage.getItem('srishti_private_key');
+            console.log(`🔍 Checking returning user: savedNodeId=${savedNodeId}, hasValidLocalData=${hasValidLocalData}`);
             
             if (hasValidLocalData) {
-                // Verify nodeId matches between localStorage and app
-                if (window.SrishtiApp.nodeId !== savedNodeId) {
-                    console.warn('⚠️ Node ID mismatch between localStorage and app - clearing localStorage');
-                    localStorage.removeItem('srishti_node_id');
-                    localStorage.removeItem('srishti_node_name');
-                    localStorage.removeItem('srishti_public_key');
-                    localStorage.removeItem('srishti_private_key');
-                    hasValidLocalData = false;
-                } else {
-                    // User has valid identity - they're a returning user
-                    currentUser = { id: savedNodeId, name: savedNodeName };
-                    console.log(`✅ Returning user set: ${savedNodeName} (${savedNodeId})`);
-                    
-                    // Mark ourselves as online
-                    if (window.SrishtiApp) {
-                        window.SrishtiApp.updatePresence(savedNodeId, { isOnline: true, lastSeen: Date.now() });
-                    }
-                    
-                    // Initialize QR
-                    if (window.SrishtiQRCode && window.SrishtiApp.publicKeyBase64) {
-                        window.SrishtiQRCode.init(savedNodeId, window.SrishtiApp.publicKeyBase64);
-                    }
-                    
-                    // If they came from a QR link but are already in network
-                    if (joinParentId) {
-                        const url = new URL(window.location.href);
-                        url.searchParams.delete('join');
-                        window.history.replaceState({}, document.title, url.pathname);
-                    }
-                    
-                    // Trigger a UI update with current user
-                    updateStats();
+                // User has valid identity in localStorage - they're a returning user
+                currentUser = { id: savedNodeId, name: savedNodeName };
+                console.log(`✅ Returning user set: ${savedNodeName} (${savedNodeId})`);
+                
+                // Mark ourselves as online
+                if (window.SrishtiApp) {
+                    window.SrishtiApp.updatePresence(savedNodeId, { isOnline: true, lastSeen: Date.now() });
                 }
-            }
-            
-            if (!hasValidLocalData) {
+                
+                // Initialize QR
+                if (window.SrishtiQRCode && window.SrishtiApp.publicKeyBase64) {
+                    window.SrishtiQRCode.init(savedNodeId, window.SrishtiApp.publicKeyBase64);
+                }
+                
+                // If they came from a QR link but are already in network
+                if (joinParentId) {
+                    const url = new URL(window.location.href);
+                    url.searchParams.delete('join');
+                    window.history.replaceState({}, document.title, url.pathname);
+                }
+                
+                // Trigger a UI update with current user
+                updateStats();
+            } else {
                 // New user - show guest mode first (allows viewing before joining)
                 console.log('👁️ New user - entering guest mode');
                 showGuestMode();
