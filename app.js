@@ -59,18 +59,56 @@ class SrishtiApp {
             const savedPrivateKey = localStorage.getItem('srishti_private_key');
             
             if (savedNodeId && savedPublicKey && savedPrivateKey) {
-                // Load existing keys
-                this.nodeId = savedNodeId;
-                this.currentUser = { id: savedNodeId, name: savedNodeName };
-                this.publicKeyBase64 = savedPublicKey;
-                this.keyPair = {
-                    publicKey: await window.SrishtiKeys.importPublicKey(savedPublicKey),
-                    privateKey: await window.SrishtiKeys.importPrivateKey(savedPrivateKey)
-                };
-                console.log('✅ Existing node loaded:', savedNodeName);
+                try {
+                    // Load existing keys
+                    console.log('🔑 Loading existing node from localStorage...');
+                    this.nodeId = savedNodeId;
+                    this.currentUser = { id: savedNodeId, name: savedNodeName };
+                    this.publicKeyBase64 = savedPublicKey;
+                    
+                    // Import keys with error handling
+                    try {
+                        const publicKey = await window.SrishtiKeys.importPublicKey(savedPublicKey);
+                        const privateKey = await window.SrishtiKeys.importPrivateKey(savedPrivateKey);
+                        
+                        // Verify keys imported successfully
+                        if (!publicKey || !privateKey) {
+                            throw new Error('Failed to import keys - keys are null/undefined');
+                        }
+                        
+                        this.keyPair = {
+                            publicKey: publicKey,
+                            privateKey: privateKey
+                        };
+                        
+                        console.log('✅ Existing node loaded:', savedNodeName, '(', savedNodeId.substring(0, 12) + '...)');
+                    } catch (keyError) {
+                        console.error('❌ Failed to import keys from localStorage:', keyError);
+                        console.warn('⚠️ Keys may be corrupted. Clearing localStorage and requiring re-join.');
+                        
+                        // Clear corrupted keys
+                        localStorage.removeItem('srishti_node_id');
+                        localStorage.removeItem('srishti_node_name');
+                        localStorage.removeItem('srishti_public_key');
+                        localStorage.removeItem('srishti_private_key');
+                        
+                        this.nodeId = null;
+                        this.currentUser = null;
+                        this.keyPair = null;
+                        this.publicKeyBase64 = null;
+                    }
+                } catch (error) {
+                    console.error('❌ Error loading node from localStorage:', error);
+                    // Don't clear localStorage on general errors, just log
+                }
             } else {
                 // Will create node during onboarding
-                console.log('📝 No existing node found');
+                console.log('📝 No existing node found in localStorage');
+                if (savedNodeId && (!savedPublicKey || !savedPrivateKey)) {
+                    console.warn('⚠️ Node ID found but keys missing - clearing incomplete data');
+                    localStorage.removeItem('srishti_node_id');
+                    localStorage.removeItem('srishti_node_name');
+                }
             }
             
             // Initialize blockchain adapter (needed before KarmaManager)
@@ -108,8 +146,14 @@ class SrishtiApp {
             }
             
             // Initialize network (if we have a node)
-            if (this.nodeId && this.keyPair) {
+            if (this.nodeId && this.keyPair && this.keyPair.publicKey && this.keyPair.privateKey) {
                 await this.initNetwork();
+            } else {
+                if (this.nodeId && !this.keyPair) {
+                    console.warn('⚠️ Node ID exists but keyPair is missing - node will need to re-join');
+                } else if (this.nodeId && this.keyPair && (!this.keyPair.publicKey || !this.keyPair.privateKey)) {
+                    console.warn('⚠️ Node ID exists but keyPair is incomplete - node will need to re-join');
+                }
             }
             
             this.initialized = true;
