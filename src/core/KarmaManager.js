@@ -11,10 +11,12 @@ class KarmaManager {
      * @param {Chain} chain - Chain instance
      * @param {Object} config - Configuration options
      * @param {BlockchainAdapter} adapter - Optional adapter for presence data
+     * @param {string} currentNodeId - Optional current node ID (always considered online)
      */
-    constructor(chain, config = {}, adapter = null) {
+    constructor(chain, config = {}, adapter = null, currentNodeId = null) {
         this.chain = chain;
         this.adapter = adapter; // Adapter has presence cache
+        this.currentNodeId = currentNodeId; // Current user's node (always online)
         
         // KARMA configuration
         this.config = {
@@ -98,11 +100,15 @@ class KarmaManager {
             clearInterval(this.presenceInterval);
         }
         
+        console.log(`⏰ KarmaManager: Starting presence checks every ${this.config.presenceCheckInterval / 1000}s`);
+        
         this.presenceInterval = setInterval(() => {
+            console.log(`⏰ KarmaManager: Running scheduled presence check...`);
             this.checkPresenceEarnings();
         }, this.config.presenceCheckInterval);
         
         // Do initial check
+        console.log(`⏰ KarmaManager: Running initial presence check...`);
         this.checkPresenceEarnings();
     }
     
@@ -111,11 +117,20 @@ class KarmaManager {
      */
     async checkPresenceEarnings() {
         if (!this.chain || !this.chain.state) {
+            console.warn('⚠️ KarmaManager: Chain or state not available');
             return;
         }
         
         const now = Date.now();
         const nodes = this.chain.buildNodeMap();
+        const nodeCount = Object.keys(nodes).length;
+        
+        console.log(`🔍 KarmaManager: Checking presence for ${nodeCount} nodes`);
+        
+        if (nodeCount === 0) {
+            console.warn('⚠️ KarmaManager: No nodes found in chain');
+            return;
+        }
         
         // Check each node for online presence
         for (const nodeId in nodes) {
@@ -131,6 +146,7 @@ class KarmaManager {
             // Get presence data from adapter if available (more accurate)
             let isOnline = false;
             let lastSeen = 0;
+            let presenceSource = 'none';
             
             if (this.adapter) {
                 // Check adapter's presence cache first (most accurate)
@@ -140,9 +156,11 @@ class KarmaManager {
                 if (presenceData) {
                     isOnline = presenceData.isOnline || false;
                     lastSeen = presenceData.lastSeen || 0;
+                    presenceSource = 'presenceCache';
                 } else if (nodeCacheData) {
                     isOnline = nodeCacheData.isOnline || false;
                     lastSeen = nodeCacheData.lastSeen || 0;
+                    presenceSource = 'nodeCache';
                 }
             }
             
@@ -150,14 +168,24 @@ class KarmaManager {
             if (!lastSeen) {
                 isOnline = node.isOnline || false;
                 lastSeen = node.lastSeen || 0;
+                presenceSource = 'chain';
             }
             
             const timeSinceSeen = now - lastSeen;
             
+            // Current user's node is always considered online (they're using the app)
+            const isCurrentUser = this.currentNodeId && nodeId === this.currentNodeId;
+            
             // Consider online if:
-            // 1. Explicitly marked as online, OR
-            // 2. Seen within last 5 minutes (for active nodes)
-            const consideredOnline = isOnline || (lastSeen > 0 && timeSinceSeen < 300000);
+            // 1. It's the current user (always online), OR
+            // 2. Explicitly marked as online, OR
+            // 3. Seen within last 5 minutes (for active nodes)
+            const consideredOnline = isCurrentUser || isOnline || (lastSeen > 0 && timeSinceSeen < 300000);
+            
+            // Debug log for each node
+            if (isCurrentUser || consideredOnline) {
+                console.log(`  📊 Node ${nodeId.substring(0, 8)}...: isCurrentUser=${isCurrentUser}, online=${isOnline}, lastSeen=${lastSeen ? new Date(lastSeen).toLocaleTimeString() : 'never'}, timeSince=${Math.floor(timeSinceSeen / 1000)}s, source=${presenceSource}, consideredOnline=${consideredOnline}`);
+            }
             
             if (consideredOnline) {
                 // Calculate minutes online since last check
@@ -215,6 +243,11 @@ class KarmaManager {
         const now = Date.now();
         const minEarning = 0.1; // Lower threshold: award when >= 0.1 KARMA (was 1)
         
+        const pendingCount = Object.keys(this.pendingEarnings).length;
+        if (pendingCount > 0) {
+            console.log(`💰 KarmaManager: Processing pending earnings for ${pendingCount} nodes`);
+        }
+        
         for (const nodeId in this.pendingEarnings) {
             const pending = this.pendingEarnings[nodeId];
             
@@ -226,6 +259,8 @@ class KarmaManager {
                 const amount = Math.floor(pending.amount * 100) / 100; // Round to 2 decimals
                 
                 if (amount > 0) {
+                    console.log(`💰 KarmaManager: Awarding ${amount} KARMA to ${nodeId.substring(0, 8)}...`);
+                    
                     // Award KARMA directly (updates state without creating block for efficiency)
                     await this.awardKarma(nodeId, amount, 'PRESENCE', {
                         source: 'passive_earning',
@@ -235,6 +270,8 @@ class KarmaManager {
                     // Reset pending
                     this.pendingEarnings[nodeId] = { amount: 0, lastUpdate: now };
                 }
+            } else if (pending.amount > 0) {
+                console.log(`  ⏳ Node ${nodeId.substring(0, 8)}...: ${pending.amount.toFixed(3)} KARMA pending (need ${minEarning}, waiting...)`);
             }
         }
     }
