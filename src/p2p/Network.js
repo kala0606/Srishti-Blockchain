@@ -22,6 +22,7 @@ class Network {
         this.storage = options.storage;
         this.onChainUpdate = options.onChainUpdate || (() => {});
         this.onPresenceUpdate = options.onPresenceUpdate || null;
+        this.onSyncProgress = options.onSyncProgress || null;
         this.signalingServerUrl = options.signalingServerUrl || null;
         
         // Legacy peer management (maintained for backward compatibility)
@@ -674,6 +675,9 @@ class Network {
             const receivedBlocks = message.blocks;
             if (!receivedBlocks || receivedBlocks.length === 0) {
                 console.log(`📭 No blocks received`);
+                if (this.onSyncProgress) {
+                    this.onSyncProgress({ status: 'idle' });
+                }
                 return;
             }
             
@@ -681,6 +685,16 @@ class Network {
             const theirLength = receivedBlocks.length;
             
             console.log(`📊 Chain comparison: ours=${ourLength}, theirs=${theirLength}`);
+            
+            // Emit sync start event
+            if (this.onSyncProgress) {
+                this.onSyncProgress({
+                    status: 'syncing',
+                    current: ourLength,
+                    total: theirLength,
+                    message: `Syncing ${theirLength} blocks...`
+                });
+            }
             
             // Validate genesis signature to prevent syncing old chains after reset
             // Only validate if both chains have at least one block (genesis)
@@ -723,11 +737,44 @@ class Network {
             if (theirLength > ourLength) {
                 console.log(`📥 Their chain is longer, replacing ours...`);
                 
+                // Update progress: starting replacement
+                if (this.onSyncProgress) {
+                    this.onSyncProgress({
+                        status: 'syncing',
+                        current: ourLength,
+                        total: theirLength,
+                        message: `Replacing chain with ${theirLength} blocks...`,
+                        progress: Math.min((ourLength / theirLength) * 100, 50)
+                    });
+                }
+                
                 // IMPORTANT: Save our current nodes BEFORE replacing chain
                 // We might have unique nodes they don't have
                 const ourOldBlocks = this.chain.toJSON();
                 
+                // Update progress: replacing chain
+                if (this.onSyncProgress) {
+                    this.onSyncProgress({
+                        status: 'syncing',
+                        current: ourLength,
+                        total: theirLength,
+                        message: `Processing blocks...`,
+                        progress: 60
+                    });
+                }
+                
                 await this.chain.replaceChain(receivedBlocks);
+                
+                // Update progress: merging nodes
+                if (this.onSyncProgress) {
+                    this.onSyncProgress({
+                        status: 'syncing',
+                        current: this.chain.getLength(),
+                        total: theirLength,
+                        message: `Merging unique nodes...`,
+                        progress: 80
+                    });
+                }
                 
                 // Ensure our local node is in the chain (for returning users)
                 await this.ensureLocalNodeInChain();
@@ -738,6 +785,17 @@ class Network {
                 await this.saveChain();
                 this.onChainUpdate(this.chain);
                 console.log(`✅ Chain replaced with ${this.chain.getLength()} blocks from ${peerId}`);
+                
+                // Update progress: complete
+                if (this.onSyncProgress) {
+                    this.onSyncProgress({
+                        status: 'complete',
+                        current: this.chain.getLength(),
+                        total: this.chain.getLength(),
+                        message: `Synced ${this.chain.getLength()} blocks`,
+                        progress: 100
+                    });
+                }
             } 
             // If same length, use deterministic tie-breaker (earlier genesis timestamp wins)
             else if (theirLength === ourLength && theirLength > 1) {
@@ -782,6 +840,17 @@ class Network {
                     await this.saveChain();
                     this.onChainUpdate(this.chain);
                     console.log(`✅ Chain replaced (earlier genesis) with ${this.chain.getLength()} blocks from ${peerId}`);
+                    
+                    // Update progress: complete
+                    if (this.onSyncProgress) {
+                        this.onSyncProgress({
+                            status: 'complete',
+                            current: this.chain.getLength(),
+                            total: this.chain.getLength(),
+                            message: `Synced ${this.chain.getLength()} blocks`,
+                            progress: 100
+                        });
+                    }
                 } else {
                     console.log(`📭 Our chain wins tie-breaker, keeping ours`);
                     
@@ -797,8 +866,23 @@ class Network {
             }
         } catch (error) {
             console.error(`Sync failed from ${peerId}:`, error);
+            if (this.onSyncProgress) {
+                this.onSyncProgress({
+                    status: 'error',
+                    message: `Sync failed: ${error.message}`,
+                    progress: 0
+                });
+            }
         } finally {
             this.syncing = false;
+            // Hide progress bar after a delay if no new sync starts
+            if (this.onSyncProgress) {
+                setTimeout(() => {
+                    if (!this.syncing) {
+                        this.onSyncProgress({ status: 'idle' });
+                    }
+                }, 2000);
+            }
         }
     }
     
@@ -1167,12 +1251,35 @@ class Network {
         if (!connection) {
             console.log(`❌ No connection found for ${peerId} in peers map`);
             console.log(`📊 Current peers:`, Array.from(this.peers.keys()));
+            if (this.onSyncProgress) {
+                this.onSyncProgress({
+                    status: 'connecting',
+                    message: `Connecting to peers...`,
+                    progress: 10
+                });
+            }
             return;
         }
         
         if (!connection.isConnected()) {
             console.log(`❌ Connection to ${peerId} is not open`);
+            if (this.onSyncProgress) {
+                this.onSyncProgress({
+                    status: 'connecting',
+                    message: `Establishing connection...`,
+                    progress: 20
+                });
+            }
             return;
+        }
+        
+        // Emit progress: requesting sync
+        if (this.onSyncProgress) {
+            this.onSyncProgress({
+                status: 'syncing',
+                message: `Requesting blockchain data...`,
+                progress: 30
+            });
         }
         
         // Always request full chain to compare and merge

@@ -214,6 +214,10 @@ class SrishtiApp {
                     if (this.onParentResponseReceived) {
                         this.onParentResponseReceived(responseData);
                     }
+                },
+                onSyncProgress: (progressData) => {
+                    // Handle sync progress updates
+                    this.updateSyncProgress(progressData);
                 }
             });
             
@@ -402,6 +406,13 @@ class SrishtiApp {
             const shortTimeout = 3000; // 3 seconds if no peers available
             const longTimeout = 8000;  // 8 seconds if peers ARE available (wait for P2P)
             
+            // Show initial sync progress
+            this.updateSyncProgress({
+                status: 'connecting',
+                message: 'Connecting to network...',
+                progress: 5
+            });
+            
             const checkSync = () => {
                 const connectedPeers = this.network.peers?.size || 0;
                 const availablePeers = this.network.signaling?.availablePeers?.length || 0;
@@ -415,9 +426,31 @@ class SrishtiApp {
                 
                 console.log(`🔄 Sync check: elapsed=${elapsed}ms, connected=${connectedPeers}, available=${availablePeers}, chain=${chainLength}`);
                 
+                // Update progress based on current state
+                if (hasKnownPeers && connectedPeers === 0) {
+                    this.updateSyncProgress({
+                        status: 'connecting',
+                        message: `Found ${availablePeers} peers, connecting...`,
+                        progress: 10 + Math.min(30, (elapsed / timeout) * 30)
+                    });
+                } else if (connectedPeers > 0 && chainLength <= 1) {
+                    this.updateSyncProgress({
+                        status: 'syncing',
+                        message: 'Connected! Syncing blockchain...',
+                        progress: 40 + Math.min(30, (elapsed / timeout) * 30)
+                    });
+                }
+                
                 // If we have connected peers and chain has been updated beyond genesis - success!
                 if (connectedPeers > 0 && chainLength > 1) {
                     console.log(`✅ Initial sync complete. Chain length: ${chainLength}`);
+                    this.updateSyncProgress({
+                        status: 'complete',
+                        message: `Synced ${chainLength} blocks`,
+                        current: chainLength,
+                        total: chainLength,
+                        progress: 100
+                    });
                     resolve();
                     return;
                 }
@@ -426,8 +459,15 @@ class SrishtiApp {
                 if (elapsed >= timeout) {
                     if (hasKnownPeers && connectedPeers === 0) {
                         console.log(`⏰ Sync timeout - peers available but P2P connection not established`);
+                        this.updateSyncProgress({
+                            status: 'idle',
+                            message: 'Connection timeout'
+                        });
                     } else {
                         console.log(`⏰ Sync timeout after ${timeout}ms. Chain: ${chainLength}, Connected: ${connectedPeers}`);
+                        this.updateSyncProgress({
+                            status: 'idle'
+                        });
                     }
                     resolve();
                     return;
@@ -455,6 +495,66 @@ class SrishtiApp {
      */
     updatePresence(nodeId, presenceData) {
         this.adapter.updatePresence(nodeId, presenceData);
+    }
+    
+    /**
+     * Update sync progress UI
+     */
+    updateSyncProgress(progressData) {
+        const syncBar = document.getElementById('sync-progress-bar');
+        const syncStatusText = document.getElementById('sync-status-text');
+        const syncProgressText = document.getElementById('sync-progress-text');
+        const syncProgressFill = document.getElementById('sync-progress-fill');
+        
+        if (!syncBar || !syncStatusText || !syncProgressText || !syncProgressFill) {
+            return; // UI elements not found
+        }
+        
+        if (progressData.status === 'idle') {
+            // Hide the sync bar after a short delay
+            setTimeout(() => {
+                if (syncBar) {
+                    syncBar.style.display = 'none';
+                }
+            }, 500);
+            return;
+        }
+        
+        // Show the sync bar
+        syncBar.style.display = 'block';
+        
+        // Update status text
+        syncStatusText.textContent = progressData.message || 'Syncing blockchain...';
+        
+        // Update progress details
+        if (progressData.current !== undefined && progressData.total !== undefined) {
+            syncProgressText.textContent = `${progressData.current} / ${progressData.total} blocks`;
+        } else if (progressData.status === 'connecting') {
+            syncProgressText.textContent = 'Connecting to network...';
+        } else {
+            syncProgressText.textContent = '';
+        }
+        
+        // Update progress bar
+        const progress = progressData.progress || 0;
+        syncProgressFill.style.width = `${Math.min(100, Math.max(0, progress))}%`;
+        
+        // Update icon color based on status
+        const icon = syncBar.querySelector('.sync-progress-icon svg');
+        if (icon) {
+            if (progressData.status === 'error') {
+                icon.style.color = '#EF4444';
+                icon.innerHTML = '<path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path>';
+            } else if (progressData.status === 'complete') {
+                icon.style.color = '#10B981';
+                icon.innerHTML = '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline>';
+                icon.style.animation = 'none';
+            } else {
+                icon.style.color = '#60A5FA';
+                icon.innerHTML = '<path d="M21 12a9 9 0 1 1-6.219-8.56"></path>';
+                icon.style.animation = 'spin 1.5s linear infinite';
+            }
+        }
     }
     
     /**
