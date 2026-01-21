@@ -3979,10 +3979,6 @@
             const myInstitution = institutions.verified[currentUser.id];
             const myPending = institutions.pending[currentUser.id];
             
-            console.log(`🔍 updateRoleSection - myRole: ${myRole}, isInstitution: ${isInstitution}`);
-            console.log(`🔍 updateRoleSection - currentUser: ${currentUser.id}`);
-            console.log(`🔍 updateRoleSection - All roles:`, window.SrishtiApp.chain?.state?.nodeRoles);
-            
             // Update role badge
             let badgeClass = 'user';
             let badgeText = '👤 USER';
@@ -4059,30 +4055,7 @@
             
             const container = document.getElementById('dash-pending-institutions');
             const pending = window.SrishtiApp.getPendingInstitutions();
-            
-            // Enhanced debugging
-            console.log('📊 Admin Panel - Raw pending institutions:', pending);
-            console.log('📊 Admin Panel - Chain state pendingInstitutions:', window.SrishtiApp.chain?.state?.pendingInstitutions);
-            console.log('📊 Admin Panel - Chain length:', window.SrishtiApp.chain?.getLength());
-            console.log('📊 Admin Panel - Peer count:', window.SrishtiApp.network?.getPeerCount());
-            
-            // Log all INSTITUTION_REGISTER transactions in the chain
-            if (window.SrishtiApp.chain) {
-                const allTxs = [];
-                for (const block of window.SrishtiApp.chain.blocks) {
-                    const events = block.getEvents();
-                    for (const event of events) {
-                        if (event.type === 'INSTITUTION_REGISTER') {
-                            allTxs.push({ sender: event.sender, payload: event.payload });
-                        }
-                    }
-                }
-                console.log('📊 Admin Panel - INSTITUTION_REGISTER txs in chain:', allTxs);
-            }
-            
             const pendingList = Object.entries(pending).filter(([_, p]) => p.status === 'PENDING');
-            
-            console.log(`📊 Admin Panel - Filtered pending (status=PENDING): ${pendingList.length} items`);
             
             if (pendingList.length === 0) {
                 container.innerHTML = `
@@ -5025,7 +4998,6 @@
         
         function updateStats() {
             const nodes = Object.values(nodesData).filter(n => !n.isVirtualRoot);
-            console.log(`📊 updateStats: ${nodes.length} nodes, currentUser:`, currentUser);
             
             document.getElementById('total-nodes').textContent = nodes.length;
             // Count online nodes - current user is ALWAYS online
@@ -5039,7 +5011,6 @@
             if (currentUser) {
                 const indicator = document.getElementById('your-node-indicator');
                 const freshData = nodesData[currentUser.id];
-                console.log(`📊 User data for ${currentUser.id}:`, freshData);
                 
                 // Use chain data if available, otherwise fallback to currentUser data
                 const displayName = freshData?.name || currentUser.name || '?';
@@ -5049,13 +5020,6 @@
                 document.getElementById('your-name').textContent = displayName;
                 document.getElementById('your-children').textContent = `${childCount} recruits`;
                 indicator.style.display = 'flex';
-                console.log(`✅ Profile indicator set to visible for ${displayName}`);
-                
-                if (!freshData) {
-                    console.log(`⚠️ Node ${currentUser.id} not in chain yet, using localStorage data`);
-                }
-            } else {
-                console.log(`⚠️ currentUser is not set`);
             }
         }
         
@@ -5208,23 +5172,11 @@
             
             // Subscribe to nodes from blockchain
             unsubscribeNodes = window.SrishtiApp.subscribeToNodes((nodes) => {
-                console.log(`🔔 Node update received: ${Object.keys(nodes).length} nodes`);
-                
-                // Check for duplicate node IDs in blockchain data
-                const nodeIds = Object.keys(nodes);
-                const uniqueIds = new Set(nodeIds);
-                if (nodeIds.length !== uniqueIds.size) {
-                    console.error(`⚠️ DUPLICATE NODES DETECTED IN BLOCKCHAIN DATA! ${nodeIds.length} total, ${uniqueIds.size} unique`);
-                    const duplicates = nodeIds.filter((id, index) => nodeIds.indexOf(id) !== index);
-                    console.error(`⚠️ Duplicate node IDs:`, duplicates.map(id => id.substring(0, 12)));
-                }
-                
                 nodesData = nodes;
                 updateStats();
                 
                 // Build visualization (only rebuilds if structure changed)
                 const hierarchy = window.SrishtiApp.buildHierarchy();
-                console.log(`🌳 Hierarchy built:`, hierarchy ? 'has data' : 'null');
                 buildVisualization(hierarchy);
                 
                 // Update glows (this is lightweight and can run every time)
@@ -5257,10 +5209,9 @@
             // IMPORTANT: We allow login with just nodeId and name, even without private key (for recovery cases)
             // Users without private key will be in read-only mode but still recognized as logged in
             // Fix: Trim and validate node name to handle spaces properly
-            const hasValidLocalData = savedNodeId && savedNodeName && savedNodeName.length > 0; // Don't require private key for login
+            const hasValidLocalData = savedNodeId && savedNodeName && savedNodeName.length > 0;
             const hasPrivateKey = !!savedPrivateKey;
             const appHasNode = window.SrishtiApp?.nodeId === savedNodeId;
-            console.log(`🔍 Checking returning user: savedNodeId=${savedNodeId}, savedName=${savedNodeName}, hasPrivateKey=${hasPrivateKey}, app.nodeId=${window.SrishtiApp?.nodeId}, appMatches=${appHasNode}, hasValidLocalData=${hasValidLocalData}`);
             
             if (savedNodeId && !appHasNode && window.SrishtiApp?.nodeId) {
                 console.warn(`⚠️ Mismatch detected: localStorage has ${savedNodeId} but app has ${window.SrishtiApp.nodeId}. App may not have loaded from localStorage correctly.`);

@@ -5,6 +5,9 @@
  * This is the central coordinator that ties everything together.
  */
 
+// Set to true for verbose debugging (ICE candidates, heartbeats, etc.)
+const NETWORK_DEBUG = false;
+
 class Network {
     /**
      * Create a new network instance
@@ -189,7 +192,7 @@ class Network {
                 onAnswer: (data) => this.handleSignalingAnswer(data),
                 onIceCandidate: (data) => this.handleSignalingIceCandidate(data),
                 onPeerConnected: (peers) => {
-                    console.log(`📡 Available peers: ${peers.length}`, peers);
+                    if (peers.length > 0) console.log(`📡 Found ${peers.length} peer(s)`);
                     // When we get the peer list, try to connect to available peers
                     // But only initiate if our nodeId is "lower" to avoid glare (both sides offering)
                     for (const peerId of peers) {
@@ -198,9 +201,7 @@ class Network {
                             if (this.nodeId < peerId) {
                                 console.log(`🔌 Initiating connection to peer: ${peerId} (we have lower ID)`);
                                 this.attemptConnection(peerId, null);
-                            } else {
-                                console.log(`⏳ Waiting for peer ${peerId} to initiate (they have lower ID)`);
-                            }
+                            } // else: wait for peer to initiate (they have lower ID)
                         }
                     }
                 }
@@ -251,7 +252,6 @@ class Network {
                 nodeId: this.nodeId,
                 onMessage: (message, peerId) => this.handleMessage(message, peerId),
                 onConnectionStateChange: (state) => {
-                    console.log(`📶 Connection state from ${fromNodeId}: ${state}`);
                     if (state === 'data_channel_open') {
                         console.log(`🎉 Data channel open with ${fromNodeId}! Syncing...`);
                         // Mark as online immediately
@@ -296,7 +296,7 @@ class Network {
                 },
                 onIceCandidate: (candidate) => {
                     if (this.signaling && candidate) {
-                        console.log(`🧊 Sending ICE candidate to ${fromNodeId}`);
+                        if (NETWORK_DEBUG) console.log(`🧊 Sending ICE candidate to ${fromNodeId}`);
                         this.signaling.sendIceCandidate(fromNodeId, candidate);
                     }
                 }
@@ -318,10 +318,7 @@ class Network {
                 this.signaling.sendAnswer(fromNodeId, answer);
             }
             
-            console.log(`✅ WebRTC connection established with ${fromNodeId} (as answerer)`);
-            console.log(`⏳ Waiting for data channel to open before sync...`);
-            // Don't request sync here - wait for data channel to open
-            // The sync will be triggered by onConnectionStateChange when state is 'connected'
+            // WebRTC handshake complete, waiting for data channel
         } catch (error) {
             console.error(`❌ Failed to handle offer from ${fromNodeId}:`, error);
         }
@@ -333,8 +330,6 @@ class Network {
     async handleSignalingAnswer(data) {
         const { fromNodeId, answer } = data;
         
-        console.log(`📥 Received WebRTC answer from ${fromNodeId}`);
-        
         const connection = this.pendingOffers.get(fromNodeId);
         if (!connection) {
             console.warn(`⚠️ No pending offer for ${fromNodeId}`);
@@ -342,24 +337,16 @@ class Network {
         }
         
         try {
-            console.log(`📝 Setting remote answer from ${fromNodeId}...`);
             await connection.setRemoteAnswer(answer);
             this.pendingOffers.delete(fromNodeId);
             this.pendingConnections.delete(fromNodeId);
             
-            // Add to peers if not already there
             if (!this.peers.has(fromNodeId)) {
                 this.peers.set(fromNodeId, connection);
-                console.log(`➕ Added ${fromNodeId} to peers map`);
             }
             
-            // Apply any ICE candidates that arrived before the answer was processed
             await this.applyQueuedIceCandidates(fromNodeId, connection);
-            
-            console.log(`📊 Current peers:`, Array.from(this.peers.keys()));
-            console.log(`✅ WebRTC connection established with ${fromNodeId} (as offerer)`);
-            console.log(`⏳ Waiting for data channel to open before sync...`);
-            // Don't request sync here - wait for data channel to open
+            // WebRTC handshake complete, waiting for data channel
         } catch (error) {
             console.error(`❌ Failed to handle answer from ${fromNodeId}:`, error);
             this.pendingOffers.delete(fromNodeId);
@@ -372,8 +359,6 @@ class Network {
     async handleSignalingIceCandidate(data) {
         const { fromNodeId, candidate } = data;
         
-        console.log(`🧊 Received ICE candidate from ${fromNodeId}`);
-        
         // Check if we have a connection (either in peers or pendingOffers)
         let connection = this.peers.get(fromNodeId) || this.pendingOffers.get(fromNodeId);
         
@@ -383,7 +368,6 @@ class Network {
             } catch (err) {
                 // If adding fails (e.g., remote description not set yet), queue it
                 if (err.message?.includes('remote description') || !connection.pc?.remoteDescription) {
-                    console.log(`⏳ Queueing ICE candidate from ${fromNodeId} (remote description not ready)`);
                     this.queueIceCandidate(fromNodeId, candidate);
                 } else {
                     console.warn(`⚠️ Failed to add ICE candidate from ${fromNodeId}:`, err.message);
@@ -391,7 +375,6 @@ class Network {
             }
         } else {
             // Queue the ICE candidate for when the connection is established
-            console.log(`⏳ Queueing ICE candidate from ${fromNodeId} (no connection yet)`);
             this.queueIceCandidate(fromNodeId, candidate);
         }
     }
@@ -406,7 +389,6 @@ class Network {
             this.pendingIceCandidates.set(nodeId, []);
         }
         this.pendingIceCandidates.get(nodeId).push(candidate);
-        console.log(`📦 Queued ICE candidate for ${nodeId}, total queued: ${this.pendingIceCandidates.get(nodeId).length}`);
     }
     
     /**
@@ -416,21 +398,18 @@ class Network {
      */
     async applyQueuedIceCandidates(nodeId, connection) {
         const queued = this.pendingIceCandidates.get(nodeId);
-        if (!queued || queued.length === 0) {
-            return;
-        }
+        if (!queued || queued.length === 0) return;
         
-        console.log(`🧊 Applying ${queued.length} queued ICE candidates to ${nodeId}`);
+        if (NETWORK_DEBUG) console.log(`🧊 Applying ${queued.length} queued ICE candidates to ${nodeId}`);
         
         for (const candidate of queued) {
             try {
                 await connection.addIceCandidate(candidate);
             } catch (err) {
-                console.warn(`⚠️ Failed to apply queued ICE candidate to ${nodeId}:`, err.message);
+                // Silently ignore candidate errors during queue application
             }
         }
         
-        // Clear the queue
         this.pendingIceCandidates.delete(nodeId);
     }
     
@@ -610,8 +589,6 @@ class Network {
                 this.dht.removePeer(nodeId);
             }
             
-            console.log(`📡 Disconnected from ${nodeId}`);
-            
             // Schedule reconnection attempt if we should retry
             if (shouldRetry && this.signaling?.connected) {
                 this.scheduleReconnect(nodeId);
@@ -632,30 +609,19 @@ class Network {
         const maxAttempts = 3;
         
         if (attempts > maxAttempts) {
-            console.log(`⚠️ Max reconnect attempts reached for ${nodeId}`);
             delete this.reconnectAttempts[nodeId];
             return;
         }
         
         // Exponential backoff: 2s, 4s, 8s
         const delay = Math.pow(2, attempts) * 1000;
-        console.log(`🔄 Scheduling reconnect to ${nodeId} in ${delay/1000}s (attempt ${attempts}/${maxAttempts})`);
         
         setTimeout(() => {
-            // Only reconnect if we're still not connected and signaling is available
             if (!this.peers.has(nodeId) && this.signaling?.connected) {
-                console.log(`🔄 Attempting reconnect to ${nodeId}...`);
-                // Check if they're in available peers
-                if (this.signaling.availablePeers?.includes(nodeId)) {
-                    // Let the peer with lower ID initiate
-                    if (this.nodeId < nodeId) {
-                        this.attemptConnection(nodeId, null);
-                    } else {
-                        console.log(`⏳ Waiting for ${nodeId} to initiate reconnection`);
-                    }
+                if (this.signaling.availablePeers?.includes(nodeId) && this.nodeId < nodeId) {
+                    this.attemptConnection(nodeId, null);
                 }
             } else if (this.peers.has(nodeId)) {
-                // Successfully reconnected
                 delete this.reconnectAttempts[nodeId];
             }
         }, delay);
@@ -667,8 +633,6 @@ class Network {
      * @param {string} peerId - Peer's node ID
      */
     async handleMessage(message, peerId) {
-        console.log(`📨 Received message from ${peerId}:`, message.type);
-        
         if (!window.SrishtiProtocol) return;
         
         switch (message.type) {
@@ -1541,20 +1505,15 @@ class Network {
      * @param {string} excludePeerId - Peer ID to exclude
      */
     broadcast(message, excludePeerId = null) {
-        console.log(`📢 Broadcasting ${message.type} to ${this.peers.size} peers (excluding ${excludePeerId || 'none'})`);
+        if (NETWORK_DEBUG) console.log(`📢 Broadcasting ${message.type} to ${this.peers.size} peers`);
         
+        let sentCount = 0;
         for (const [peerId, connection] of this.peers.entries()) {
-            if (peerId !== excludePeerId) {
-                const isConnected = connection.isConnected();
-                console.log(`📤 Broadcasting to ${peerId}: connected=${isConnected}`);
-                if (isConnected) {
-                    const sent = connection.send(message);
-                    console.log(`📤 Broadcast to ${peerId}: sent=${sent}`);
-                } else {
-                    console.log(`⏭️ Skipping ${peerId} - not connected`);
-                }
+            if (peerId !== excludePeerId && connection.isConnected()) {
+                if (connection.send(message)) sentCount++;
             }
         }
+        if (NETWORK_DEBUG && sentCount > 0) console.log(`📤 Broadcast sent to ${sentCount} peers`);
     }
     
     /**
@@ -1875,33 +1834,19 @@ class Network {
             return;
         }
         
-        if (this.pendingOffers.has(nodeId)) {
-            console.log(`⏭️ Already have pending offer to ${nodeId}`);
-            return;
-        }
-        
-        if (!this.signaling || !this.signaling.isConnected()) {
-            console.log(`⏳ Cannot connect to ${nodeId}: signaling not ready`);
-            return;
-        }
-        
-        if (!window.SrishtiPeerConnection) {
-            console.error('❌ PeerConnection not loaded');
-            return;
-        }
-        
-        console.log(`🔌 Creating WebRTC connection to ${nodeId}...`);
+        if (this.pendingOffers.has(nodeId)) return;
+        if (!this.signaling || !this.signaling.isConnected()) return;
+        if (!window.SrishtiPeerConnection) return;
         
         try {
             const connection = new window.SrishtiPeerConnection({
                 nodeId: this.nodeId,
                 onMessage: (message, peerId) => this.handleMessage(message, peerId),
                 onConnectionStateChange: (state) => {
-                    console.log(`📶 Connection state to ${nodeId}: ${state}`);
                     if (state === 'data_channel_open') {
+                        console.log(`✅ Connected to peer ${nodeId}`);
                         this.pendingOffers.delete(nodeId);
                         this.pendingConnections.delete(nodeId);
-                        console.log(`🎉 Data channel open with ${nodeId}! Syncing...`);
                         // Mark as online immediately
                         const info = this.peerInfo.get(nodeId) || {};
                         this.peerInfo.set(nodeId, {
@@ -1936,40 +1881,29 @@ class Network {
                         // This ensures we have accurate chain info from the peer
                         setTimeout(async () => {
                             if (this.peers.has(nodeId) && this.peers.get(nodeId).isConnected()) {
-                                console.log(`🔄 Requesting sync from ${nodeId} after connection established...`);
                                 await this.requestSync(nodeId);
                             }
                         }, 500);
                     } else if (state === 'data_channel_closed' || state === 'data_channel_error' ||
                                state === 'disconnected' || state === 'failed') {
                         this.pendingOffers.delete(nodeId);
-                        // Retry if the connection failed before data channel opened
-                        const shouldRetry = state === 'failed';
-                        console.log(`🔌 Connection ${state} for ${nodeId} (offerer), retry=${shouldRetry}`);
-                        this.disconnectPeer(nodeId, shouldRetry);
+                        this.disconnectPeer(nodeId, state === 'failed');
                     }
                 },
                 onIceCandidate: (candidate) => {
                     if (this.signaling && candidate) {
-                        console.log(`🧊 Sending ICE candidate to ${nodeId}`);
                         this.signaling.sendIceCandidate(nodeId, candidate);
                     }
                 }
             });
             
-            // Set remote node ID for message handling
             connection.remoteNodeId = nodeId;
             
-            // Create offer
-            console.log(`📝 Creating WebRTC offer for ${nodeId}...`);
             const offer = await connection.initAsOfferer();
             this.pendingOffers.set(nodeId, connection);
             
-            // Send offer via signaling
-            console.log(`📤 Sending offer to ${nodeId} via signaling...`);
             this.signaling.sendOffer(nodeId, offer);
-            
-            console.log(`✅ Offer sent to ${nodeId}`);
+            console.log(`📤 WebRTC offer sent to ${nodeId}`);
         } catch (error) {
             console.error(`Failed to connect to ${nodeId}:`, error);
             this.pendingOffers.delete(nodeId);

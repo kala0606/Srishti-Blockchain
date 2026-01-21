@@ -149,14 +149,7 @@ class PeerConnection {
             throw new Error('Cannot add ICE candidate: remote description not set');
         }
         
-        try {
-            await this.pc.addIceCandidate(new RTCIceCandidate(candidate));
-            const candidateType = this.parseIceCandidateType(candidate.candidate || '');
-            console.log(`🧊 Added remote ICE candidate (${candidateType}): ${candidate.candidate?.substring(0, 60)}...`);
-        } catch (err) {
-            console.warn(`⚠️ Failed to add ICE candidate:`, err.message);
-            throw err;
-        }
+        await this.pc.addIceCandidate(new RTCIceCandidate(candidate));
     }
     
     /**
@@ -204,43 +197,33 @@ class PeerConnection {
      * Setup peer connection event handlers
      */
     setupPeerConnection() {
-        // Handle ICE candidates
+        // Handle ICE candidates - send to peer via signaling
         this.pc.onicecandidate = (event) => {
             if (event.candidate) {
-                // Log candidate type for debugging
-                const candidateType = this.parseIceCandidateType(event.candidate.candidate);
-                console.log(`🧊 Local ICE candidate (${candidateType}): ${event.candidate.candidate.substring(0, 80)}...`);
-                // Send ICE candidate to peer via signaling
                 this.onIceCandidate(event.candidate);
-            } else {
-                console.log('🧊 ICE candidate gathering complete');
             }
         };
         
-        // Handle ICE gathering state changes
-        this.pc.onicegatheringstatechange = () => {
-            console.log(`🧊 ICE gathering state: ${this.pc.iceGatheringState}`);
-        };
-        
-        // Handle ICE connection state changes (important for debugging!)
+        // Handle ICE connection state (only log failures)
         this.pc.oniceconnectionstatechange = () => {
-            console.log(`🧊 ICE connection state: ${this.pc.iceConnectionState}`);
             if (this.pc.iceConnectionState === 'failed') {
-                console.error('❌ ICE connection failed - check TURN server credentials or firewall settings');
+                console.error('❌ ICE connection failed - NAT traversal issue');
             }
         };
         
         // Handle connection state changes
         this.pc.onconnectionstatechange = () => {
             const state = this.pc.connectionState;
-            console.log(`📡 Connection state: ${state}`);
-            this.onConnectionStateChange(state);
-            
-            if (state === 'connected' || state === 'completed') {
+            if (state === 'connected') {
+                console.log(`✅ WebRTC connected`);
                 this.connected = true;
+            } else if (state === 'failed') {
+                console.log(`❌ WebRTC connection failed`);
+                this.connected = false;
             } else {
                 this.connected = false;
             }
+            this.onConnectionStateChange(state);
         };
         
         // Handle incoming data channel (for answerer)
@@ -251,28 +234,12 @@ class PeerConnection {
     }
     
     /**
-     * Parse ICE candidate type from candidate string
-     * @param {string} candidateStr 
-     * @returns {string} - 'host', 'srflx', 'relay', or 'unknown'
-     */
-    parseIceCandidateType(candidateStr) {
-        if (candidateStr.includes('typ host')) return 'host (local)';
-        if (candidateStr.includes('typ srflx')) return 'srflx (STUN)';
-        if (candidateStr.includes('typ relay')) return 'relay (TURN)';
-        if (candidateStr.includes('typ prflx')) return 'prflx (peer-reflexive)';
-        return 'unknown';
-    }
-    
-    /**
      * Send a message to the peer
      * @param {Object} message - Message object
      * @returns {boolean} - Success status
      */
     send(message) {
-        console.log(`📤 PeerConnection.send called, connected=${this.connected}, dataChannel=${this.dataChannel?.readyState}`);
-        
         if (!this.connected || !this.dataChannel || this.dataChannel.readyState !== 'open') {
-            console.warn(`Cannot send: connected=${this.connected}, dataChannel=${this.dataChannel?.readyState}`);
             return false;
         }
         

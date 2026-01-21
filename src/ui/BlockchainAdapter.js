@@ -76,19 +76,7 @@ class BlockchainAdapter {
         const nodes = this.nodeCache;
         const nodesArray = Object.values(nodes);
         
-        console.log(`🌳 buildHierarchy called with ${nodesArray.length} nodes`);
-        
-        if (nodesArray.length === 0) {
-            console.log('🌳 No nodes to build hierarchy');
-            return null;
-        }
-        
-        // Log all nodes with their parentIds for debugging
-        console.log('🌳 Nodes in cache:', nodesArray.map(n => ({ 
-            id: n.id.substring(0, 12), 
-            name: n.name, 
-            parentIds: (Array.isArray(n.parentIds) ? n.parentIds : (n.parentId ? [n.parentId] : [])).map(p => p.substring(0, 12))
-        })));
+        if (nodesArray.length === 0) return null;
         
         // Find root nodes (no parents)
         const rootNodes = nodesArray.filter(n => {
@@ -96,13 +84,10 @@ class BlockchainAdapter {
             return parentIds.length === 0;
         });
         
-        console.log(`🌳 Found ${rootNodes.length} root nodes:`, rootNodes.map(n => ({ id: n.id.substring(0, 12), name: n.name })));
-        
         if (rootNodes.length === 0) {
             // If no root, use the oldest node as root
             nodesArray.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
             rootNodes.push(nodesArray[0]);
-            console.log(`🌳 No root found, using oldest node as root:`, rootNodes[0].name);
         }
         
         // Build children map (supporting multiple parents)
@@ -140,12 +125,6 @@ class BlockchainAdapter {
                 seenNodes.add(rootNode.id);
             }
         });
-        
-        // Log children map for debugging
-        console.log('🌳 Children map:', Object.entries(childrenMap).map(([parentId, children]) => ({
-            parent: parentId.substring(0, 12),
-            children: children.map(c => ({ id: c.id.substring(0, 12), name: c.name }))
-        })));
         
         // Recursive function to build tree (using first parent only to prevent duplicates)
         // But we'll attach allParentsMap to each node for link creation
@@ -218,11 +197,8 @@ class BlockchainAdapter {
         }
         this.listeners.get('nodes').push({ id: listenerId, callback });
         
-        console.log(`📝 New subscriber added, total listeners: ${this.listeners.get('nodes').length}`);
-        
         // Call immediately with current nodes
         const currentNodes = this.getAllNodes();
-        console.log(`📝 Calling subscriber immediately with ${Object.keys(currentNodes).length} nodes`);
         callback(currentNodes);
         
         // Return unsubscribe function
@@ -243,7 +219,6 @@ class BlockchainAdapter {
     notifyListeners() {
         const nodes = this.getAllNodes();
         const callbacks = this.listeners.get('nodes') || [];
-        console.log(`📣 Notifying ${callbacks.length} listeners with ${Object.keys(nodes).length} nodes`);
         callbacks.forEach(({ callback }) => {
             try {
                 callback(nodes);
@@ -281,15 +256,7 @@ class BlockchainAdapter {
      * Handle chain update (called when chain changes)
      */
     onChainUpdate() {
-        console.log('🔄 BlockchainAdapter.onChainUpdate called');
-        
-        // Update node cache
         this.updateNodeCache();
-        
-        console.log('📊 Node cache updated:', Object.keys(this.nodeCache).length, 'nodes');
-        console.log('📊 Nodes:', Object.values(this.nodeCache).map(n => n.name));
-        
-        // Notify listeners
         this.notifyListeners();
     }
     
