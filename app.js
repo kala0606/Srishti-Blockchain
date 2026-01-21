@@ -336,7 +336,11 @@ class SrishtiApp {
             
             // Add block to chain and broadcast
             if (this.network) {
-                await this.network.proposeBlock(newBlock);
+                const proposed = await this.network.proposeBlock(newBlock);
+                if (!proposed) {
+                    console.error('❌ Failed to propose join block - node may already exist');
+                    throw new Error('Failed to join network - please refresh and try again');
+                }
                 
                 // If we joined under a parent, attempt to connect to them
                 // This is critical for ensuring blocks (like INSTITUTION_REGISTER) reach the parent
@@ -384,7 +388,11 @@ class SrishtiApp {
                 }
             } else {
                 // If no network, just add to chain locally
-                await this.chain.addBlock(newBlock);
+                const added = await this.chain.addBlock(newBlock);
+                if (!added) {
+                    console.error('❌ Failed to add join block - node may already exist');
+                    throw new Error('Failed to join network - please refresh and try again');
+                }
                 await this.saveChain();
             }
             

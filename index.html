@@ -1204,6 +1204,116 @@
             z-index: 1;
         }
 
+        /* Guest Loading Indicator */
+        #guest-indicator {
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        #guest-indicator.loading {
+            pointer-events: none;
+        }
+        
+        .guest-spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-top-color: rgba(255, 255, 255, 0.8);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+        
+        .guest-check {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            margin-right: 8px;
+            vertical-align: middle;
+            color: #4ade80;
+            animation: checkPop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        
+        @keyframes checkPop {
+            0% { transform: scale(0); opacity: 0; }
+            50% { transform: scale(1.3); }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        
+        .guest-progress {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            height: 2px;
+            background: linear-gradient(90deg, rgba(74, 222, 128, 0.8), rgba(59, 130, 246, 0.8));
+            border-radius: 0 0 12px 12px;
+            transition: width 0.3s ease;
+        }
+        
+        /* Skeleton loaders */
+        .skeleton {
+            background: linear-gradient(
+                90deg,
+                rgba(255, 255, 255, 0.04) 0%,
+                rgba(255, 255, 255, 0.08) 50%,
+                rgba(255, 255, 255, 0.04) 100%
+            );
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+            border-radius: 8px;
+        }
+        
+        @keyframes shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+        
+        .skeleton-text {
+            height: 14px;
+            margin-bottom: 8px;
+        }
+        
+        .skeleton-text.sm {
+            height: 12px;
+            width: 60%;
+        }
+        
+        .skeleton-circle {
+            border-radius: 50%;
+        }
+        
+        /* Pulse animation for sync status */
+        .sync-pulse {
+            animation: syncPulse 2s ease-in-out infinite;
+        }
+        
+        @keyframes syncPulse {
+            0%, 100% { opacity: 0.5; }
+            50% { opacity: 1; }
+        }
+        
+        /* Dashboard loading state */
+        .dashboard-loading {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 40px 20px;
+            gap: 16px;
+        }
+        
+        .dashboard-loading .loading-spinner {
+            width: 32px;
+            height: 32px;
+        }
+        
+        .dashboard-loading-text {
+            color: var(--text-secondary);
+            font-size: 0.85em;
+            letter-spacing: 0.5px;
+        }
+
         /* Welcome Animation for new nodes */
         .welcome-burst {
             position: fixed;
@@ -2173,7 +2283,13 @@
     <div id="loading">
         <div class="loading-logo">SRISHTI</div>
         <div class="loading-spinner"></div>
-        <p class="loading-text">Connecting to the timeline...</p>
+        <p class="loading-text" id="loading-status">Initializing...</p>
+        <div class="loading-substatus" id="loading-substatus" style="
+            color: rgba(255, 255, 255, 0.4);
+            font-size: 0.75em;
+            margin-top: 8px;
+            letter-spacing: 0.5px;
+        "></div>
     </div>
 
     <!-- Onboarding Modal -->
@@ -3527,7 +3643,43 @@
             }
             
             const panel = document.getElementById('dashboard-panel');
+            const content = panel.querySelector('.dashboard-content');
+            
+            // Show panel with loading state
             panel.classList.add('open');
+            
+            // Show brief loading overlay
+            const existingLoader = panel.querySelector('.dashboard-loader-overlay');
+            if (!existingLoader) {
+                const loader = document.createElement('div');
+                loader.className = 'dashboard-loader-overlay';
+                loader.innerHTML = `
+                    <div class="loading-spinner" style="width: 28px; height: 28px;"></div>
+                    <span style="margin-top: 12px; color: rgba(255,255,255,0.6); font-size: 12px;">Loading dashboard...</span>
+                `;
+                loader.style.cssText = `
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    bottom: 0;
+                    background: rgba(5, 5, 16, 0.95);
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: center;
+                    z-index: 10;
+                    transition: opacity 0.3s ease;
+                `;
+                panel.appendChild(loader);
+                
+                // Fade out loader after data loads
+                setTimeout(() => {
+                    loader.style.opacity = '0';
+                    setTimeout(() => loader.remove(), 300);
+                }, 400);
+            }
+            
             updateDashboard();
             
             // Start periodic KARMA balance updates (every 10 seconds)
@@ -4475,7 +4627,20 @@
                 if (name.length < 2) return;
                 
                 joinBtn.disabled = true;
-                joinBtn.textContent = 'Joining...';
+                joinBtn.innerHTML = `
+                    <span class="btn-spinner" style="
+                        display: inline-block;
+                        width: 16px;
+                        height: 16px;
+                        border: 2px solid rgba(0, 0, 0, 0.2);
+                        border-top-color: rgba(0, 0, 0, 0.8);
+                        border-radius: 50%;
+                        animation: spin 0.8s linear infinite;
+                        margin-right: 8px;
+                        vertical-align: middle;
+                    "></span>
+                    <span>Connecting to network...</span>
+                `;
                 
                 await joinNetwork(name, modal.dataset.parentId || null);
             };
@@ -4672,9 +4837,10 @@
         }
         
         /**
-         * Show guest mode - allows viewing without joining
+         * Show guest mode - shows loading state first, then ready state after blockchain loads
+         * @param {boolean} showLoadingFirst - If true, show loading state initially
          */
-        function showGuestMode() {
+        function showGuestMode(showLoadingFirst = true) {
             // Remove any existing guest UI
             const existingBtn = document.getElementById('guest-join-btn');
             const existingIndicator = document.getElementById('guest-indicator');
@@ -4687,16 +4853,29 @@
                 fabContainer.style.display = 'none';
             }
             
-            // Add a subtle indicator that you're viewing as guest (clickable to join)
+            // Create guest indicator container
             const guestIndicator = document.createElement('div');
             guestIndicator.id = 'guest-indicator';
             
             // Check if mobile
             const isMobile = window.innerWidth <= 768;
-            const mobileText = '👁️ Guest • Tap to join';
-            const desktopText = '👁️ Viewing as Guest <span style="opacity: 0.7; margin-left: 8px;">• Click to join</span>';
             
-            guestIndicator.innerHTML = isMobile ? mobileText : desktopText;
+            // Loading state content
+            const loadingContent = `
+                <span class="guest-spinner"></span>
+                <span class="guest-loading-text">Syncing blockchain...</span>
+                <div class="guest-progress" style="width: 0%"></div>
+            `;
+            
+            // Ready state content
+            const getReadyContent = (mobile) => mobile 
+                ? '👁️ Guest • Tap to join'
+                : '👁️ Viewing as Guest <span style="opacity: 0.7; margin-left: 8px;">• Click to join</span>';
+            
+            guestIndicator.innerHTML = showLoadingFirst ? loadingContent : getReadyContent(isMobile);
+            if (showLoadingFirst) {
+                guestIndicator.classList.add('loading');
+            }
             
             // Base styles - positioned at bottom-left corner
             let baseStyles = `
@@ -4715,9 +4894,10 @@
                 backdrop-filter: blur(20px);
                 -webkit-backdrop-filter: blur(20px);
                 box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-                cursor: pointer;
-                transition: all 0.3s ease;
+                cursor: default;
+                transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
                 text-align: center;
+                overflow: hidden;
             `;
             
             // Mobile-specific adjustments
@@ -4732,60 +4912,196 @@
             
             guestIndicator.style.cssText = baseStyles;
             
-            guestIndicator.onmouseenter = () => {
-                guestIndicator.style.background = 'rgba(255, 255, 255, 0.1)';
-                guestIndicator.style.borderColor = 'rgba(255, 255, 255, 0.2)';
-                guestIndicator.style.transform = 'translateY(-2px)';
-            };
-            
-            guestIndicator.onmouseleave = () => {
-                guestIndicator.style.background = 'rgba(255, 255, 255, 0.06)';
-                guestIndicator.style.borderColor = 'rgba(255, 255, 255, 0.12)';
-                guestIndicator.style.transform = 'translateY(0)';
-            };
-            
-            // Handle window resize
-            const handleResize = () => {
+            // Store resize handler reference for cleanup
+            guestIndicator._resizeHandler = () => {
                 const nowMobile = window.innerWidth <= 768;
-                if (nowMobile !== isMobile) {
-                    guestIndicator.innerHTML = nowMobile ? mobileText : desktopText;
-                    if (nowMobile) {
-                        guestIndicator.style.bottom = '24px';
-                        guestIndicator.style.left = '24px';
-                        guestIndicator.style.padding = '10px 18px';
-                        guestIndicator.style.fontSize = '12px';
-                    } else {
-                        guestIndicator.style.bottom = '32px';
-                        guestIndicator.style.left = '32px';
-                        guestIndicator.style.padding = '12px 24px';
-                        guestIndicator.style.fontSize = '13px';
-                    }
+                if (!guestIndicator.classList.contains('loading')) {
+                    guestIndicator.innerHTML = getReadyContent(nowMobile);
+                }
+                if (nowMobile) {
+                    guestIndicator.style.bottom = '24px';
+                    guestIndicator.style.left = '24px';
+                    guestIndicator.style.padding = '10px 18px';
+                    guestIndicator.style.fontSize = '12px';
+                } else {
+                    guestIndicator.style.bottom = '32px';
+                    guestIndicator.style.left = '32px';
+                    guestIndicator.style.padding = '12px 24px';
+                    guestIndicator.style.fontSize = '13px';
                 }
             };
-            window.addEventListener('resize', handleResize);
-            
-            guestIndicator.onclick = () => {
-                // Check if there's a join param in URL
-                const urlParams = new URLSearchParams(window.location.search);
-                const joinParam = urlParams.get('join');
-                let joinParentId = null;
-                
-                if (joinParam) {
-                    try {
-                        const connectionInfo = window.SrishtiQRCodeClass.parseFromUrl(joinParam);
-                        if (connectionInfo) {
-                            joinParentId = connectionInfo.nodeId;
-                        }
-                    } catch (e) {
-                        console.warn('Failed to parse join param:', e);
-                    }
-                }
-                
-                showOnboardingModal(joinParentId);
-                guestIndicator.remove();
-            };
+            window.addEventListener('resize', guestIndicator._resizeHandler);
             
             document.body.appendChild(guestIndicator);
+        }
+        
+        /**
+         * Update guest indicator progress during blockchain sync
+         * @param {number} progress - Progress percentage (0-100)
+         * @param {string} message - Optional status message
+         */
+        function updateGuestLoadingProgress(progress, message = null) {
+            const indicator = document.getElementById('guest-indicator');
+            if (!indicator || !indicator.classList.contains('loading')) return;
+            
+            const progressBar = indicator.querySelector('.guest-progress');
+            const textEl = indicator.querySelector('.guest-loading-text');
+            
+            if (progressBar) {
+                progressBar.style.width = `${Math.min(100, progress)}%`;
+            }
+            if (textEl && message) {
+                textEl.textContent = message;
+            }
+        }
+        
+        /**
+         * Transition guest indicator from loading to ready state
+         */
+        function showGuestReady() {
+            const indicator = document.getElementById('guest-indicator');
+            if (!indicator) return;
+            
+            const isMobile = window.innerWidth <= 768;
+            
+            // Show checkmark briefly then transition to clickable state
+            indicator.innerHTML = `
+                <svg class="guest-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+                <span>Blockchain loaded!</span>
+            `;
+            
+            // After a moment, show the join button
+            setTimeout(() => {
+                indicator.classList.remove('loading');
+                indicator.innerHTML = isMobile 
+                    ? '👁️ Guest • Tap to join'
+                    : '👁️ Viewing as Guest <span style="opacity: 0.7; margin-left: 8px;">• Click to join</span>';
+                
+                indicator.style.cursor = 'pointer';
+                
+                // Add hover effects
+                indicator.onmouseenter = () => {
+                    indicator.style.background = 'rgba(255, 255, 255, 0.1)';
+                    indicator.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+                    indicator.style.transform = 'translateY(-2px)';
+                };
+                
+                indicator.onmouseleave = () => {
+                    indicator.style.background = 'rgba(255, 255, 255, 0.06)';
+                    indicator.style.borderColor = 'rgba(255, 255, 255, 0.12)';
+                    indicator.style.transform = 'translateY(0)';
+                };
+                
+                // Add click handler to join
+                indicator.onclick = () => {
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const joinParam = urlParams.get('join');
+                    let joinParentId = null;
+                    
+                    if (joinParam) {
+                        try {
+                            const connectionInfo = window.SrishtiQRCodeClass.parseFromUrl(joinParam);
+                            if (connectionInfo) {
+                                joinParentId = connectionInfo.nodeId;
+                            }
+                        } catch (e) {
+                            console.warn('Failed to parse join param:', e);
+                        }
+                    }
+                    
+                    showOnboardingModal(joinParentId);
+                    
+                    // Cleanup
+                    if (indicator._resizeHandler) {
+                        window.removeEventListener('resize', indicator._resizeHandler);
+                    }
+                    indicator.remove();
+                };
+            }, 1200);
+        }
+        
+        /**
+         * Wait for blockchain to sync in guest mode with progress updates
+         * @returns {Promise<void>}
+         */
+        async function waitForGuestSync() {
+            return new Promise((resolve) => {
+                const startTime = Date.now();
+                const maxWaitTime = 8000; // 8 seconds max wait
+                const minWaitTime = 1500; // Minimum time to show loading for better UX
+                
+                let lastChainLength = window.SrishtiApp?.chain?.getLength() || 0;
+                let stableCount = 0;
+                const stableThreshold = 3; // Chain needs to be stable for 3 checks
+                
+                const checkSync = () => {
+                    const elapsed = Date.now() - startTime;
+                    const chainLength = window.SrishtiApp?.chain?.getLength() || 0;
+                    const connectedPeers = window.SrishtiApp?.network?.peers?.size || 0;
+                    const isSignalingConnected = window.SrishtiApp?.network?.signaling?.isConnected?.() || false;
+                    
+                    // Calculate progress based on different stages
+                    let progress = 30;
+                    let message = 'Syncing blockchain...';
+                    
+                    if (isSignalingConnected) {
+                        progress = 40;
+                        message = 'Connected to network...';
+                    }
+                    
+                    if (connectedPeers > 0) {
+                        progress = 60;
+                        message = `Found ${connectedPeers} peer${connectedPeers > 1 ? 's' : ''}...`;
+                    }
+                    
+                    if (chainLength > 0) {
+                        progress = 70 + Math.min(25, chainLength * 5);
+                        message = `Loading ${chainLength} block${chainLength > 1 ? 's' : ''}...`;
+                    }
+                    
+                    // Check if chain is stable (not receiving new blocks)
+                    if (chainLength === lastChainLength && chainLength > 0) {
+                        stableCount++;
+                    } else {
+                        stableCount = 0;
+                        lastChainLength = chainLength;
+                    }
+                    
+                    updateGuestLoadingProgress(progress, message);
+                    
+                    // Sync complete conditions:
+                    // 1. Chain is stable (no new blocks for a few checks) after min wait
+                    // 2. Max wait time exceeded
+                    // 3. We have chain data and signaling connection timed out
+                    
+                    const isStable = stableCount >= stableThreshold && elapsed >= minWaitTime;
+                    const timedOut = elapsed >= maxWaitTime;
+                    const hasLocalData = chainLength > 0 && elapsed >= minWaitTime && !isSignalingConnected;
+                    
+                    if (isStable || timedOut || hasLocalData) {
+                        updateGuestLoadingProgress(100, 'Ready!');
+                        
+                        if (timedOut) {
+                            console.log(`⏰ Guest sync timeout - proceeding with ${chainLength} blocks`);
+                        } else if (hasLocalData) {
+                            console.log(`📦 Using local chain data - ${chainLength} blocks`);
+                        } else {
+                            console.log(`✅ Guest sync complete - ${chainLength} blocks from ${connectedPeers} peers`);
+                        }
+                        
+                        resolve();
+                        return;
+                    }
+                    
+                    // Keep checking
+                    setTimeout(checkSync, 400);
+                };
+                
+                // Start checking after a brief delay
+                setTimeout(checkSync, 300);
+            });
         }
         
         function showQRModal() {
@@ -5103,8 +5419,9 @@
             } catch (error) {
                 console.error('Failed to join network:', error);
                 alert('Failed to join. Please try again.');
-                document.getElementById('join-btn').disabled = false;
-                document.getElementById('join-btn').textContent = 'Enter the Timeline';
+                const joinBtn = document.getElementById('join-btn');
+                joinBtn.disabled = false;
+                joinBtn.innerHTML = 'Enter the Timeline';
             }
         }
         
@@ -5131,10 +5448,24 @@
         // Initialization
         // ============================================
         
+        /**
+         * Update the loading screen status
+         * @param {string} status - Main status message
+         * @param {string} substatus - Optional secondary message
+         */
+        function updateLoadingStatus(status, substatus = '') {
+            const statusEl = document.getElementById('loading-status');
+            const substatusEl = document.getElementById('loading-substatus');
+            if (statusEl) statusEl.textContent = status;
+            if (substatusEl) substatusEl.textContent = substatus;
+        }
+        
         async function init() {
             // Initialize blockchain app
             try {
+                updateLoadingStatus('Initializing blockchain...', 'Opening storage');
                 await window.SrishtiApp.init();
+                updateLoadingStatus('Loading chain data...', '');
             } catch (error) {
                 console.error('Failed to initialize blockchain:', error);
                 document.getElementById('loading').innerHTML = `
@@ -5161,6 +5492,8 @@
                 }
             }
             
+            updateLoadingStatus('Checking identity...', '');
+            
             // Check for existing user - do this AFTER app.init() to ensure app has loaded keys
             const savedNodeId = localStorage.getItem('srishti_node_id');
             const savedNodeName = (localStorage.getItem('srishti_node_name') || '').trim();
@@ -5169,6 +5502,8 @@
             // Also verify app has loaded the node correctly
             const appHasLoadedNode = window.SrishtiApp && window.SrishtiApp.nodeId && window.SrishtiApp.keyPair;
             console.log(`🔍 Initialization check: savedNodeId=${savedNodeId}, savedNodeName="${savedNodeName}", appHasLoadedNode=${appHasLoadedNode}, app.nodeId=${window.SrishtiApp?.nodeId}`);
+            
+            updateLoadingStatus('Building visualization...', 'Preparing 3D environment');
             
             // Subscribe to nodes from blockchain
             unsubscribeNodes = window.SrishtiApp.subscribeToNodes((nodes) => {
@@ -5197,11 +5532,17 @@
                 }
             });
             
+            updateLoadingStatus('Almost ready...', '');
+            
             // Wait a moment for initial data
             await new Promise(resolve => setTimeout(resolve, 500));
             
-            // Hide loading
-            document.getElementById('loading').style.display = 'none';
+            // Hide loading with fade out
+            const loadingEl = document.getElementById('loading');
+            loadingEl.style.transition = 'opacity 0.3s ease';
+            loadingEl.style.opacity = '0';
+            await new Promise(resolve => setTimeout(resolve, 300));
+            loadingEl.style.display = 'none';
             
             // Check if returning user - trust localStorage if we have valid data
             // Note: We check localStorage directly here (not app.nodeId) because app.js loads from localStorage
@@ -5299,23 +5640,38 @@
                 // Trigger a UI update with current user
                 updateStats();
             } else {
-                // New user - show guest mode first (allows viewing before joining)
-                console.log('👁️ New user - entering guest mode');
-                showGuestMode();
+                // New user - show guest mode with loading state first
+                console.log('👁️ New user - entering guest mode with loading state');
+                showGuestMode(true); // true = show loading first
                 
                 // Initialize network in guest mode so they can see the network
                 // This allows viewing other nodes without joining
                 if (window.SrishtiApp && !window.SrishtiApp.network) {
                     try {
+                        updateGuestLoadingProgress(10, 'Connecting to network...');
+                        
                         await window.SrishtiApp.initNetwork(true); // true = guest mode
-                        console.log('✅ Guest mode network initialized - you can now see the network');
+                        console.log('✅ Guest mode network initialized - syncing blockchain');
+                        
+                        updateGuestLoadingProgress(30, 'Syncing blockchain...');
+                        
+                        // Wait for blockchain sync with progress updates
+                        await waitForGuestSync();
+                        
+                        console.log('✅ Guest mode ready - blockchain loaded');
+                        showGuestReady();
                     } catch (error) {
                         console.warn('⚠️ Guest mode network initialization failed:', error);
-                        // Continue anyway - they can still view local chain
+                        // Still show ready state - they can view local chain
+                        updateGuestLoadingProgress(100, 'Using local data');
+                        setTimeout(() => showGuestReady(), 500);
                     }
+                } else {
+                    // Network already exists or app not ready - just show ready
+                    showGuestReady();
                 }
                 
-                // If they came via QR code, show a subtle hint after a delay
+                // If they came via QR code, show a subtle hint after guest is ready
                 if (joinParentId) {
                     setTimeout(() => {
                         // Only show hint if they haven't joined yet
@@ -5348,7 +5704,7 @@
                                 }
                             }, 5000);
                         }
-                    }, 2000);
+                    }, 3000); // Slightly delayed to allow guest ready animation
                 }
             }
             

@@ -162,6 +162,28 @@ class Chain {
             throw new Error('Block hash verification failed');
         }
         
+        // ═══════════════════════════════════════════════════════════════════
+        // CRITICAL: Prevent duplicate NODE_JOIN blocks for the same nodeId
+        // This is the last line of defense against duplicate nodes
+        // ═══════════════════════════════════════════════════════════════════
+        const blockEvents = block.getEvents();
+        for (const event of blockEvents) {
+            if (event && event.type === 'NODE_JOIN') {
+                const nodeId = event.nodeId;
+                // Check if this node already exists in the chain
+                if (this.state.nodeRoles[nodeId]) {
+                    console.warn(`🚫 BLOCKING duplicate NODE_JOIN: ${nodeId} already exists in chain (role: ${this.state.nodeRoles[nodeId]})`);
+                    return false; // Silently reject - node already exists
+                }
+                // Also check the node map directly (belt and suspenders)
+                const existingNodes = this.buildNodeMap();
+                if (existingNodes[nodeId]) {
+                    console.warn(`🚫 BLOCKING duplicate NODE_JOIN: ${nodeId} already exists in node map`);
+                    return false; // Silently reject - node already exists
+                }
+            }
+        }
+        
         // Process transactions before adding block
         await this.processTransactions(block);
         

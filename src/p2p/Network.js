@@ -1149,17 +1149,12 @@ class Network {
             
             // Check block index
             if (block.index < expectedIndex) {
-                // Block is behind our chain - check if it has a NODE_JOIN we don't have
-                console.log(`📦 Block ${block.index} from ${peerId} is behind our chain (we have ${expectedIndex})`);
+                // Block is behind our chain - this is stale, ignore it
+                // The sync mechanism will handle any missing nodes properly
+                console.log(`📦 Block ${block.index} from ${peerId} is behind our chain (we have ${expectedIndex}), ignoring stale block`);
                 
-                // Extract any unique nodes from this block
-                if (block.data && block.data.type === 'NODE_JOIN') {
-                    const nodeMap = this.chain.buildNodeMap();
-                    if (!nodeMap[block.data.nodeId]) {
-                        console.log(`🆕 Block contains node ${block.data.nodeId} we don't have, merging...`);
-                        await this.mergeUniqueNodes([message.block], peerId);
-                    }
-                }
+                // Don't call mergeUniqueNodes here - it causes duplicate issues
+                // If we're missing a node, the regular sync will find it
                 return;
             }
             
@@ -1178,8 +1173,26 @@ class Network {
                 return;
             }
             
-            // Add to chain
-            await this.chain.addBlock(block);
+            // ═══════════════════════════════════════════════════════════════════
+            // CRITICAL: Check if this NODE_JOIN would create a duplicate
+            // ═══════════════════════════════════════════════════════════════════
+            if (block.data && block.data.type === 'NODE_JOIN') {
+                const nodeId = block.data.nodeId;
+                const existingInState = this.chain.state?.nodeRoles?.[nodeId];
+                const nodeMap = this.chain.buildNodeMap();
+                
+                if (existingInState || nodeMap[nodeId]) {
+                    console.log(`🚫 Ignoring duplicate NODE_JOIN block for ${nodeId} from ${peerId}`);
+                    return;
+                }
+            }
+            
+            // Add to chain (Chain.addBlock has additional duplicate protection)
+            const added = await this.chain.addBlock(block);
+            if (!added) {
+                console.log(`⏭️ Block rejected by chain (likely duplicate NODE_JOIN)`);
+                return;
+            }
             
             // Save to storage
             await this.saveChain();
@@ -1522,8 +1535,13 @@ class Network {
      */
     async proposeBlock(block) {
         try {
-            // Add to chain
-            await this.chain.addBlock(block);
+            // Add to chain (returns false if duplicate NODE_JOIN is detected)
+            const added = await this.chain.addBlock(block);
+            
+            if (!added) {
+                console.warn(`⚠️ Block rejected (likely duplicate NODE_JOIN): ${block.hash?.substring(0, 16)}...`);
+                return false;
+            }
             
             // Save to storage
             await this.saveChain();
@@ -1536,6 +1554,7 @@ class Network {
             this.onChainUpdate(this.chain);
             
             console.log(`✅ Block proposed: ${block.hash.substring(0, 16)}...`);
+            return true;
         } catch (error) {
             console.error('Failed to propose block:', error);
             throw error;
@@ -1559,7 +1578,17 @@ class Network {
     async mergeUniqueNodes(receivedBlocks, peerId) {
         if (!receivedBlocks || receivedBlocks.length === 0) return;
         
+        // ═══════════════════════════════════════════════════════════════════
+        // CRITICAL: Prevent concurrent merge operations (race condition fix)
+        // ═══════════════════════════════════════════════════════════════════
+        if (this.merging) {
+            console.log(`⏳ Already merging nodes, skipping concurrent merge from ${peerId}`);
+            return;
+        }
+        
         try {
+            this.merging = true;
+            
             // Build map of nodes we already have
             const ourNodeMap = this.chain.buildNodeMap();
             const ourNodeIds = new Set(Object.keys(ourNodeMap));
@@ -1567,7 +1596,8 @@ class Network {
             console.log(`🔀 Checking for unique nodes from ${peerId}. Our nodes:`, Array.from(ourNodeIds));
             
             // Find NODE_JOIN events in their chain that we don't have
-            const missingJoins = [];
+            // Use a Map to de-duplicate by nodeId (in case same node appears in multiple blocks)
+            const missingJoinsMap = new Map();
             
             for (const blockData of receivedBlocks) {
                 const eventData = blockData.data;
@@ -1576,13 +1606,15 @@ class Network {
                 if (eventData && eventData.type === 'NODE_JOIN') {
                     const nodeId = eventData.nodeId;
                     
-                    // If we don't have this node, add it to missing list
-                    if (!ourNodeIds.has(nodeId)) {
+                    // If we don't have this node AND we haven't already added it to missing list
+                    if (!ourNodeIds.has(nodeId) && !missingJoinsMap.has(nodeId)) {
                         console.log(`🆕 Found missing node: ${eventData.name} (${nodeId})`);
-                        missingJoins.push(eventData);
+                        missingJoinsMap.set(nodeId, eventData);
                     }
                 }
             }
+            
+            const missingJoins = Array.from(missingJoinsMap.values());
             
             if (missingJoins.length === 0) {
                 console.log(`✅ No missing nodes to merge from ${peerId}`);
@@ -1590,6 +1622,8 @@ class Network {
             }
             
             console.log(`🔀 Merging ${missingJoins.length} unique nodes from ${peerId}`);
+            
+            let addedCount = 0;
             
             // Add each missing node as a new block
             for (const joinEvent of missingJoins) {
@@ -1625,7 +1659,15 @@ class Network {
                 });
                 
                 await newBlock.computeHash();
-                await this.chain.addBlock(newBlock);
+                
+                // addBlock now returns false if it rejects a duplicate NODE_JOIN
+                const added = await this.chain.addBlock(newBlock);
+                if (!added) {
+                    console.log(`⏭️ Block rejected for ${nodeId} (duplicate detected by Chain.addBlock)`);
+                    continue;
+                }
+                
+                addedCount++;
                 
                 // Add to our known nodes for next iteration
                 ourNodeIds.add(nodeId);
@@ -1637,16 +1679,20 @@ class Network {
                 console.log(`✅ Added missing node ${joinEvent.name} (${nodeId}) at index ${newBlock.index}`);
             }
             
-            // Save updated chain
-            await this.saveChain();
-            
-            // Notify UI of chain update
-            this.onChainUpdate(this.chain);
-            
-            console.log(`✅ Merged ${missingJoins.length} nodes from ${peerId}, chain now has ${this.chain.getLength()} blocks`);
+            if (addedCount > 0) {
+                // Save updated chain
+                await this.saveChain();
+                
+                // Notify UI of chain update
+                this.onChainUpdate(this.chain);
+                
+                console.log(`✅ Merged ${addedCount} nodes from ${peerId}, chain now has ${this.chain.getLength()} blocks`);
+            }
             
         } catch (error) {
             console.error(`Failed to merge nodes from ${peerId}:`, error);
+        } finally {
+            this.merging = false;
         }
     }
     
@@ -1657,9 +1703,11 @@ class Network {
     async ensureLocalNodeInChain() {
         if (!this.nodeId) return;
         
-        // Check if our node is in the chain
+        // Check if our node is in the chain (check both nodeMap and state.nodeRoles)
         const nodeMap = this.chain.buildNodeMap();
-        if (nodeMap[this.nodeId]) {
+        const existingInState = this.chain.state?.nodeRoles?.[this.nodeId];
+        
+        if (nodeMap[this.nodeId] || existingInState) {
             console.log(`✅ Our node ${this.nodeId} is in the chain`);
             return;
         }
@@ -1694,7 +1742,13 @@ class Network {
         });
         
         await newBlock.computeHash();
-        await this.chain.addBlock(newBlock);
+        
+        // addBlock returns false if duplicate NODE_JOIN is detected
+        const added = await this.chain.addBlock(newBlock);
+        if (!added) {
+            console.log(`⏭️ Re-add rejected (node might have been added by concurrent operation)`);
+            return;
+        }
         
         // Broadcast our re-join to peers
         const message = window.SrishtiProtocol.createNewBlock(newBlock.toJSON());
