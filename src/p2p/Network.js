@@ -285,7 +285,10 @@ class Network {
                         this.requestSync(fromNodeId);
                     } else if (state === 'data_channel_closed' || state === 'data_channel_error' || 
                                state === 'disconnected' || state === 'failed') {
-                        this.disconnectPeer(fromNodeId);
+                        // Retry if the connection failed before data channel opened
+                        const shouldRetry = state === 'failed';
+                        console.log(`🔌 Connection ${state} for ${fromNodeId}, retry=${shouldRetry}`);
+                        this.disconnectPeer(fromNodeId, shouldRetry);
                     }
                 },
                 onIceCandidate: (candidate) => {
@@ -389,7 +392,8 @@ class Network {
                 onMessage: (message, peerId) => this.handleMessage(message, peerId),
                 onConnectionStateChange: (state) => {
                     if (state === 'disconnected' || state === 'failed') {
-                        this.disconnectPeer(peerInfo.nodeId);
+                        const shouldRetry = state === 'failed';
+                        this.disconnectPeer(peerInfo.nodeId, shouldRetry);
                     }
                 }
             });
@@ -501,8 +505,9 @@ class Network {
     /**
      * Disconnect from a peer
      * @param {string} nodeId - Peer's node ID
+     * @param {boolean} shouldRetry - Whether to attempt reconnection
      */
-    disconnectPeer(nodeId) {
+    disconnectPeer(nodeId, shouldRetry = false) {
         const connection = this.peers.get(nodeId);
         if (connection) {
             connection.close();
@@ -538,7 +543,54 @@ class Network {
             }
             
             console.log(`📡 Disconnected from ${nodeId}`);
+            
+            // Schedule reconnection attempt if we should retry
+            if (shouldRetry && this.signaling?.connected) {
+                this.scheduleReconnect(nodeId);
+            }
         }
+    }
+    
+    /**
+     * Schedule a reconnection attempt to a peer
+     * @param {string} nodeId - Peer's node ID
+     */
+    scheduleReconnect(nodeId) {
+        // Track retry count
+        this.reconnectAttempts = this.reconnectAttempts || {};
+        this.reconnectAttempts[nodeId] = (this.reconnectAttempts[nodeId] || 0) + 1;
+        
+        const attempts = this.reconnectAttempts[nodeId];
+        const maxAttempts = 3;
+        
+        if (attempts > maxAttempts) {
+            console.log(`⚠️ Max reconnect attempts reached for ${nodeId}`);
+            delete this.reconnectAttempts[nodeId];
+            return;
+        }
+        
+        // Exponential backoff: 2s, 4s, 8s
+        const delay = Math.pow(2, attempts) * 1000;
+        console.log(`🔄 Scheduling reconnect to ${nodeId} in ${delay/1000}s (attempt ${attempts}/${maxAttempts})`);
+        
+        setTimeout(() => {
+            // Only reconnect if we're still not connected and signaling is available
+            if (!this.peers.has(nodeId) && this.signaling?.connected) {
+                console.log(`🔄 Attempting reconnect to ${nodeId}...`);
+                // Check if they're in available peers
+                if (this.signaling.availablePeers?.includes(nodeId)) {
+                    // Let the peer with lower ID initiate
+                    if (this.nodeId < nodeId) {
+                        this.initiatePeerConnection(nodeId);
+                    } else {
+                        console.log(`⏳ Waiting for ${nodeId} to initiate reconnection`);
+                    }
+                }
+            } else if (this.peers.has(nodeId)) {
+                // Successfully reconnected
+                delete this.reconnectAttempts[nodeId];
+            }
+        }, delay);
     }
     
     /**
@@ -1823,7 +1875,10 @@ class Network {
                     } else if (state === 'data_channel_closed' || state === 'data_channel_error' ||
                                state === 'disconnected' || state === 'failed') {
                         this.pendingOffers.delete(nodeId);
-                        this.disconnectPeer(nodeId);
+                        // Retry if the connection failed before data channel opened
+                        const shouldRetry = state === 'failed';
+                        console.log(`🔌 Connection ${state} for ${nodeId} (offerer), retry=${shouldRetry}`);
+                        this.disconnectPeer(nodeId, shouldRetry);
                     }
                 },
                 onIceCandidate: (candidate) => {

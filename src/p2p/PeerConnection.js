@@ -40,7 +40,22 @@ class PeerConnection {
                 { urls: 'stun:stun4.l.google.com:19302' },
                 // Alternative public STUN servers for redundancy
                 { urls: 'stun:stun.stunprotocol.org:3478' },
-                { urls: 'stun:stun.voip.eutelia.it:3478' }
+                // Free TURN servers from OpenRelay (for NAT traversal when STUN fails)
+                {
+                    urls: 'turn:openrelay.metered.ca:80',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                },
+                {
+                    urls: 'turn:openrelay.metered.ca:443',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                },
+                {
+                    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                }
             ],
             // Pre-gather candidates to speed up connection
             iceCandidatePoolSize: 10,
@@ -118,7 +133,14 @@ class PeerConnection {
      */
     async addIceCandidate(candidate) {
         if (this.pc && this.pc.remoteDescription) {
-            await this.pc.addIceCandidate(new RTCIceCandidate(candidate));
+            try {
+                await this.pc.addIceCandidate(new RTCIceCandidate(candidate));
+                console.log(`🧊 Added ICE candidate from peer: ${candidate.candidate?.substring(0, 50)}...`);
+            } catch (err) {
+                console.warn(`⚠️ Failed to add ICE candidate:`, err.message);
+            }
+        } else {
+            console.warn(`⚠️ Cannot add ICE candidate - pc: ${!!this.pc}, remoteDescription: ${!!this.pc?.remoteDescription}`);
         }
     }
     
