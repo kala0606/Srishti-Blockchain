@@ -2569,28 +2569,20 @@
                 </div>
             </div>
             
-            <!-- Pending Parent Requests (when you are the parent) -->
-            <div class="dashboard-section" id="dash-parent-requests-section" style="display: none;">
-                <div class="dashboard-section-header">
-                    <span class="dashboard-section-title">📥 Parent Connection Requests</span>
-                    <div class="dashboard-section-line"></div>
-                </div>
-                <div id="dash-parent-requests-list">
-                    <!-- Will be populated by JS -->
-                </div>
-            </div>
-            
-            <!-- Pending Parent Requests -->
-            <div class="dashboard-section" id="dash-parent-requests-section" style="display: none;">
-                <div class="dashboard-section-header">
-                    <span class="dashboard-section-title">🔗 Pending Parent Requests</span>
-                    <div class="dashboard-section-line"></div>
+            <!-- Pending Parent Requests (when you are the parent/institution) -->
+            <div class="dashboard-section admin-section" id="dash-parent-requests-section" style="display: none;">
+                <div class="admin-header" style="display: flex; justify-content: space-between; align-items: center;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span>📥</span>
+                        <span>Connection Requests</span>
+                    </div>
+                    <button onclick="updateParentRequests()" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; padding: 4px 10px; color: #fff; font-size: 0.75em; cursor: pointer;">🔄 Refresh</button>
                 </div>
                 <div id="dash-parent-requests-list">
                     <div class="dashboard-empty" style="padding: 24px;">
                         <div class="dashboard-empty-icon">🔗</div>
                         <div class="dashboard-empty-title">No pending requests</div>
-                        <div style="color: rgba(255,255,255,0.4); font-size: 0.85em;">Parent connection requests will appear here</div>
+                        <div style="color: rgba(255,255,255,0.4); font-size: 0.85em;">Connection requests from other nodes will appear here</div>
                     </div>
                 </div>
             </div>
@@ -3751,11 +3743,34 @@
             const section = document.getElementById('dash-parent-requests-section');
             if (!container || !section) return;
             
+            // Check if user is an institution (verified or pending) - always show section for institutions
+            const isInstitution = window.SrishtiApp.isInstitution();
+            const myRole = window.SrishtiApp.getMyRole();
+            const institutions = window.SrishtiApp.getInstitutions();
+            const isPendingInstitution = institutions.pending && institutions.pending[currentUser.id];
+            
             const pendingRequests = window.SrishtiApp.getPendingParentRequests();
             const requestArray = Object.values(pendingRequests);
             
+            console.log(`📥 updateParentRequests: isInstitution=${isInstitution}, isPendingInstitution=${!!isPendingInstitution}, role=${myRole}, pendingRequests=${requestArray.length}`);
+            
+            // Show section for institutions (verified or pending), ROOT, or if there are pending requests
+            const shouldShowSection = isInstitution || isPendingInstitution || myRole === 'ROOT' || myRole === 'INSTITUTION';
+            
             if (requestArray.length === 0) {
-                section.style.display = 'none';
+                if (shouldShowSection) {
+                    // Show empty state for institutions
+                    section.style.display = 'block';
+                    container.innerHTML = `
+                        <div class="dashboard-empty" style="padding: 24px;">
+                            <div class="dashboard-empty-icon">🔗</div>
+                            <div class="dashboard-empty-title">No pending requests</div>
+                            <div style="color: rgba(255,255,255,0.4); font-size: 0.85em;">Connection requests from other nodes will appear here</div>
+                        </div>
+                    `;
+                } else {
+                    section.style.display = 'none';
+                }
                 return;
             }
             
