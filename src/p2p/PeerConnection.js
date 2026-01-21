@@ -130,17 +130,23 @@ class PeerConnection {
     /**
      * Add ICE candidate
      * @param {RTCIceCandidateInit} candidate
+     * @throws {Error} If remote description is not set yet
      */
     async addIceCandidate(candidate) {
-        if (this.pc && this.pc.remoteDescription) {
-            try {
-                await this.pc.addIceCandidate(new RTCIceCandidate(candidate));
-                console.log(`🧊 Added ICE candidate from peer: ${candidate.candidate?.substring(0, 50)}...`);
-            } catch (err) {
-                console.warn(`⚠️ Failed to add ICE candidate:`, err.message);
-            }
-        } else {
-            console.warn(`⚠️ Cannot add ICE candidate - pc: ${!!this.pc}, remoteDescription: ${!!this.pc?.remoteDescription}`);
+        if (!this.pc) {
+            throw new Error('PeerConnection not initialized');
+        }
+        
+        if (!this.pc.remoteDescription) {
+            throw new Error('Cannot add ICE candidate: remote description not set');
+        }
+        
+        try {
+            await this.pc.addIceCandidate(new RTCIceCandidate(candidate));
+            console.log(`🧊 Added ICE candidate from peer: ${candidate.candidate?.substring(0, 50)}...`);
+        } catch (err) {
+            console.warn(`⚠️ Failed to add ICE candidate:`, err.message);
+            throw err;
         }
     }
     

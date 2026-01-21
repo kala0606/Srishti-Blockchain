@@ -36,6 +36,9 @@ class Network {
         this.dht = null; // DHT for peer discovery
         this.connectionManager = null; // Connection pool manager
         
+        // Queue for ICE candidates that arrive before connection is established
+        this.pendingIceCandidates = new Map(); // Map<nodeId, Array<candidate>>
+        
         this.signaling = null;
         this.syncing = false;
         this.heartbeatInterval = null;
@@ -306,6 +309,9 @@ class Network {
             this.peers.set(fromNodeId, connection);
             this.pendingConnections.delete(fromNodeId);
             
+            // Apply any ICE candidates that arrived before the connection was ready
+            await this.applyQueuedIceCandidates(fromNodeId, connection);
+            
             // Send answer via signaling
             if (this.signaling) {
                 console.log(`📤 Sending answer to ${fromNodeId}...`);
@@ -347,6 +353,9 @@ class Network {
                 console.log(`➕ Added ${fromNodeId} to peers map`);
             }
             
+            // Apply any ICE candidates that arrived before the answer was processed
+            await this.applyQueuedIceCandidates(fromNodeId, connection);
+            
             console.log(`📊 Current peers:`, Array.from(this.peers.keys()));
             console.log(`✅ WebRTC connection established with ${fromNodeId} (as offerer)`);
             console.log(`⏳ Waiting for data channel to open before sync...`);
@@ -365,16 +374,64 @@ class Network {
         
         console.log(`🧊 Received ICE candidate from ${fromNodeId}`);
         
-        const connection = this.peers.get(fromNodeId);
+        // Check if we have a connection (either in peers or pendingOffers)
+        let connection = this.peers.get(fromNodeId) || this.pendingOffers.get(fromNodeId);
+        
         if (connection) {
             try {
                 await connection.addIceCandidate(candidate);
             } catch (err) {
-                console.warn(`⚠️ Failed to add ICE candidate from ${fromNodeId}:`, err.message);
+                // If adding fails (e.g., remote description not set yet), queue it
+                if (err.message?.includes('remote description') || !connection.pc?.remoteDescription) {
+                    console.log(`⏳ Queueing ICE candidate from ${fromNodeId} (remote description not ready)`);
+                    this.queueIceCandidate(fromNodeId, candidate);
+                } else {
+                    console.warn(`⚠️ Failed to add ICE candidate from ${fromNodeId}:`, err.message);
+                }
             }
         } else {
-            console.warn(`⚠️ No connection found for ICE candidate from ${fromNodeId}, peers:`, Array.from(this.peers.keys()));
+            // Queue the ICE candidate for when the connection is established
+            console.log(`⏳ Queueing ICE candidate from ${fromNodeId} (no connection yet)`);
+            this.queueIceCandidate(fromNodeId, candidate);
         }
+    }
+    
+    /**
+     * Queue an ICE candidate for later processing
+     * @param {string} nodeId - Peer node ID
+     * @param {RTCIceCandidateInit} candidate - ICE candidate
+     */
+    queueIceCandidate(nodeId, candidate) {
+        if (!this.pendingIceCandidates.has(nodeId)) {
+            this.pendingIceCandidates.set(nodeId, []);
+        }
+        this.pendingIceCandidates.get(nodeId).push(candidate);
+        console.log(`📦 Queued ICE candidate for ${nodeId}, total queued: ${this.pendingIceCandidates.get(nodeId).length}`);
+    }
+    
+    /**
+     * Apply queued ICE candidates to a connection
+     * @param {string} nodeId - Peer node ID
+     * @param {PeerConnection} connection - The peer connection
+     */
+    async applyQueuedIceCandidates(nodeId, connection) {
+        const queued = this.pendingIceCandidates.get(nodeId);
+        if (!queued || queued.length === 0) {
+            return;
+        }
+        
+        console.log(`🧊 Applying ${queued.length} queued ICE candidates to ${nodeId}`);
+        
+        for (const candidate of queued) {
+            try {
+                await connection.addIceCandidate(candidate);
+            } catch (err) {
+                console.warn(`⚠️ Failed to apply queued ICE candidate to ${nodeId}:`, err.message);
+            }
+        }
+        
+        // Clear the queue
+        this.pendingIceCandidates.delete(nodeId);
     }
     
     /**
@@ -520,6 +577,9 @@ class Network {
         if (connection) {
             connection.close();
             this.peers.delete(nodeId);
+            
+            // Clean up any pending ICE candidates
+            this.pendingIceCandidates.delete(nodeId);
             
             // Mark as offline before deleting
             const info = this.peerInfo.get(nodeId);
@@ -1962,6 +2022,7 @@ class Network {
         this.peers.clear();
         this.peerInfo.clear();
         this.pendingOffers.clear();
+        this.pendingIceCandidates.clear();
     }
 }
 
