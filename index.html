@@ -3114,6 +3114,24 @@
             const nodesBeforeFilter = nodes.length;
             nodes = nodes.filter(d => !d.data.isVirtualRoot);
             
+            // Remove duplicate nodes by ID (keep first occurrence)
+            const seenNodeIds = new Set();
+            const uniqueNodes = [];
+            nodes.forEach(node => {
+                const nodeId = node.data.id;
+                if (!seenNodeIds.has(nodeId)) {
+                    seenNodeIds.add(nodeId);
+                    uniqueNodes.push(node);
+                } else {
+                    console.warn(`⚠️ Duplicate node detected in visualization: ${nodeId.substring(0, 12)} (${node.data.name}), skipping duplicate`);
+                }
+            });
+            nodes = uniqueNodes;
+            
+            if (nodesBeforeFilter - nodes.length > 0) {
+                console.log(`🎨 Removed ${nodesBeforeFilter - nodes.length} duplicate nodes from visualization`);
+            }
+            
             // Filter links to exclude those connecting to/from virtual root
             // Also ensure both source and target exist in filtered nodes
             const nodeIds = new Set(nodes.map(n => n.data.id));
@@ -3219,10 +3237,16 @@
             });
             
             // Create node meshes
+            // Scale sphere size based on number of nodes to prevent overlap
+            const nodeCount = nodes.length;
+            const scaleFactor = Math.max(0.4, Math.min(1.0, 50 / nodeCount)); // Scale down when more than 50 nodes
+            
             nodes.forEach(d => {
                 const nodeInfo = d.data;
                 const isCurrentUser = currentUser && nodeInfo.id === currentUser.id;
-                const geometry = new THREE.SphereGeometry(isCurrentUser ? 20 : 15, 32, 32);
+                const baseRadius = isCurrentUser ? 12 : 8;
+                const sphereRadius = baseRadius * scaleFactor;
+                const geometry = new THREE.SphereGeometry(sphereRadius, 32, 32);
                 
                 // Calculate glow
                 const glow = window.SrishtiGlow ? window.SrishtiGlow.calculateGlow(nodeInfo) : { intensity: 0.2, color: { r: 60, g: 60, b: 80 } };
@@ -3253,7 +3277,9 @@
                 
                 // Add corona for high-glow nodes
                 if (glow.intensity > 0.6) {
-                    const coronaGeometry = new THREE.SphereGeometry(isCurrentUser ? 25 : 20, 16, 16);
+                    const baseCoronaRadius = isCurrentUser ? 15 : 12;
+                    const coronaRadius = baseCoronaRadius * scaleFactor;
+                    const coronaGeometry = new THREE.SphereGeometry(coronaRadius, 16, 16);
                     const coronaMaterial = new THREE.MeshBasicMaterial({
                         color: color,
                         transparent: true,
@@ -5078,6 +5104,16 @@
             // Subscribe to nodes from blockchain
             unsubscribeNodes = window.SrishtiApp.subscribeToNodes((nodes) => {
                 console.log(`🔔 Node update received: ${Object.keys(nodes).length} nodes`);
+                
+                // Check for duplicate node IDs in blockchain data
+                const nodeIds = Object.keys(nodes);
+                const uniqueIds = new Set(nodeIds);
+                if (nodeIds.length !== uniqueIds.size) {
+                    console.error(`⚠️ DUPLICATE NODES DETECTED IN BLOCKCHAIN DATA! ${nodeIds.length} total, ${uniqueIds.size} unique`);
+                    const duplicates = nodeIds.filter((id, index) => nodeIds.indexOf(id) !== index);
+                    console.error(`⚠️ Duplicate node IDs:`, duplicates.map(id => id.substring(0, 12)));
+                }
+                
                 nodesData = nodes;
                 updateStats();
                 
