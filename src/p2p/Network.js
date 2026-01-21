@@ -266,6 +266,21 @@ class Network {
                         }
                         // Send immediate heartbeat
                         this.sendHeartbeat();
+                        
+                        // Send rapid heartbeats for first 10 seconds to ensure presence is synced
+                        let rapidHeartbeatCount = 0;
+                        const rapidHeartbeat = setInterval(() => {
+                            if (!this.peers.has(fromNodeId)) {
+                                clearInterval(rapidHeartbeat);
+                                return;
+                            }
+                            this.sendHeartbeat();
+                            rapidHeartbeatCount++;
+                            if (rapidHeartbeatCount >= 10) {
+                                clearInterval(rapidHeartbeat);
+                            }
+                        }, 1000); // Every 1 second for first 10 seconds
+                        
                         // Request sync
                         this.requestSync(fromNodeId);
                     } else if (state === 'data_channel_closed' || state === 'data_channel_error' || 
@@ -407,6 +422,20 @@ class Network {
      */
     addPeer(nodeId, connection) {
         this.peers.set(nodeId, connection);
+        
+        // Check if there are any queued parent requests for this peer
+        if (this.queuedParentRequests && this.queuedParentRequests.length > 0) {
+            const requests = this.queuedParentRequests.filter(req => req.parentId === nodeId);
+            if (requests.length > 0) {
+                console.log(`📤 Delivering ${requests.length} queued parent request(s) to newly connected ${nodeId}`);
+                // Deliver with a small delay to allow connection to stabilize
+                setTimeout(async () => {
+                    for (const req of requests) {
+                        await this.sendParentRequest(req.parentId, req.options);
+                    }
+                }, 1000);
+            }
+        }
         
         // Register with connection manager if available
         if (this.connectionManager) {
@@ -669,6 +698,17 @@ class Network {
             return;
         }
         
+        // Add timeout protection to prevent stuck syncing flag
+        const syncTimeout = setTimeout(() => {
+            if (this.syncing) {
+                console.warn('⚠️ Sync timeout after 30s - resetting flag');
+                this.syncing = false;
+                if (this.onSyncProgress) {
+                    this.onSyncProgress({ status: 'idle', message: 'Sync timeout' });
+                }
+            }
+        }, 30000); // 30 second max sync time
+        
         try {
             this.syncing = true;
             
@@ -874,6 +914,7 @@ class Network {
                 });
             }
         } finally {
+            clearTimeout(syncTimeout);
             this.syncing = false;
             // Hide progress bar after a delay if no new sync starts
             if (this.onSyncProgress) {
@@ -1163,30 +1204,55 @@ class Network {
     }
     
     /**
-     * Send parent request to a node
+     * Send parent request to a node with retry logic
      * @param {string} parentId - Node ID of the parent we want to connect to
      * @param {Object} options - Request options
+     * @param {number} retryCount - Current retry attempt (internal)
      * @returns {Promise<boolean>} - Success status
      */
-    async sendParentRequest(parentId, options = {}) {
-        console.log(`📤 Sending PARENT_REQUEST to ${parentId}...`);
+    async sendParentRequest(parentId, options = {}, retryCount = 0) {
+        const maxRetries = 5;
+        console.log(`📤 Sending PARENT_REQUEST to ${parentId}... (attempt ${retryCount + 1}/${maxRetries + 1})`);
         
         const connection = this.peers.get(parentId);
         if (!connection || !connection.isConnected()) {
             console.warn(`❌ Cannot send parent request: not connected to ${parentId}`);
+            
             // Try to connect first
             const nodeMap = this.chain.buildNodeMap();
             const parentNode = nodeMap[parentId];
             if (parentNode && parentNode.publicKey) {
                 await this.addPendingConnection(parentId, parentNode.publicKey);
                 await this.attemptConnection(parentId, parentNode.publicKey);
-                // Wait a bit for connection to establish
-                await new Promise(resolve => setTimeout(resolve, 2000));
+                // Wait longer for connection to establish
+                await new Promise(resolve => setTimeout(resolve, 3000));
+                
                 // Retry after connection
                 if (this.peers.has(parentId) && this.peers.get(parentId).isConnected()) {
-                    return await this.sendParentRequest(parentId, options);
+                    return await this.sendParentRequest(parentId, options, retryCount);
                 }
             }
+            
+            // If still not connected and we have retries left, queue for later
+            if (retryCount < maxRetries) {
+                console.log(`🔄 Connection not established, retrying in 3s (${retryCount + 1}/${maxRetries})`);
+                await new Promise(r => setTimeout(r, 3000));
+                return this.sendParentRequest(parentId, options, retryCount + 1);
+            }
+            
+            // Max retries reached - queue request for delivery when peer connects
+            console.warn(`⚠️ Max retries reached. Queuing parent request for ${parentId}`);
+            this.queuedParentRequests = this.queuedParentRequests || [];
+            this.queuedParentRequests.push({ 
+                parentId, 
+                options, 
+                timestamp: Date.now(),
+                nodeId: this.nodeId 
+            });
+            
+            // Set up a listener to send when peer connects
+            this.setupQueuedRequestDelivery(parentId);
+            
             return false;
         }
         
@@ -1200,11 +1266,66 @@ class Network {
         const sent = connection.send(request);
         if (sent) {
             console.log(`✅ Parent request sent to ${parentId}`);
+            // Remove from queue if it was queued
+            if (this.queuedParentRequests) {
+                this.queuedParentRequests = this.queuedParentRequests.filter(
+                    req => req.parentId !== parentId || req.nodeId !== this.nodeId
+                );
+            }
         } else {
             console.error(`❌ Failed to send parent request to ${parentId}`);
+            // Queue for retry if send failed
+            if (retryCount < maxRetries) {
+                await new Promise(r => setTimeout(r, 2000));
+                return this.sendParentRequest(parentId, options, retryCount + 1);
+            }
         }
         
         return sent;
+    }
+    
+    /**
+     * Set up delivery of queued requests when peer connects
+     * @param {string} parentId - Parent node ID to watch for
+     */
+    setupQueuedRequestDelivery(parentId) {
+        // Check periodically if peer connected and deliver queued requests
+        const deliveryCheck = setInterval(async () => {
+            if (!this.queuedParentRequests || this.queuedParentRequests.length === 0) {
+                clearInterval(deliveryCheck);
+                return;
+            }
+            
+            const connection = this.peers.get(parentId);
+            if (connection && connection.isConnected()) {
+                // Find and send queued requests for this parent
+                const requests = this.queuedParentRequests.filter(req => req.parentId === parentId);
+                for (const req of requests) {
+                    console.log(`📤 Delivering queued parent request to ${parentId}`);
+                    const sent = await this.sendParentRequest(req.parentId, req.options);
+                    if (sent) {
+                        // Remove from queue
+                        this.queuedParentRequests = this.queuedParentRequests.filter(
+                            r => r !== req
+                        );
+                    }
+                }
+                clearInterval(deliveryCheck);
+            }
+            
+            // Remove old queued requests (older than 5 minutes)
+            const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+            this.queuedParentRequests = this.queuedParentRequests.filter(
+                req => req.timestamp > fiveMinutesAgo
+            );
+            
+            if (this.queuedParentRequests.length === 0) {
+                clearInterval(deliveryCheck);
+            }
+        }, 5000); // Check every 5 seconds
+        
+        // Stop checking after 5 minutes
+        setTimeout(() => clearInterval(deliveryCheck), 5 * 60 * 1000);
     }
     
     /**
@@ -1578,7 +1699,7 @@ class Network {
             
             // Also attempt pending connections periodically
             this.attemptPendingConnections();
-        }, 15000); // Every 15 seconds (reduced from 60s for faster sync)
+        }, 10000); // Every 10 seconds for responsive sync
     }
     
     /**
@@ -1676,6 +1797,21 @@ class Network {
                         }
                         // Send immediate heartbeat
                         this.sendHeartbeat();
+                        
+                        // Send rapid heartbeats for first 10 seconds to ensure presence is synced
+                        let rapidHeartbeatCount = 0;
+                        const rapidHeartbeat = setInterval(() => {
+                            if (!this.peers.has(nodeId)) {
+                                clearInterval(rapidHeartbeat);
+                                return;
+                            }
+                            this.sendHeartbeat();
+                            rapidHeartbeatCount++;
+                            if (rapidHeartbeatCount >= 10) {
+                                clearInterval(rapidHeartbeat);
+                            }
+                        }, 1000); // Every 1 second for first 10 seconds
+                        
                         // Wait a moment for HELLO exchange before requesting sync
                         // This ensures we have accurate chain info from the peer
                         setTimeout(async () => {

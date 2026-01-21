@@ -31,6 +31,7 @@ class SignalingClient {
         this.maxReconnectAttempts = 10;
         this.reconnectDelay = 3000;
         this.availablePeers = []; // Track known peers from signaling
+        this.pingInterval = null; // Keep-alive ping interval
     }
     
     /**
@@ -46,6 +47,9 @@ class SignalingClient {
                     console.log('🔌 Connected to signaling server');
                     this.connected = true;
                     this.reconnectAttempts = 0;
+                    
+                    // Start keep-alive ping to prevent server from sleeping
+                    this.startKeepAlive();
                     
                     // Register with server
                     this.register();
@@ -69,6 +73,7 @@ class SignalingClient {
                 this.ws.onclose = () => {
                     console.log('🔌 Disconnected from signaling server');
                     this.connected = false;
+                    this.stopKeepAlive();
                     this.reconnect();
                 };
             } catch (error) {
@@ -227,6 +232,7 @@ class SignalingClient {
     
     /**
      * Attempt to reconnect to signaling server
+     * Uses exponential backoff but starts fast for cold-start recovery
      */
     reconnect() {
         if (this.reconnectAttempts >= this.maxReconnectAttempts) {
@@ -235,9 +241,17 @@ class SignalingClient {
         }
         
         this.reconnectAttempts++;
-        const delay = this.reconnectDelay * this.reconnectAttempts;
         
-        console.log(`🔄 Reconnecting to signaling server in ${delay}ms (attempt ${this.reconnectAttempts})`);
+        // Fast reconnect for first 3 attempts (1s, 2s, 3s) to handle cold starts
+        // Then exponential backoff for subsequent attempts
+        let delay;
+        if (this.reconnectAttempts <= 3) {
+            delay = this.reconnectAttempts * 1000; // 1s, 2s, 3s
+        } else {
+            delay = Math.min(this.reconnectDelay * Math.pow(1.5, this.reconnectAttempts - 3), 30000);
+        }
+        
+        console.log(`🔄 Reconnecting to signaling server in ${Math.round(delay)}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
         
         setTimeout(() => {
             this.connect().catch(error => {
@@ -247,9 +261,37 @@ class SignalingClient {
     }
     
     /**
+     * Start keep-alive ping interval to prevent server from sleeping
+     */
+    startKeepAlive() {
+        this.stopKeepAlive(); // Clear any existing interval
+        
+        // Send ping every 25 seconds to keep connection alive
+        // Fly.io free tier can sleep after 30 seconds of inactivity
+        this.pingInterval = setInterval(() => {
+            if (this.isConnected()) {
+                this.send({ type: 'ping' });
+            }
+        }, 25000);
+        
+        console.log('🏓 Keep-alive ping started (every 25s)');
+    }
+    
+    /**
+     * Stop keep-alive ping interval
+     */
+    stopKeepAlive() {
+        if (this.pingInterval) {
+            clearInterval(this.pingInterval);
+            this.pingInterval = null;
+        }
+    }
+    
+    /**
      * Disconnect from signaling server
      */
     disconnect() {
+        this.stopKeepAlive();
         if (this.ws) {
             this.ws.close();
             this.ws = null;

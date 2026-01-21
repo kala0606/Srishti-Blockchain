@@ -26,15 +26,28 @@ class PeerConnection {
     }
     
     /**
-     * Create WebRTC configuration
+     * Create WebRTC configuration with redundant STUN servers
      * @returns {RTCConfiguration}
      */
     getRTCConfiguration() {
         return {
             iceServers: [
+                // Google STUN servers (most reliable)
                 { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' }
-            ]
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:stun3.l.google.com:19302' },
+                { urls: 'stun:stun4.l.google.com:19302' },
+                // Alternative public STUN servers for redundancy
+                { urls: 'stun:stun.stunprotocol.org:3478' },
+                { urls: 'stun:stun.voip.eutelia.it:3478' }
+            ],
+            // Pre-gather candidates to speed up connection
+            iceCandidatePoolSize: 10,
+            // Bundle all media to reduce ICE candidates
+            bundlePolicy: 'max-bundle',
+            // Require multiplexing to reduce port usage
+            rtcpMuxPolicy: 'require'
         };
     }
     
