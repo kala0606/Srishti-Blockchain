@@ -363,9 +363,17 @@ class Network {
     async handleSignalingIceCandidate(data) {
         const { fromNodeId, candidate } = data;
         
+        console.log(`🧊 Received ICE candidate from ${fromNodeId}`);
+        
         const connection = this.peers.get(fromNodeId);
         if (connection) {
-            await connection.addIceCandidate(candidate);
+            try {
+                await connection.addIceCandidate(candidate);
+            } catch (err) {
+                console.warn(`⚠️ Failed to add ICE candidate from ${fromNodeId}:`, err.message);
+            }
+        } else {
+            console.warn(`⚠️ No connection found for ICE candidate from ${fromNodeId}, peers:`, Array.from(this.peers.keys()));
         }
     }
     
