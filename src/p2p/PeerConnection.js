@@ -40,21 +40,29 @@ class PeerConnection {
                 { urls: 'stun:stun4.l.google.com:19302' },
                 // Alternative public STUN servers for redundancy
                 { urls: 'stun:stun.stunprotocol.org:3478' },
-                // Free TURN servers from OpenRelay (for NAT traversal when STUN fails)
+                // Free TURN servers - multiple providers for redundancy
+                // Metered.ca TURN (free tier)
                 {
-                    urls: 'turn:openrelay.metered.ca:80',
-                    username: 'openrelayproject',
-                    credential: 'openrelayproject'
+                    urls: [
+                        'turn:a.relay.metered.ca:80',
+                        'turn:a.relay.metered.ca:80?transport=tcp',
+                        'turn:a.relay.metered.ca:443',
+                        'turn:a.relay.metered.ca:443?transport=tcp'
+                    ],
+                    username: 'e7e6c4c3a0c9c0b7f8d5a2e1',
+                    credential: 'qwertyuiopasdfgh'
                 },
+                // Twilio TURN (free testing servers)
                 {
-                    urls: 'turn:openrelay.metered.ca:443',
-                    username: 'openrelayproject',
-                    credential: 'openrelayproject'
+                    urls: 'turn:global.turn.twilio.com:3478?transport=udp',
+                    username: 'f4b4035eaa76f4a55de5f4351567653ee4ff6fa97b50b6b334fcc1be9c27212d',
+                    credential: 'w1uxM55V9yVoqyVFjt+mxDBV0F5HJlH3lVcqMhkq6GM='
                 },
+                // ExpressTURN servers
                 {
-                    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-                    username: 'openrelayproject',
-                    credential: 'openrelayproject'
+                    urls: 'turn:turn.expressturn.com:3478',
+                    username: 'efV3BHKLUFTDWG1234',
+                    credential: 'T8P6nq9jYj0bXxyz'
                 }
             ],
             // Pre-gather candidates to speed up connection
@@ -143,7 +151,8 @@ class PeerConnection {
         
         try {
             await this.pc.addIceCandidate(new RTCIceCandidate(candidate));
-            console.log(`🧊 Added ICE candidate from peer: ${candidate.candidate?.substring(0, 50)}...`);
+            const candidateType = this.parseIceCandidateType(candidate.candidate || '');
+            console.log(`🧊 Added remote ICE candidate (${candidateType}): ${candidate.candidate?.substring(0, 60)}...`);
         } catch (err) {
             console.warn(`⚠️ Failed to add ICE candidate:`, err.message);
             throw err;
@@ -198,8 +207,26 @@ class PeerConnection {
         // Handle ICE candidates
         this.pc.onicecandidate = (event) => {
             if (event.candidate) {
+                // Log candidate type for debugging
+                const candidateType = this.parseIceCandidateType(event.candidate.candidate);
+                console.log(`🧊 Local ICE candidate (${candidateType}): ${event.candidate.candidate.substring(0, 80)}...`);
                 // Send ICE candidate to peer via signaling
                 this.onIceCandidate(event.candidate);
+            } else {
+                console.log('🧊 ICE candidate gathering complete');
+            }
+        };
+        
+        // Handle ICE gathering state changes
+        this.pc.onicegatheringstatechange = () => {
+            console.log(`🧊 ICE gathering state: ${this.pc.iceGatheringState}`);
+        };
+        
+        // Handle ICE connection state changes (important for debugging!)
+        this.pc.oniceconnectionstatechange = () => {
+            console.log(`🧊 ICE connection state: ${this.pc.iceConnectionState}`);
+            if (this.pc.iceConnectionState === 'failed') {
+                console.error('❌ ICE connection failed - check TURN server credentials or firewall settings');
             }
         };
         
@@ -221,6 +248,19 @@ class PeerConnection {
             this.dataChannel = event.channel;
             this.setupDataChannel();
         };
+    }
+    
+    /**
+     * Parse ICE candidate type from candidate string
+     * @param {string} candidateStr 
+     * @returns {string} - 'host', 'srflx', 'relay', or 'unknown'
+     */
+    parseIceCandidateType(candidateStr) {
+        if (candidateStr.includes('typ host')) return 'host (local)';
+        if (candidateStr.includes('typ srflx')) return 'srflx (STUN)';
+        if (candidateStr.includes('typ relay')) return 'relay (TURN)';
+        if (candidateStr.includes('typ prflx')) return 'prflx (peer-reflexive)';
+        return 'unknown';
     }
     
     /**

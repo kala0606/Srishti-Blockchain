@@ -649,7 +649,7 @@ class Network {
                 if (this.signaling.availablePeers?.includes(nodeId)) {
                     // Let the peer with lower ID initiate
                     if (this.nodeId < nodeId) {
-                        this.initiatePeerConnection(nodeId);
+                        this.attemptConnection(nodeId, null);
                     } else {
                         console.log(`⏳ Waiting for ${nodeId} to initiate reconnection`);
                     }
