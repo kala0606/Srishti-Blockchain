@@ -41,6 +41,9 @@ class BlockchainAdapter {
     updateNodeCache() {
         const nodes = this.chain.buildNodeMap();
         
+        // Get current user's node ID (they're always online!)
+        const currentUserNodeId = window.SrishtiApp?.nodeId || localStorage.getItem('srishti_node_id');
+        
         // CLEAR old cache first (important for chain replacements!)
         this.nodeCache = {};
         
@@ -51,11 +54,15 @@ class BlockchainAdapter {
             // Get presence data if available
             const presence = this.presenceCache[nodeId] || {};
             
+            // Current user is ALWAYS online (they're using the app!)
+            const isCurrentUser = nodeId === currentUserNodeId;
+            const isOnline = isCurrentUser || presence.isOnline || false;
+            
             // Merge node data with presence
             this.nodeCache[nodeId] = {
                 ...node,
-                isOnline: presence.isOnline || false,
-                lastSeen: presence.lastSeen || node.createdAt
+                isOnline: isOnline,
+                lastSeen: isCurrentUser ? Date.now() : (presence.lastSeen || node.createdAt)
             };
         }
     }

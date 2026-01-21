@@ -3618,7 +3618,10 @@
                     : parent.name || 'Unknown';
                 document.getElementById('dash-parent-name').textContent = parentNameDisplay;
                 const parentStatus = document.getElementById('dash-parent-status');
-                parentStatus.className = 'network-node-status' + (parent.isOnline ? ' online' : '');
+                // Parent is online if they're the current user OR marked as online
+                const parentIsCurrentUser = currentUser && parent.id === currentUser.id;
+                const parentIsOnline = parentIsCurrentUser || parent.isOnline;
+                parentStatus.className = 'network-node-status' + (parentIsOnline ? ' online' : '');
             } else {
                 parentNode.style.display = 'none';
             }
@@ -3698,6 +3701,9 @@
                 const maxShow = Math.min(children.length, 3);
                 for (let i = 0; i < maxShow; i++) {
                     const child = children[i];
+                    // Child is online if they're the current user OR marked as online
+                    const childIsCurrentUser = currentUser && child.id === currentUser.id;
+                    const childIsOnline = childIsCurrentUser || child.isOnline;
                     const childNode = document.createElement('div');
                     childNode.className = 'network-node child';
                     childNode.innerHTML = `
@@ -3706,7 +3712,7 @@
                             <div class="network-node-name">${child.name || 'Unknown'}</div>
                             <div class="network-node-role">Your Recruit</div>
                         </div>
-                        <div class="network-node-status${child.isOnline ? ' online' : ''}"></div>
+                        <div class="network-node-status${childIsOnline ? ' online' : ''}"></div>
                     `;
                     childrenContainer.appendChild(childNode);
                 }
@@ -5022,7 +5028,12 @@
             console.log(`📊 updateStats: ${nodes.length} nodes, currentUser:`, currentUser);
             
             document.getElementById('total-nodes').textContent = nodes.length;
-            document.getElementById('online-nodes').textContent = nodes.filter(n => n.isOnline).length;
+            // Count online nodes - current user is ALWAYS online
+            const onlineCount = nodes.filter(n => {
+                const isCurrentUser = currentUser && n.id === currentUser.id;
+                return isCurrentUser || n.isOnline;
+            }).length;
+            document.getElementById('online-nodes').textContent = onlineCount;
             
             // Update your node indicator
             if (currentUser) {
