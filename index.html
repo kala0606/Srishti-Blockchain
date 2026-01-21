@@ -3643,6 +3643,9 @@
                     // Populate parent request dropdown
                     const parentSelect = document.getElementById('parent-request-select');
                     if (parentSelect) {
+                        // Preserve the currently selected value before rebuilding
+                        const previousSelection = parentSelect.value;
+                        
                         parentSelect.innerHTML = '<option value="">Select a node...</option>';
                         availableNodes.forEach(node => {
                             const option = document.createElement('option');
@@ -3650,6 +3653,11 @@
                             option.textContent = `${node.name || 'Unknown'} ${node.isInstitution ? '🏛️' : ''}`;
                             parentSelect.appendChild(option);
                         });
+                        
+                        // Restore previous selection if it's still a valid option
+                        if (previousSelection && availableNodes.some(n => n.id === previousSelection)) {
+                            parentSelect.value = previousSelection;
+                        }
                         
                         parentSelect.onchange = () => {
                             const submitBtn = document.getElementById('request-parent-submit-btn');
@@ -3665,6 +3673,9 @@
                         // Remove any existing click handlers to avoid duplicates
                         submitBtn.replaceWith(submitBtn.cloneNode(true));
                         const newSubmitBtn = document.getElementById('request-parent-submit-btn');
+                        
+                        // Set initial disabled state based on current selection
+                        newSubmitBtn.disabled = !parentSelect.value;
                         
                         newSubmitBtn.onclick = async () => {
                             const selectedParentId = parentSelect.value;
@@ -4741,13 +4752,19 @@
             const nodeId = nodeData.id;
             const chain = window.SrishtiApp?.chain;
             
-            document.getElementById('node-avatar').textContent = (nodeData.name || '?')[0].toUpperCase();
-            document.getElementById('node-name').textContent = nodeData.name || 'Unknown';
-            document.getElementById('node-children').textContent = nodeData.childCount || 0;
+            // Get fresh data from nodesData (includes latest presence info)
+            const freshData = nodesData[nodeId] || nodeData;
+            
+            document.getElementById('node-avatar').textContent = (freshData.name || '?')[0].toUpperCase();
+            document.getElementById('node-name').textContent = freshData.name || 'Unknown';
+            document.getElementById('node-children').textContent = freshData.childCount || 0;
             
             const statusEl = document.getElementById('node-status');
             const statusText = document.getElementById('node-status-text');
-            if (nodeData.isOnline) {
+            // Current user is always online (they're using the app right now!)
+            const isCurrentUser = currentUser && currentUser.id === nodeId;
+            const isOnline = isCurrentUser || freshData.isOnline;
+            if (isOnline) {
                 statusEl.className = 'node-status online';
                 statusText.textContent = 'Online';
             } else {
@@ -4756,8 +4773,8 @@
             }
             
             // Format join date
-            if (nodeData.createdAt) {
-                const date = new Date(nodeData.createdAt);
+            if (freshData.createdAt) {
+                const date = new Date(freshData.createdAt);
                 const now = new Date();
                 const diffMs = now - date;
                 const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
@@ -4789,8 +4806,8 @@
             // Display Rank/Participation Score
             let rankText = 'N/A';
             let rankValue = 0;
-            if (window.SrishtiGlow && nodeData) {
-                const glow = window.SrishtiGlow.calculateGlow(nodeData);
+            if (window.SrishtiGlow && freshData) {
+                const glow = window.SrishtiGlow.calculateGlow(freshData);
                 rankValue = Math.round(glow.composite * 100);
                 rankText = `Rank: ${rankValue}%`;
             } else if (window.SrishtiApp?.consensus) {

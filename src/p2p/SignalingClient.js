@@ -166,7 +166,13 @@ class SignalingClient {
                 break;
                 
             case 'pong':
-                // Heartbeat response
+                // Heartbeat response from server
+                break;
+                
+            case 'server_ping':
+                // Server-side ping to keep connection alive
+                // Respond with pong to confirm we're still connected
+                this.send({ type: 'pong', timestamp: data.timestamp });
                 break;
                 
             default:
