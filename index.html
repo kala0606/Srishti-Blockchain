@@ -2594,7 +2594,10 @@
                         <span>👑</span>
                         <span>Admin Panel</span>
                     </div>
-                    <button onclick="updateAdminSection()" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; padding: 4px 10px; color: #fff; font-size: 0.75em; cursor: pointer;">🔄 Refresh</button>
+                    <div style="display: flex; gap: 6px;">
+                        <button onclick="forceRebuildState()" style="background: rgba(255,165,0,0.2); border: 1px solid rgba(255,165,0,0.4); border-radius: 6px; padding: 4px 10px; color: #ffa500; font-size: 0.75em; cursor: pointer;">⚡ Force Sync</button>
+                        <button onclick="updateAdminSection()" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; padding: 4px 10px; color: #fff; font-size: 0.75em; cursor: pointer;">🔄 Refresh</button>
+                    </div>
                 </div>
                 <div id="dash-pending-institutions">
                     <div style="color: rgba(255,255,255,0.5); font-size: 0.85em; text-align: center; padding: 16px;">
@@ -4051,7 +4054,25 @@
             const container = document.getElementById('dash-pending-institutions');
             const pending = window.SrishtiApp.getPendingInstitutions();
             
+            // Enhanced debugging
             console.log('📊 Admin Panel - Raw pending institutions:', pending);
+            console.log('📊 Admin Panel - Chain state pendingInstitutions:', window.SrishtiApp.chain?.state?.pendingInstitutions);
+            console.log('📊 Admin Panel - Chain length:', window.SrishtiApp.chain?.getLength());
+            console.log('📊 Admin Panel - Peer count:', window.SrishtiApp.network?.getPeerCount());
+            
+            // Log all INSTITUTION_REGISTER transactions in the chain
+            if (window.SrishtiApp.chain) {
+                const allTxs = [];
+                for (const block of window.SrishtiApp.chain.blocks) {
+                    const events = block.getEvents();
+                    for (const event of events) {
+                        if (event.type === 'INSTITUTION_REGISTER') {
+                            allTxs.push({ sender: event.sender, payload: event.payload });
+                        }
+                    }
+                }
+                console.log('📊 Admin Panel - INSTITUTION_REGISTER txs in chain:', allTxs);
+            }
             
             const pendingList = Object.entries(pending).filter(([_, p]) => p.status === 'PENDING');
             
@@ -4081,6 +4102,47 @@
             `).join('');
             
             console.log(`✅ Admin Panel updated with ${pendingList.length} pending requests`);
+        }
+        
+        // Force rebuild chain state from blocks
+        async function forceRebuildState() {
+            if (!window.SrishtiApp || !window.SrishtiApp.chain) {
+                alert('App not initialized');
+                return;
+            }
+            
+            try {
+                console.log('⚡ Force rebuilding chain state...');
+                const chain = window.SrishtiApp.chain;
+                
+                // Reset state
+                chain.state = {
+                    activeProposals: {},
+                    accountStates: {},
+                    soulboundTokens: {},
+                    institutions: {},
+                    pendingInstitutions: {},
+                    nodeRoles: {},
+                    pendingParentRequests: {},
+                    karmaBalances: {}
+                };
+                
+                // Reprocess all blocks
+                for (const block of chain.blocks) {
+                    await chain.processTransactions(block);
+                }
+                
+                console.log('✅ State rebuilt! pendingInstitutions:', chain.state.pendingInstitutions);
+                console.log('✅ State rebuilt! nodeRoles:', chain.state.nodeRoles);
+                
+                // Refresh UI
+                updateAdminSection();
+                updateRoleSection();
+                alert('✅ State rebuilt from ' + chain.blocks.length + ' blocks. Check console for details.');
+            } catch (error) {
+                console.error('Failed to rebuild state:', error);
+                alert('Error: ' + error.message);
+            }
         }
         
         // Approve institution
