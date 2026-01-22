@@ -52,6 +52,10 @@ class Network {
         
         // Chain epoch for network reset compatibility
         this.chainEpoch = window.SrishtiConfig?.CHAIN_EPOCH || 1;
+        
+        // Track compatible peers (passed epoch validation)
+        this.compatiblePeerCount = 0;
+        this.rejectedPeerCount = 0;
     }
     
     /**
@@ -691,9 +695,13 @@ class Network {
         if (theirEpoch !== this.chainEpoch) {
             console.warn(`🚫 REJECTING peer ${peerId}: Chain epoch mismatch (ours: ${this.chainEpoch}, theirs: ${theirEpoch})`);
             console.warn(`   This peer is from an old/different network. Disconnecting...`);
+            this.rejectedPeerCount++;
             this.disconnectPeer(peerId, false); // Don't retry - epoch mismatch is permanent
             return;
         }
+        
+        // Peer passed epoch check - they're compatible!
+        this.compatiblePeerCount++;
         
         // Update activity in connection manager
         if (this.connectionManager) {

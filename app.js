@@ -423,22 +423,23 @@ class SrishtiApp {
             
             const checkSync = () => {
                 const connectedPeers = this.network.peers?.size || 0;
-                const availablePeers = this.network.signaling?.availablePeers?.length || 0;
+                const compatiblePeers = this.network.compatiblePeerCount || 0;
+                const rejectedPeers = this.network.rejectedPeerCount || 0;
                 const pendingConnections = this.network.pendingConnections?.size || 0;
                 const chainLength = this.chain.getLength();
                 const elapsed = Date.now() - startTime;
                 
-                // Determine timeout based on whether peers exist
-                const hasKnownPeers = availablePeers > 0 || pendingConnections > 0;
-                const timeout = hasKnownPeers ? longTimeout : shortTimeout;
+                // Only count compatible peers (not raw signaling count which includes old-epoch peers)
+                const hasCompatiblePeers = connectedPeers > 0 || (pendingConnections > 0 && rejectedPeers === 0);
+                const timeout = hasCompatiblePeers ? longTimeout : shortTimeout;
                 
-                console.log(`🔄 Sync check: elapsed=${elapsed}ms, connected=${connectedPeers}, available=${availablePeers}, chain=${chainLength}`);
+                console.log(`🔄 Sync check: elapsed=${elapsed}ms, connected=${connectedPeers}, compatible=${compatiblePeers}, rejected=${rejectedPeers}, chain=${chainLength}`);
                 
                 // Update progress based on current state
-                if (hasKnownPeers && connectedPeers === 0) {
+                if (pendingConnections > 0 && connectedPeers === 0 && rejectedPeers === 0) {
                     this.updateSyncProgress({
                         status: 'connecting',
-                        message: `Found ${availablePeers} peers, connecting...`,
+                        message: 'Connecting to network...',
                         progress: 10 + Math.min(30, (elapsed / timeout) * 30)
                     });
                 } else if (connectedPeers > 0 && chainLength <= 1) {
@@ -463,9 +464,20 @@ class SrishtiApp {
                     return;
                 }
                 
+                // If all peers were rejected (old epoch), no point waiting - start fresh
+                if (rejectedPeers > 0 && compatiblePeers === 0 && connectedPeers === 0 && elapsed >= 2000) {
+                    console.log(`🚀 All ${rejectedPeers} peers rejected (old epoch) - starting fresh network`);
+                    this.updateSyncProgress({
+                        status: 'idle',
+                        message: 'Starting fresh network...'
+                    });
+                    resolve();
+                    return;
+                }
+                
                 // If timeout reached
                 if (elapsed >= timeout) {
-                    if (hasKnownPeers && connectedPeers === 0) {
+                    if (hasCompatiblePeers && connectedPeers === 0) {
                         console.log(`⏰ Sync timeout - peers available but P2P connection not established`);
                         this.updateSyncProgress({
                             status: 'idle',

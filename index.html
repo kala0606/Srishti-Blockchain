@@ -5336,14 +5336,17 @@
                     const chainLength = window.SrishtiApp?.chain?.getLength() || 0;
                     const connectedPeers = window.SrishtiApp?.network?.peers?.size || 0;
                     const isSignalingConnected = window.SrishtiApp?.network?.signaling?.isConnected?.() || false;
-                    const availablePeers = window.SrishtiApp?.network?.signaling?.availablePeers?.length || 0;
+                    // Use compatible peer count (peers that passed epoch validation) instead of raw signaling count
+                    const compatiblePeers = window.SrishtiApp?.network?.compatiblePeerCount || 0;
+                    const rejectedPeers = window.SrishtiApp?.network?.rejectedPeerCount || 0;
                     
                     // Count actual nodes in chain (excluding genesis/virtual)
                     const nodeMap = window.SrishtiApp?.chain?.buildNodeMap?.() || {};
                     const nodeCount = Object.keys(nodeMap).length;
                     
-                    // Track if we ever had peers (means network is active)
-                    if (connectedPeers > 0 || availablePeers > 0) {
+                    // Track if we ever had compatible peers (means network is active)
+                    // Don't count rejected peers (old epoch) as "having peers"
+                    if (connectedPeers > 0 || compatiblePeers > 0) {
                         hadPeersAtSomePoint = true;
                     }
                     
@@ -5356,9 +5359,14 @@
                         message = 'Looking for peers...';
                     }
                     
-                    if (availablePeers > 0) {
+                    // Only show peer count if we have compatible peers (not rejected old-epoch ones)
+                    if (compatiblePeers > 0 && connectedPeers === 0) {
                         progress = 30;
-                        message = `Found ${availablePeers} peer${availablePeers > 1 ? 's' : ''}, connecting...`;
+                        message = `Found ${compatiblePeers} peer${compatiblePeers > 1 ? 's' : ''}, connecting...`;
+                    } else if (rejectedPeers > 0 && compatiblePeers === 0 && connectedPeers === 0) {
+                        // All peers are from old network - show fresh start message
+                        progress = 30;
+                        message = 'Starting fresh network...';
                     }
                     
                     if (connectedPeers > 0) {
@@ -5395,7 +5403,8 @@
                     const timedOut = elapsed >= maxWaitTime;
                     
                     // Don't finish too early if we're actively connecting/syncing
-                    const stillConnecting = (availablePeers > 0 && connectedPeers === 0 && elapsed < nodeWaitTime);
+                    // Only wait for compatible peers (not old-epoch peers that will be rejected)
+                    const stillConnecting = (compatiblePeers > 0 && connectedPeers === 0 && elapsed < nodeWaitTime);
                     const stillSyncing = (connectedPeers > 0 && !isStable && elapsed < maxWaitTime - 3000);
                     
                     // Complete if:
