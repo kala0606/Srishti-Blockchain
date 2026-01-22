@@ -5136,6 +5136,9 @@
                     console.log('✅ User authenticated in wallet (recovery)');
                 }
                 
+                // Force refresh authentication UI state to remove guest indicator
+                refreshAuthUIState();
+                
                 showWelcome(foundNode.name || name);
                 
                 // Mark ourselves as online
