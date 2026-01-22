@@ -409,6 +409,13 @@ class Chain {
             return;
         }
 
+        // 🔍 DEBUG: Log entry
+        console.log('🔍 [Chain.handleInstitutionVerify] Processing:', {
+            sender: tx.sender,
+            targetNodeId: tx.payload.targetNodeId,
+            approved: tx.payload.approved
+        });
+
         // Authorization check - only ROOT or GOVERNANCE_ADMIN can verify
         const senderRole = this.state.nodeRoles[tx.sender];
         if (senderRole !== 'ROOT' && senderRole !== 'GOVERNANCE_ADMIN') {
@@ -436,6 +443,13 @@ class Chain {
 
             // Update role to INSTITUTION
             this.state.nodeRoles[targetNodeId] = 'INSTITUTION';
+
+            // 🔍 DEBUG: Log role assignment
+            console.log('🔍 [Chain.handleInstitutionVerify] INSTITUTION role assigned:', {
+                targetNodeId,
+                newRole: this.state.nodeRoles[targetNodeId],
+                allRoles: this.state.nodeRoles
+            });
 
             // Remove from pending
             delete this.state.pendingInstitutions[targetNodeId];
