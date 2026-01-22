@@ -166,6 +166,42 @@ class SrishtiSDK {
         });
         
         await block.computeHash();
+        
+        // Sign the block using wallet provider (if available) or fallback to direct signing
+        if (window.SrishtiWalletProvider && !window.SrishtiApp?.keyPair?.privateKey) {
+            // We're in a dApp - request signature from wallet
+            try {
+                const blockData = {
+                    index: block.index,
+                    timestamp: block.timestamp,
+                    previousHash: block.previousHash,
+                    data: block.data,
+                    proposer: block.proposer,
+                    participationProof: block.participationProof,
+                    hash: block.hash
+                };
+                
+                const signature = await window.SrishtiWalletProvider.requestSignature(
+                    blockData,
+                    this.nodeId,
+                    window.SRISHTI_BLOCKCHAIN_URL ? new URL(window.SRISHTI_BLOCKCHAIN_URL).origin : null
+                );
+                
+                block.signature = signature;
+            } catch (error) {
+                throw new Error(`Failed to get signature from wallet: ${error.message}. Please ensure you are logged in to the main blockchain app.`);
+            }
+        } else if (window.SrishtiApp?.keyPair?.privateKey) {
+            // We have a private key directly (main app) - sign directly
+            await block.sign(window.SrishtiApp.keyPair.privateKey);
+        } else {
+            throw new Error('No signing method available. Please ensure you are authenticated.');
+        }
+        
+        if (!this.network) {
+            throw new Error('Network not available. Cannot submit events. Please ensure you are connected to the blockchain network.');
+        }
+        
         return await this.network.proposeBlock(block);
     }
     

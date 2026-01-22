@@ -17,15 +17,6 @@ class AttendanceAppUI {
             // Log domain information for debugging
             console.log('🌐 Attendance App Domain:', window.location.hostname);
             console.log('🌐 Blockchain URL:', window.SRISHTI_BLOCKCHAIN_URL);
-            console.log('🔑 LocalStorage credentials check:');
-            console.log('  - nodeId:', localStorage.getItem('srishti_node_id'));
-            console.log('  - nodeName:', localStorage.getItem('srishti_node_name'));
-            console.log('  - hasPublicKey:', !!localStorage.getItem('srishti_public_key'));
-            console.log('  - hasPrivateKey:', !!localStorage.getItem('srishti_private_key'));
-
-            // Check if user is logged in
-            const hasCredentials = localStorage.getItem('srishti_node_id') &&
-                localStorage.getItem('srishti_private_key');
 
             // Wait for blockchain instance to be available
             if (!window.srishtiAppInstance) {
@@ -35,79 +26,17 @@ class AttendanceAppUI {
             // Use the existing instance
             this.srishtiApp = window.srishtiAppInstance;
 
-            // AUTO-RECOVERY: If we have private key but missing public key
-            // We do this AFTER getting the instance so we have access to SrishtiKeys
-            const storedPrivateKey = localStorage.getItem('srishti_private_key');
-            if (storedPrivateKey && !localStorage.getItem('srishti_public_key')) {
-                console.log('🔄 Attempting to recover Public Key from stored Private Key...');
-                try {
-                    // Ensure SrishtiKeys is available
-                    let keysLib = window.SrishtiKeys;
-                    if (!keysLib && this.srishtiApp.SrishtiKeys) {
-                        keysLib = this.srishtiApp.SrishtiKeys;
-                    }
-
-                    if (keysLib) {
-                        const privateKey = await keysLib.importPrivateKey(storedPrivateKey);
-                        const jwk = await crypto.subtle.exportKey('jwk', privateKey);
-
-                        // Derive public key from JWK 'x' parameter
-                        if (jwk.x) {
-                            const xBase64 = jwk.x.replace(/-/g, '+').replace(/_/g, '/');
-                            const xBinary = atob(xBase64);
-                            const xBytes = new Uint8Array(xBinary.length);
-                            for (let i = 0; i < xBinary.length; i++) xBytes[i] = xBinary.charCodeAt(i);
-
-                            const publicKey = await crypto.subtle.importKey(
-                                'raw', xBytes, { name: 'Ed25519', namedCurve: 'Ed25519' }, true, ['verify']
-                            );
-
-                            const publicKeyBase64 = await keysLib.exportPublicKeyBase64(publicKey);
-                            localStorage.setItem('srishti_public_key', publicKeyBase64);
-                            console.log('✅ Public Key recovered and saved.');
-                        }
-                    } else {
-                        console.warn('⚠️ SrishtiKeys library not found for recovery.');
-                    }
-                } catch (e) {
-                    console.warn('⚠️ Credential recovery failed:', e);
-                }
-            }
-
-            if (!hasCredentials) {
-                console.warn('⚠️ No credentials found in localStorage. App functionality will be limited.');
-                // We don't redirect anymore, just warn
-            }
-
             console.log('🔍 SrishtiApp instance check:');
             console.log('  - initialized:', this.srishtiApp.initialized);
             console.log('  - nodeId:', this.srishtiApp.nodeId);
-            console.log('  - hasKeyPair:', !!this.srishtiApp.keyPair);
 
-            // If not initialized, initialize it
+            // If not initialized, initialize it (this loads chain, but no credentials needed)
             if (!this.srishtiApp.initialized) {
-                await this.srishtiApp.init();
-            }
-
-            // CRITICAL: Wait for credentials to be loaded from localStorage
-            // The main app.js loads credentials during init(), but it's async
-            let credentialWaitRetries = 0;
-            const storedNodeId = localStorage.getItem('srishti_node_id');
-            const hasStoredCredentials = storedNodeId &&
-                localStorage.getItem('srishti_public_key') &&
-                localStorage.getItem('srishti_private_key');
-
-            if (hasStoredCredentials && !this.srishtiApp.nodeId) {
-                console.log('⏳ Waiting for SrishtiApp to load credentials from localStorage...');
-                while (!this.srishtiApp.nodeId && credentialWaitRetries < 20) {
-                    await new Promise(resolve => setTimeout(resolve, 100));
-                    credentialWaitRetries++;
-                }
-
-                if (this.srishtiApp.nodeId) {
-                    console.log('✅ Credentials loaded:', this.srishtiApp.nodeId);
-                } else {
-                    console.warn('⚠️ Credentials not loaded after waiting. May need manual login.');
+                try {
+                    await this.srishtiApp.init();
+                } catch (error) {
+                    // If init fails due to private key issues, that's okay - we'll use session tokens
+                    console.warn('⚠️ SrishtiApp init had issues (expected if no private key):', error.message);
                 }
             }
 
@@ -122,102 +51,80 @@ class AttendanceAppUI {
                 throw new Error('Blockchain chain not available. Initialization may have failed.');
             }
 
-            // FALLBACK: If credentials couldn't be loaded (e.g., private key import failed)
-            // but we have a nodeId in localStorage, check if it exists on the chain
-            // This handles cases where the private key is corrupted but the nodeId is valid
-            if (!this.srishtiApp.nodeId && storedNodeId && this.srishtiApp.chain) {
-                console.log('🔄 Checking if stored nodeId exists on chain...');
+            // ═══════════════════════════════════════════════════════════════════
+            // SESSION TOKEN AUTHENTICATION (No private keys needed!)
+            // ═══════════════════════════════════════════════════════════════════
+            
+            // Check if auth libraries are loaded
+            if (!window.SrishtiDAppAuth || !window.SrishtiSessionAuth) {
+                throw new Error('Authentication libraries not loaded. Please ensure auth scripts are included.');
+            }
+
+            // Handle login callback (if redirected from main app with token)
+            const tokenData = await window.SrishtiDAppAuth.handleLoginCallback(this.srishtiApp.chain);
+            if (tokenData) {
+                console.log('✅ Authenticated via session token:', tokenData.nodeId);
+                this.srishtiApp.nodeId = tokenData.nodeId;
+                
+                // Get node name from chain
                 const nodes = this.srishtiApp.chain.buildNodeMap();
                 const institutions = this.srishtiApp.chain.getInstitutions();
-                const node = nodes[storedNodeId];
-                const institution = institutions.verified?.[storedNodeId];
+                const node = nodes[tokenData.nodeId];
+                const institution = institutions.verified?.[tokenData.nodeId];
                 
-                if (node || institution) {
-                    console.log('✅ Found node on chain, setting nodeId (read-only mode)');
-                    this.srishtiApp.nodeId = storedNodeId;
-                    const storedNodeName = localStorage.getItem('srishti_node_name');
-                    if (storedNodeName) {
-                        this.srishtiApp.currentUser = { id: storedNodeId, name: storedNodeName };
-                    } else if (institution) {
-                        this.srishtiApp.currentUser = { id: storedNodeId, name: institution.name };
-                    } else if (node) {
-                        this.srishtiApp.currentUser = { id: storedNodeId, name: node.name };
-                    }
+                if (institution) {
+                    this.srishtiApp.currentUser = { id: tokenData.nodeId, name: institution.name };
+                    localStorage.setItem('srishti_node_name', institution.name);
+                } else if (node) {
+                    this.srishtiApp.currentUser = { id: tokenData.nodeId, name: node.name };
+                    localStorage.setItem('srishti_node_name', node.name);
+                }
+            } else {
+                // Check for existing valid session
+                const isAuthenticated = await window.SrishtiDAppAuth.isAuthenticated(this.srishtiApp.chain);
+                
+                if (!isAuthenticated) {
+                    // No valid session - redirect to main app for login
+                    console.log('🔐 No valid session found. Redirecting to main app for login...');
+                    const returnUrl = encodeURIComponent(window.location.href);
+                    window.SrishtiDAppAuth.initiateLogin(returnUrl, window.SRISHTI_BLOCKCHAIN_URL);
+                    return; // Exit early - will redirect
+                }
+                
+                // We have a valid session
+                const nodeId = await window.SrishtiDAppAuth.getNodeId(this.srishtiApp.chain);
+                if (nodeId) {
+                    console.log('✅ Using existing session:', nodeId);
+                    this.srishtiApp.nodeId = nodeId;
                     
-                    // Set public key if available (even without private key, we can verify identity)
-                    const storedPublicKey = localStorage.getItem('srishti_public_key');
-                    if (storedPublicKey) {
-                        try {
-                            this.srishtiApp.publicKeyBase64 = storedPublicKey;
-                            this.srishtiApp.keyPair = {
-                                publicKey: await window.SrishtiKeys.importPublicKey(storedPublicKey),
-                                privateKey: null // No private key = read-only mode
-                            };
-                            console.log('✅ Public key loaded (read-only mode - no private key)');
-                        } catch (e) {
-                            console.warn('⚠️ Could not import public key:', e);
-                        }
+                    // Get node name from chain
+                    const nodes = this.srishtiApp.chain.buildNodeMap();
+                    const institutions = this.srishtiApp.chain.getInstitutions();
+                    const node = nodes[nodeId];
+                    const institution = institutions.verified?.[nodeId];
+                    
+                    if (institution) {
+                        this.srishtiApp.currentUser = { id: nodeId, name: institution.name };
+                        localStorage.setItem('srishti_node_name', institution.name);
+                    } else if (node) {
+                        this.srishtiApp.currentUser = { id: nodeId, name: node.name };
+                        localStorage.setItem('srishti_node_name', node.name);
                     }
                 } else {
-                    console.warn('⚠️ Stored nodeId not found on chain:', storedNodeId);
+                    throw new Error('Failed to get node ID from session');
                 }
             }
 
-            // Network might not exist if user hasn't created a node yet
-            // Try to initialize network in guest mode for read-only access
-            // BUT: Only use guest mode if there's NO stored credentials
+            // Initialize network in guest mode for syncing (we don't need private keys for this)
+            // Guest mode allows read-only access and syncing without requiring credentials
             if (!this.srishtiApp.network && typeof this.srishtiApp.initNetwork === 'function') {
-                // Wait a bit for SrishtiApp to load credentials from localStorage
-                // Also wait for our fallback nodeId setting to complete
-                let credentialRetries = 0;
-                while (!this.srishtiApp.nodeId && credentialRetries < 10) {
-                    const hasStoredId = localStorage.getItem('srishti_node_id');
-                    if (hasStoredId) {
-                        // Credentials exist but not loaded yet, wait
-                        await new Promise(resolve => setTimeout(resolve, 100));
-                        credentialRetries++;
-                    } else {
-                        // No credentials, break
-                        break;
-                    }
-                }
-
-                // Check if we have a nodeId (either from credentials or from chain fallback)
-                const hasNodeId = !!this.srishtiApp.nodeId;
-                const hasStoredCredentials = localStorage.getItem('srishti_node_id') &&
-                    localStorage.getItem('srishti_public_key') &&
-                    localStorage.getItem('srishti_private_key');
-
-                // If we have a nodeId (even without full credentials), try to initialize network
-                // The network might work in read-only mode without private key
-                if (hasNodeId) {
-                    console.log('🔄 Attempting to initialize network with nodeId (may be read-only)...');
-                    try {
-                        // Try to initialize network - it may work even without private key for read-only
-                        await this.srishtiApp.initNetwork(false);
-                        console.log('✅ Network initialized with nodeId');
-                    } catch (error) {
-                        console.warn('Failed to initialize network with nodeId:', error);
-                        // If that fails, try guest mode as fallback
-                        if (!hasStoredCredentials) {
-                            console.log('🔄 Falling back to guest mode...');
-                            try {
-                                await this.srishtiApp.initNetwork(true); // true = guestMode
-                                console.log('✅ Network initialized in guest mode');
-                            } catch (guestError) {
-                                console.warn('Failed to initialize network in guest mode:', guestError);
-                            }
-                        }
-                    }
-                } else {
-                    console.log('🔄 Attempting to initialize network in guest mode...');
-                    try {
-                        // Try guest mode - allows viewing without registering
-                        await this.srishtiApp.initNetwork(true); // true = guestMode
-                        console.log('✅ Network initialized in guest mode');
-                    } catch (error) {
-                        console.warn('Failed to initialize network in guest mode:', error);
-                    }
+                console.log('🔄 Initializing network in guest mode (for syncing)...');
+                try {
+                    await this.srishtiApp.initNetwork(true); // true = guestMode
+                    console.log('✅ Network initialized in guest mode');
+                } catch (error) {
+                    console.warn('⚠️ Failed to initialize network:', error);
+                    // Continue anyway - we can still use the chain data
                 }
             }
 
@@ -263,107 +170,34 @@ class AttendanceAppUI {
                 console.warn('⚠️ Network not available. Cannot sync chain from peers.');
             }
 
-            // Check if user has registered (check both SrishtiApp instance and localStorage)
-            // Wait a bit for nodeId to be loaded from localStorage
-            let nodeId = this.srishtiApp.nodeId || localStorage.getItem('srishti_node_id');
-
-            // Debug: Log what we found
-            console.log('🔍 Checking for node ID:');
-            console.log('  - SrishtiApp.nodeId:', this.srishtiApp.nodeId);
-            console.log('  - localStorage nodeId:', localStorage.getItem('srishti_node_id'));
-            console.log('  - localStorage nodeName:', localStorage.getItem('srishti_node_name'));
-            console.log('  - Chain length:', this.srishtiApp.chain.getLength());
-
-            retries = 0;
-            while (!nodeId && retries < 20) {
-                await new Promise(resolve => setTimeout(resolve, 100));
-                nodeId = this.srishtiApp.nodeId || localStorage.getItem('srishti_node_id');
-                retries++;
-            }
-
-            // DO NOT auto-select nodes from chain - user must be logged in
-            // The nodeId must come from localStorage (user's actual login)
-
-            // Update SrishtiApp nodeId if we found it
-            if (!this.srishtiApp.nodeId && nodeId) {
-                this.srishtiApp.nodeId = nodeId;
-                console.log('✅ Using node ID:', nodeId);
-
-                // Verify and log node information
-                if (this.srishtiApp.chain) {
-                    const nodes = this.srishtiApp.chain.buildNodeMap();
-                    const institutions = this.srishtiApp.chain.getInstitutions();
-                    const node = nodes[nodeId];
-                    const institution = institutions.verified?.[nodeId];
-
-                    console.log('📋 Node Information:');
-                    console.log('  - Node ID:', nodeId);
-                    console.log('  - Node Name:', node?.name || 'Unknown');
-                    console.log('  - Is Institution:', !!institution);
-                    if (institution) {
-                        console.log('  - Institution Name:', institution.name);
-                        console.log('  - Institution Category:', institution.category);
-                    }
-                    console.log('  - Node Role:', this.srishtiApp.chain.getNodeRole(nodeId));
-
-                    // Store institution name if found
-                    if (institution && institution.name) {
-                        localStorage.setItem('srishti_node_name', institution.name);
-                    } else if (node && node.name) {
-                        localStorage.setItem('srishti_node_name', node.name);
-                    }
-                }
-            }
-
+            // Verify we have a nodeId from session token
+            const nodeId = this.srishtiApp.nodeId;
+            
             if (!nodeId) {
-                // User hasn't logged in - show helpful message
-                const currentDomain = window.location.hostname;
-                const blockchainDomain = window.SRISHTI_BLOCKCHAIN_URL ? new URL(window.SRISHTI_BLOCKCHAIN_URL).hostname : 'kala0606.github.io';
-                const isDifferentDomain = currentDomain !== blockchainDomain && currentDomain !== 'localhost' && currentDomain !== '127.0.0.1';
+                // This shouldn't happen if authentication worked, but handle it gracefully
+                console.error('❌ No node ID after authentication');
+                this.updateStatus('disconnected', '⚠️ Authentication failed. Please try logging in again.');
+                return;
+            }
 
-                this.updateStatus('disconnected', '⚠️ Not logged in. Please log in to the blockchain first.');
-                document.getElementById('userInfo').innerHTML = `
-                    <div style="background: #fff3cd; padding: 16px; border-radius: 8px; margin-top: 10px;">
-                        <strong>🔐 Login Required</strong><br>
-                        ${isDifferentDomain ?
-                        `You're on <strong>${currentDomain}</strong> but logged in on <strong>${blockchainDomain}</strong>.<br>
-                            <strong>Solution:</strong> Open the attendance app on the same domain as the blockchain, or log in on this domain.<br>` :
-                        'You need to log in to the Srishti blockchain to use this app.<br>'
-                    }
-                        <a href="${window.SRISHTI_BLOCKCHAIN_URL || 'https://kala0606.github.io/Srishti-Blockchain/'}" target="_blank" style="color: #667eea; text-decoration: underline;">
-                            Click here to log in →
-                        </a>
-                        <br><small>After logging in, refresh this page.</small>
-                    </div>
-                `;
+            // Log node information
+            console.log('📋 Node Information:');
+            console.log('  - Node ID:', nodeId);
+            if (this.srishtiApp.chain) {
+                const nodes = this.srishtiApp.chain.buildNodeMap();
+                const institutions = this.srishtiApp.chain.getInstitutions();
+                const node = nodes[nodeId];
+                const institution = institutions.verified?.[nodeId];
+                const role = this.srishtiApp.chain.getNodeRole(nodeId);
 
-                // Disable interactive features but allow viewing
-                this.initialized = false;
-                console.warn('⚠️ User not registered. Read-only mode enabled.');
-
-                // Show read-only message in all tabs
-                document.getElementById('sessionsList').innerHTML = `
-                    <div class="empty-state">
-                        <p>Please register on the blockchain to view sessions.</p>
-                    </div>
-                `;
-                document.getElementById('activeSessionsList').innerHTML = `
-                    <div class="empty-state">
-                        <p>Please register on the blockchain to view active sessions.</p>
-                    </div>
-                `;
-                document.getElementById('historyList').innerHTML = `
-                    <div class="empty-state">
-                        <p>Please register on the blockchain to view your attendance history.</p>
-                    </div>
-                `;
-                document.getElementById('certificatesList').innerHTML = `
-                    <div class="empty-state">
-                        <p>Please register on the blockchain to view certificates.</p>
-                    </div>
-                `;
-
-                return; // Exit early - can't do interactive features
+                console.log('  - Node Name:', node?.name || institution?.name || 'Unknown');
+                console.log('  - Is Institution:', !!institution);
+                console.log('  - Node Role:', role);
+                
+                if (institution) {
+                    console.log('  - Institution Name:', institution.name);
+                    console.log('  - Institution Category:', institution.category);
+                }
             }
 
             // If network still doesn't exist, try to initialize it

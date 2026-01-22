@@ -401,6 +401,17 @@
                     await loadScript(src);
                 }
                 
+                // Load auth scripts (for session token authentication)
+                const authScripts = [
+                    'src/auth/SessionAuth.js',
+                    'src/auth/WalletProvider.js',
+                    'src/auth/dAppAuth.js'
+                ];
+                
+                for (const src of authScripts) {
+                    await loadScript(src);
+                }
+                
                 // Load SDK files (local to attendance-app folder) first
                 const sdkScripts = [
                     'sdk/SrishtiSDK.js',
