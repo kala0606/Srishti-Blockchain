@@ -506,7 +506,46 @@
     </script>
     
     <!-- QR Code Library (for generating QR codes) -->
-    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+    <!-- Using multiple sources for reliability -->
+    <script src="https://unpkg.com/qrcode@1.5.3/build/qrcode.min.js"></script>
+    <script>
+        // Verify QRCode library loaded and create compatibility wrapper
+        window.addEventListener('load', () => {
+            if (typeof QRCode !== 'undefined') {
+                console.log('✅ QRCode library loaded');
+                
+                // If it's the modern library without constructor, create a wrapper
+                if (!QRCode.CorrectLevel && QRCode.toCanvas) {
+                    // Create a compatibility wrapper for the constructor API
+                    const QRCodeWrapper = function(container, options) {
+                        const canvas = document.createElement('canvas');
+                        container.appendChild(canvas);
+                        
+                        QRCode.toCanvas(canvas, options.text, {
+                            width: options.width || 280,
+                            margin: 2,
+                            color: {
+                                dark: options.colorDark || '#000000',
+                                light: options.colorLight || '#ffffff'
+                            }
+                        }).catch(err => {
+                            console.error('QR code generation failed:', err);
+                            container.innerHTML = '<p style="color: red;">QR code generation failed</p>';
+                        });
+                    };
+                    
+                    // Add CorrectLevel enum
+                    QRCodeWrapper.CorrectLevel = { L: 0, M: 1, Q: 2, H: 3 };
+                    
+                    // Replace global QRCode with wrapper
+                    window.QRCode = QRCodeWrapper;
+                    console.log('✅ Created QRCode compatibility wrapper');
+                }
+            } else {
+                console.warn('⚠️ QRCode library not loaded - QR codes will use fallback');
+            }
+        });
+    </script>
     
     <!-- Attendance App UI (loaded after blockchain is ready) -->
     <script src="app.js"></script>

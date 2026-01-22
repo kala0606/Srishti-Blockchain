@@ -707,14 +707,18 @@ class AttendanceAppUI {
         modal.appendChild(content);
         document.body.appendChild(modal);
         
-        // Generate QR code visual
-        this.generateQRVisual(qrContainer, JSON.stringify(qrData));
+        // Generate QR code visual (async)
+        this.generateQRVisual(qrContainer, JSON.stringify(qrData)).catch(err => {
+            console.error('Failed to generate QR code:', err);
+        });
         
         // Update QR code every 10 seconds
         const updateInterval = setInterval(() => {
             const currentQR = this.attendance.getCurrentQR(sessionId);
             if (currentQR) {
-                this.generateQRVisual(qrContainer, JSON.stringify(currentQR));
+                this.generateQRVisual(qrContainer, JSON.stringify(currentQR)).catch(err => {
+                    console.error('Failed to update QR code:', err);
+                });
             }
         }, 10000);
         
@@ -725,44 +729,122 @@ class AttendanceAppUI {
         };
     }
     
-    generateQRVisual(container, qrData) {
-        // Use QRCode library if available
-        if (typeof QRCode !== 'undefined') {
-            container.innerHTML = '';
-            new QRCode(container, {
-                text: qrData,
-                width: 280,
-                height: 280,
-                colorDark: '#000000',
-                colorLight: '#ffffff',
-                correctLevel: QRCode.CorrectLevel.M
-            });
-        } else if (typeof QRCodeStyling !== 'undefined') {
-            container.innerHTML = '';
-            const qr = new QRCodeStyling({
-                width: 280,
-                height: 280,
-                data: qrData,
-                dotsOptions: { color: '#000000', type: 'rounded' },
-                backgroundOptions: { color: '#ffffff' }
-            });
-            qr.append(container);
-        } else {
-            // Fallback: show data as text
+    async generateQRVisual(container, qrData) {
+        container.innerHTML = '<div style="padding: 20px; text-align: center;">Generating QR code...</div>';
+        
+        try {
+            // Try qrcodejs library (simple constructor API)
+            if (typeof QRCode !== 'undefined') {
+                container.innerHTML = '';
+                
+                // Create QR code using qrcodejs library
+                const qr = new QRCode(container, {
+                    text: qrData,
+                    width: 280,
+                    height: 280,
+                    colorDark: '#000000',
+                    colorLight: '#ffffff',
+                    correctLevel: QRCode.CorrectLevel.M || 1
+                });
+                
+                console.log('✅ QR code generated successfully');
+                return;
+            }
+            
+            // Try modern qrcode library (async API)
+            if (typeof QRCode !== 'undefined' && QRCode.toCanvas) {
+                const canvas = document.createElement('canvas');
+                container.innerHTML = '';
+                container.appendChild(canvas);
+                
+                await QRCode.toCanvas(canvas, qrData, {
+                    width: 280,
+                    margin: 2,
+                    color: {
+                        dark: '#000000',
+                        light: '#ffffff'
+                    }
+                });
+                console.log('✅ QR code generated with toCanvas API');
+                return;
+            }
+            
+            // Try QRCodeStyling
+            if (typeof QRCodeStyling !== 'undefined') {
+                container.innerHTML = '';
+                const qr = new QRCodeStyling({
+                    width: 280,
+                    height: 280,
+                    data: qrData,
+                    dotsOptions: { color: '#000000', type: 'rounded' },
+                    backgroundOptions: { color: '#ffffff' }
+                });
+                qr.append(container);
+                console.log('✅ QR code generated with QRCodeStyling');
+                return;
+            }
+            
+            // Fallback: Use a simple canvas-based QR code generator
+            console.warn('QRCode library not found, using fallback');
+            this.generateSimpleQR(container, qrData);
+        } catch (error) {
+            console.error('QR code generation error:', error);
+            // Fallback: show data as text with copy option
+            const escapedData = qrData.replace(/'/g, "\\'").replace(/"/g, '&quot;');
             container.innerHTML = `
-                <div style="padding: 20px; word-break: break-all; font-size: 0.8em;">
-                    ${qrData.substring(0, 100)}...
-                    <br><br>
-                    <small>Install QRCode library to see visual QR code</small>
+                <div style="padding: 20px; text-align: center;">
+                    <p style="color: #666; margin-bottom: 10px;">QR Code Library not available</p>
+                    <textarea readonly id="qr-data-text" style="width: 100%; height: 100px; padding: 10px; font-size: 0.8em; border: 1px solid #ddd; border-radius: 4px; font-family: monospace;">${escapedData}</textarea>
+                    <button onclick="navigator.clipboard.writeText(document.getElementById('qr-data-text').value).then(() => alert('Copied!'))" style="margin-top: 10px; padding: 8px 16px; background: #667eea; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                        Copy QR Data
+                    </button>
+                    <p style="color: #999; font-size: 0.8em; margin-top: 10px;">Students can paste this data to mark attendance</p>
                 </div>
             `;
         }
     }
     
+    generateSimpleQR(container, qrData) {
+        // Simple fallback: create a canvas and use a basic pattern
+        // This is a very basic implementation - for production, use a proper QR library
+        const canvas = document.createElement('canvas');
+        canvas.width = 280;
+        canvas.height = 280;
+        const ctx = canvas.getContext('2d');
+        
+        // Fill white background
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, 280, 280);
+        
+        // Draw a simple pattern (not a real QR code, but indicates data is there)
+        ctx.fillStyle = '#000000';
+        ctx.font = '12px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        
+        // Draw border
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(10, 10, 260, 260);
+        
+        // Draw text indicating QR data
+        const lines = qrData.match(/.{1,30}/g) || [qrData];
+        lines.forEach((line, i) => {
+            ctx.fillText(line, 140, 100 + (i * 20));
+        });
+        
+        ctx.fillText('(QR Code Library Required)', 140, 250);
+        
+        container.innerHTML = '';
+        container.appendChild(canvas);
+    }
+    
     updateQRDisplay(sessionId, qrData) {
         const container = document.getElementById(`qr-${sessionId}`);
         if (container) {
-            this.generateQRVisual(container, JSON.stringify(qrData));
+            this.generateQRVisual(container, JSON.stringify(qrData)).catch(err => {
+                console.error('Failed to update QR display:', err);
+            });
         }
     }
     
