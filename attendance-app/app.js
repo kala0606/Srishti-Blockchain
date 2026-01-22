@@ -23,19 +23,32 @@ class AttendanceAppUI {
             console.log('  - hasPublicKey:', !!localStorage.getItem('srishti_public_key'));
             console.log('  - hasPrivateKey:', !!localStorage.getItem('srishti_private_key'));
 
-            // AUTO-RECOVERY: If we have private key but missing public key/node id
-            // This happens if user manually added private key or if login failed to save others
+            // Check if user is logged in
+            const hasCredentials = localStorage.getItem('srishti_node_id') &&
+                localStorage.getItem('srishti_private_key');
+
+            // Wait for blockchain instance to be available
+            if (!window.srishtiAppInstance) {
+                throw new Error('Srishti blockchain instance not loaded. Check script loading.');
+            }
+
+            // Use the existing instance
+            this.srishtiApp = window.srishtiAppInstance;
+
+            // AUTO-RECOVERY: If we have private key but missing public key
+            // We do this AFTER getting the instance so we have access to SrishtiKeys
             const storedPrivateKey = localStorage.getItem('srishti_private_key');
-            if (storedPrivateKey && (!localStorage.getItem('srishti_public_key') || !localStorage.getItem('srishti_node_id'))) {
-                console.log('🔄 Attempting to recover credentials from Private Key...');
+            if (storedPrivateKey && !localStorage.getItem('srishti_public_key')) {
+                console.log('🔄 Attempting to recover Public Key from stored Private Key...');
                 try {
-                    // We need to load SrishtiKeys first if not available
-                    if (!window.SrishtiKeys && window.srishtiAppInstance && window.srishtiAppInstance.SrishtiKeys) {
-                        window.SrishtiKeys = window.srishtiAppInstance.SrishtiKeys;
+                    // Ensure SrishtiKeys is available
+                    let keysLib = window.SrishtiKeys;
+                    if (!keysLib && this.srishtiApp.SrishtiKeys) {
+                        keysLib = this.srishtiApp.SrishtiKeys;
                     }
 
-                    if (window.SrishtiKeys) {
-                        const privateKey = await window.SrishtiKeys.importPrivateKey(storedPrivateKey);
+                    if (keysLib) {
+                        const privateKey = await keysLib.importPrivateKey(storedPrivateKey);
                         const jwk = await crypto.subtle.exportKey('jwk', privateKey);
 
                         // Derive public key from JWK 'x' parameter
@@ -49,37 +62,22 @@ class AttendanceAppUI {
                                 'raw', xBytes, { name: 'Ed25519', namedCurve: 'Ed25519' }, true, ['verify']
                             );
 
-                            const publicKeyBase64 = await window.SrishtiKeys.exportPublicKeyBase64(publicKey);
-                            const nodeId = await window.SrishtiKeys.generateNodeId(publicKey);
-
-                            localStorage.setItem('srishti_node_id', nodeId);
+                            const publicKeyBase64 = await keysLib.exportPublicKeyBase64(publicKey);
                             localStorage.setItem('srishti_public_key', publicKeyBase64);
-                            console.log('✅ Credentials recovered successfully:', nodeId);
+                            console.log('✅ Public Key recovered and saved.');
                         }
+                    } else {
+                        console.warn('⚠️ SrishtiKeys library not found for recovery.');
                     }
                 } catch (e) {
                     console.warn('⚠️ Credential recovery failed:', e);
                 }
             }
 
-            // Check if user is logged in
-            const hasCredentials = localStorage.getItem('srishti_node_id') &&
-                localStorage.getItem('srishti_private_key');
-
             if (!hasCredentials) {
-                // Redirect to login page
-                console.log('⚠️ No credentials found. Redirecting to login...');
-                window.location.href = 'login.html';
-                return;
+                console.warn('⚠️ No credentials found in localStorage. App functionality will be limited.');
+                // We don't redirect anymore, just warn
             }
-
-            // Wait for blockchain instance to be available
-            if (!window.srishtiAppInstance) {
-                throw new Error('Srishti blockchain instance not loaded. Check script loading.');
-            }
-
-            // Use the existing instance (which should have credentials loaded)
-            this.srishtiApp = window.srishtiAppInstance;
 
             console.log('🔍 SrishtiApp instance check:');
             console.log('  - initialized:', this.srishtiApp.initialized);
