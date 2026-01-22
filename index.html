@@ -5154,7 +5154,13 @@
         }
         
         function hideOnboardingModal() {
-            document.getElementById('onboarding-modal').classList.remove('active');
+            const modal = document.getElementById('onboarding-modal');
+            if (modal) {
+                modal.classList.remove('active');
+                // Ensure it's completely hidden (in case of CSS issues)
+                modal.style.display = 'none';
+                console.log('✅ Onboarding modal hidden');
+            }
         }
         
         /**
@@ -6082,7 +6088,28 @@
                 url.searchParams.delete('join');
                 window.history.replaceState({}, document.title, url.pathname);
                 
+                // Hide onboarding modal immediately
                 hideOnboardingModal();
+                
+                // Clean up any guest mode UI immediately
+                const loginGuestBtn = document.getElementById('guest-join-btn');
+                const loginGuestIndicator = document.getElementById('guest-indicator');
+                const loginQrHint = document.getElementById('qr-join-hint');
+                if (loginGuestBtn) loginGuestBtn.remove();
+                if (loginGuestIndicator) {
+                    // Remove resize handler if it exists
+                    if (loginGuestIndicator._resizeHandler) {
+                        window.removeEventListener('resize', loginGuestIndicator._resizeHandler);
+                    }
+                    loginGuestIndicator.remove();
+                }
+                if (loginQrHint) loginQrHint.remove();
+                
+                // Ensure FAB icons are visible for logged-in users
+                const loginFabContainer = document.querySelector('.fab-container');
+                if (loginFabContainer) {
+                    loginFabContainer.style.display = 'flex';
+                }
                 
                 // Mark user as authenticated in WalletManager
                 if (window.walletManager) {
@@ -6347,6 +6374,20 @@
             } else {
                 // User is authenticated - continue with normal flow
                 console.log('✅ User authenticated - proceeding with wallet initialization');
+                
+                // Ensure onboarding modal is hidden and guest UI is removed for authenticated users
+                hideOnboardingModal();
+                const authGuestBtn = document.getElementById('guest-join-btn');
+                const authGuestIndicator = document.getElementById('guest-indicator');
+                const authQrHint = document.getElementById('qr-join-hint');
+                if (authGuestBtn) authGuestBtn.remove();
+                if (authGuestIndicator) {
+                    if (authGuestIndicator._resizeHandler) {
+                        window.removeEventListener('resize', authGuestIndicator._resizeHandler);
+                    }
+                    authGuestIndicator.remove();
+                }
+                if (authQrHint) authQrHint.remove();
             }
             
             // Check if returning user - trust localStorage if we have valid data
@@ -6358,11 +6399,36 @@
             const hasValidLocalData = savedNodeId && savedNodeName && savedNodeName.length > 0;
             const hasPrivateKey = !!savedPrivateKey;
             const appHasNode = window.SrishtiApp?.nodeId === savedNodeId;
+            const appHasPrivateKey = window.SrishtiApp?.keyPair?.privateKey !== null && window.SrishtiApp?.keyPair?.privateKey !== undefined;
             
+            // Only warn if there's an actual problem, not expected read-only mode
             if (savedNodeId && !appHasNode && window.SrishtiApp?.nodeId) {
                 console.warn(`⚠️ Mismatch detected: localStorage has ${savedNodeId} but app has ${window.SrishtiApp.nodeId}. App may not have loaded from localStorage correctly.`);
-            } else if (savedNodeId && !window.SrishtiApp?.nodeId && !hasPrivateKey) {
-                console.warn(`⚠️ localStorage has node ID ${savedNodeId} but app.nodeId is not set and no private key available. This may indicate a recovery scenario or an error during app.js initialization.`);
+            } else if (savedNodeId && !appHasNode && !hasPrivateKey) {
+                // App might still be initializing - wait a bit before warning
+                // This warning is only for actual errors, not expected read-only mode
+                setTimeout(() => {
+                    // Re-check after delay - app might have initialized in read-only mode
+                    const appNodeIdAfterDelay = window.SrishtiApp?.nodeId;
+                    const appHasPrivateKeyAfterDelay = window.SrishtiApp?.keyPair?.privateKey !== null && window.SrishtiApp?.keyPair?.privateKey !== undefined;
+                    const appInitialized = window.SrishtiApp?.initialized === true;
+                    
+                    if (appNodeIdAfterDelay === savedNodeId) {
+                        // App has nodeId now - check if it's read-only mode (expected) or full mode
+                        if (!appHasPrivateKeyAfterDelay && !hasPrivateKey) {
+                            // This is expected read-only mode - don't show warning, just log info (only once)
+                            if (!window._readOnlyModeLogged) {
+                                console.log(`ℹ️ Running in read-only mode: nodeId available but private key missing. You can view the blockchain but cannot sign transactions.`);
+                                window._readOnlyModeLogged = true; // Prevent repeated messages
+                            }
+                        }
+                        // If app has private key, everything is fine - no warning needed
+                    } else if (!appNodeIdAfterDelay && !hasPrivateKey && appInitialized) {
+                        // App is initialized but still no nodeId - this is an actual error
+                        console.warn(`⚠️ localStorage has node ID ${savedNodeId} but app.nodeId is not set after initialization. This may indicate an error during app.js initialization.`);
+                    }
+                    // If app is not initialized yet, don't warn - it's still loading
+                }, 1500); // Wait 1.5 seconds for async initialization to complete
             }
             
             if (hasValidLocalData) {
