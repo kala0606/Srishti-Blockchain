@@ -306,6 +306,21 @@ class AttendanceAppUI {
             await this.loadActiveSessions();
             await this.loadHistory();
             await this.loadCertificates();
+            
+            // Auto-refresh active sessions every 10 seconds (to catch new sessions)
+            // Only if user is not an institution (students need to see new sessions)
+            if (!this.sdk.isInstitution() && !this.sdk.isRoot()) {
+                setInterval(async () => {
+                    // Only refresh if we're on the attend tab or sessions tab
+                    const attendTab = document.getElementById('attend');
+                    const sessionsTab = document.getElementById('sessions');
+                    if (attendTab && attendTab.classList.contains('active')) {
+                        await this.loadActiveSessions();
+                    } else if (sessionsTab && sessionsTab.classList.contains('active')) {
+                        await this.loadSessions();
+                    }
+                }, 10000); // Refresh every 10 seconds
+            }
 
             // Set up event listeners
             this.setupEventListeners();

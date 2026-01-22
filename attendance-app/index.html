@@ -321,6 +321,20 @@
         <!-- Mark Attendance Tab -->
         <div id="attend" class="tab-content">
             <h2>Mark Attendance</h2>
+            <div style="margin-bottom: 16px;">
+                <button onclick="attendanceApp.loadActiveSessions()" style="
+                    background: #667eea;
+                    color: white;
+                    border: none;
+                    padding: 8px 16px;
+                    border-radius: 6px;
+                    cursor: pointer;
+                    font-size: 0.9em;
+                ">🔄 Refresh Sessions</button>
+                <small style="display: block; margin-top: 8px; color: #666;">
+                    Sessions are discovered from the blockchain. If you don't see a session, wait a few seconds for the chain to sync, then refresh.
+                </small>
+            </div>
             <div id="attendError"></div>
             <div id="activeSessionsList" class="loading">Loading active sessions...</div>
         </div>
@@ -412,7 +426,7 @@
                     await loadScript(src);
                 }
                 
-                // Load SDK files (local to attendance-app folder) first
+                // Load SDK files from main blockchain repo
                 const sdkScripts = [
                     'sdk/SrishtiSDK.js',
                     'sdk/AppDataStore.js',
@@ -420,13 +434,7 @@
                 ];
                 
                 for (const src of sdkScripts) {
-                    const script = document.createElement('script');
-                    script.src = src; // Load from current directory
-                    document.head.appendChild(script);
-                    await new Promise(resolve => {
-                        script.onload = resolve;
-                        script.onerror = resolve; // Continue even if fails
-                    });
+                    await loadScript(src); // Load from main blockchain repo (SRISHTI_BLOCKCHAIN_URL)
                 }
                 
                 // Load main app.js (creates SrishtiApp instance)

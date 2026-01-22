@@ -44,6 +44,7 @@
     <script src="src/auth/SessionAuth.js"></script>
     <script src="src/auth/WalletProvider.js"></script>
     <script src="src/auth/dAppAuth.js"></script>
+    <script src="src/auth/WalletManager.js"></script>
     
     <!-- Srishti SDK - dApp Development Kit -->
     <script src="sdk/SrishtiSDK.js"></script>
@@ -2906,6 +2907,43 @@
                 </div>
             </div>
             
+            <!-- dApps Section -->
+            <div class="dashboard-section" style="margin-top: 32px; padding-top: 24px; border-top: 1px solid rgba(255, 255, 255, 0.06);">
+                <h3 style="font-size: 0.9em; font-weight: 600; color: rgba(255, 255, 255, 0.9); margin-bottom: 16px; text-transform: uppercase; letter-spacing: 1px;">Decentralized Apps</h3>
+                <div id="dapp-browser" style="display: flex; flex-direction: column; gap: 12px;">
+                    <button class="dapp-card" onclick="launchDApp('attendance')" style="
+                        background: linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%);
+                        border: 1px solid rgba(255, 255, 255, 0.08);
+                        border-radius: 16px;
+                        padding: 20px;
+                        cursor: pointer;
+                        transition: all 0.3s ease;
+                        text-align: left;
+                        display: flex;
+                        align-items: center;
+                        gap: 16px;
+                    ">
+                        <div style="
+                            width: 48px;
+                            height: 48px;
+                            border-radius: 12px;
+                            background: linear-gradient(135deg, rgba(102, 126, 234, 0.3), rgba(118, 75, 162, 0.3));
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            font-size: 24px;
+                        ">📋</div>
+                        <div style="flex: 1;">
+                            <div style="font-weight: 600; color: rgba(255, 255, 255, 0.95); margin-bottom: 4px;">Attendance</div>
+                            <div style="font-size: 0.85em; color: rgba(255, 255, 255, 0.6);">Manage attendance sessions</div>
+                        </div>
+                        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px; color: rgba(255, 255, 255, 0.4);">
+                            <polyline points="9 18 15 12 9 6"></polyline>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            
             <!-- Actions -->
             <div class="dashboard-actions">
                 <button class="dashboard-btn secondary" id="dash-share-btn">
@@ -5091,6 +5129,13 @@
                 // In a production system, we'd need to store encrypted private keys or use deterministic key derivation
                 
                 hideOnboardingModal();
+                
+                // Mark user as authenticated in WalletManager
+                if (window.walletManager) {
+                    window.walletManager.setAuthenticated(foundNode.id, foundNode.name || name);
+                    console.log('✅ User authenticated in wallet (recovery)');
+                }
+                
                 showWelcome(foundNode.name || name);
                 
                 // Mark ourselves as online
@@ -5887,6 +5932,37 @@
             setTimeout(() => burst.remove(), 2500);
         }
         
+        /**
+         * Launch a dApp from the wallet
+         * @param {string} dAppId - dApp identifier
+         */
+        async function launchDApp(dAppId) {
+            if (!window.walletManager || !window.walletManager.isAuthenticated) {
+                alert('Please log in to access dApps');
+                return;
+            }
+            
+            // Map dApp IDs to URLs
+            const dAppUrls = {
+                'attendance': window.SRISHTI_BLOCKCHAIN_URL 
+                    ? new URL('attendance-app/index.html', window.SRISHTI_BLOCKCHAIN_URL).toString()
+                    : './attendance-app/index.html'
+            };
+            
+            const dAppUrl = dAppUrls[dAppId];
+            if (!dAppUrl) {
+                alert(`dApp "${dAppId}" not found`);
+                return;
+            }
+            
+            try {
+                await window.walletManager.launchDApp(dAppUrl, true); // true = open in new window
+            } catch (error) {
+                console.error('Failed to launch dApp:', error);
+                alert(`Failed to launch dApp: ${error.message}`);
+            }
+        }
+        
         // ============================================
         // Network Functions
         // ============================================
@@ -5997,6 +6073,12 @@
                 
                 hideOnboardingModal();
                 
+                // Mark user as authenticated in WalletManager
+                if (window.walletManager) {
+                    window.walletManager.setAuthenticated(nodeId, name);
+                    console.log('✅ User authenticated in wallet');
+                }
+                
                 // Show recovery phrase FIRST, then welcome
                 if (window.SrishtiRecovery && recoveryPhrase) {
                     window.SrishtiRecovery.showPhraseModal(recoveryPhrase, () => {
@@ -6065,6 +6147,13 @@
                     <p style="color: rgba(255, 255, 255, 0.6); font-size: 0.9em;">${error.message}</p>
                 `;
                 return;
+            }
+            
+            // Initialize wallet manager (enforces login-first architecture)
+            if (window.SrishtiWalletManager) {
+                window.walletManager = new window.SrishtiWalletManager();
+                window.walletManager.init(window.SrishtiApp);
+                console.log('✅ Wallet Manager initialized');
             }
             
             // Initialize wallet provider for dApp authentication
@@ -6217,6 +6306,37 @@
                     }
                 }
             }, 2000); // Wait 2 seconds for any async credential loading
+            
+            // ═══════════════════════════════════════════════════════════════════
+            // WALLET-FIRST ARCHITECTURE: Enforce login before showing anything
+            // ═══════════════════════════════════════════════════════════════════
+            
+            // Check authentication state using WalletManager (after app is initialized)
+            // Note: WalletManager checks localStorage directly, so it works even if app hasn't fully loaded credentials yet
+            let requiresLogin = false;
+            if (window.walletManager) {
+                requiresLogin = window.walletManager.requiresLogin();
+            } else {
+                // Fallback: check localStorage directly
+                const nodeId = localStorage.getItem('srishti_node_id');
+                const privateKey = localStorage.getItem('srishti_private_key');
+                const publicKey = localStorage.getItem('srishti_public_key');
+                requiresLogin = !(nodeId && privateKey && publicKey);
+            }
+            
+            if (requiresLogin) {
+                // User is not logged in - show onboarding/login screen
+                // Continue with initialization but show login modal
+                console.log('🔐 User not authenticated - showing login screen');
+                // Don't return - continue initialization so blockchain can load
+                // But show onboarding modal to block access
+                setTimeout(() => {
+                    showOnboardingModal();
+                }, 500); // Small delay to let UI render
+            } else {
+                // User is authenticated - continue with normal flow
+                console.log('✅ User authenticated - proceeding with wallet initialization');
+            }
             
             // Check if returning user - trust localStorage if we have valid data
             // Note: We check localStorage directly here (not app.nodeId) because app.js loads from localStorage

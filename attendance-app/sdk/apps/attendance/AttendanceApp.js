@@ -139,16 +139,32 @@ class AttendanceApp {
         const dataHash = await this.sdk.hashData(sessionData);
         
         // Submit minimal proof ON-CHAIN
+        // Include essential metadata so other nodes can see session details
+        // Note: Geofence coordinates are included as they're public venue information
+        const metadata = {
+            title: options.title,
+            description: options.description || '',
+            startTime: sessionData.startTime,
+            endTime: sessionData.endTime || null,
+            location: options.location || null
+        };
+        
+        // Include geofence if present (needed for location verification)
+        if (options.geofence) {
+            metadata.geofence = {
+                lat: options.geofence.lat,
+                lng: options.geofence.lng,
+                radius: options.geofence.radius
+            };
+        }
+        
         const success = await this.sdk.submitAppEvent(
             AttendanceApp.APP_ID,
             AttendanceApp.ACTIONS.SESSION_CREATE,
             {
                 ref: sessionId,
                 dataHash: dataHash,
-                metadata: {
-                    title: options.title,
-                    startTime: sessionData.startTime
-                }
+                metadata: metadata
             }
         );
         
@@ -219,9 +235,46 @@ class AttendanceApp {
      * });
      */
     async markAttendance(sessionId, options = {}) {
-        const session = await this.store.get(sessionId);
+        let session = await this.store.get(sessionId);
+        
+        // If session not found locally, try to get it from on-chain events
         if (!session) {
-            throw new Error('Session not found');
+            const events = this.sdk.queryAppEvents(
+                AttendanceApp.APP_ID,
+                AttendanceApp.ACTIONS.SESSION_CREATE,
+                { ref: sessionId }
+            );
+            
+            if (events.length === 0) {
+                throw new Error('Session not found');
+            }
+            
+            // Reconstruct from on-chain event (same logic as getActiveSessions)
+            const event = events[0];
+            const metadata = event.payload?.metadata || {};
+            session = {
+                id: sessionId,
+                type: 'session',
+                title: metadata.title || 'Untitled Session',
+                description: metadata.description || '',
+                startTime: metadata.startTime || event.timestamp,
+                endTime: metadata.endTime || null,
+                location: metadata.location || null,
+                geofence: metadata.geofence ? {
+                    lat: metadata.geofence.lat,
+                    lng: metadata.geofence.lng,
+                    radius: metadata.geofence.radius
+                } : null,
+                createdBy: event.sender,
+                createdAt: event.timestamp,
+                status: 'ACTIVE',
+                attendeeCount: 0,
+                _reconstructed: true
+            };
+            
+            // Store it for future use
+            await this.store.put(sessionId, session);
+            console.log(`📥 Loaded session from on-chain for attendance: ${session.title}`);
         }
         
         // Check if session is still active
@@ -243,6 +296,11 @@ class AttendanceApp {
         // Validate geofence if required
         let distanceFromVenue = null;
         if (session.geofence && options.location) {
+            // Ensure we have full geofence data
+            if (!session.geofence.lat || !session.geofence.lng) {
+                throw new Error('Session geofence data is incomplete. Cannot verify location.');
+            }
+            
             distanceFromVenue = this._calculateDistance(options.location, session.geofence);
             
             if (distanceFromVenue > session.geofence.radius) {
@@ -251,6 +309,8 @@ class AttendanceApp {
                     `Must be within ${session.geofence.radius}m to mark attendance.`
                 );
             }
+        } else if (session.geofence && !options.location) {
+            throw new Error('This session requires location verification. Please enable location access.');
         }
         
         // Full attendance data (OFF-CHAIN)
@@ -469,6 +529,7 @@ class AttendanceApp {
     /**
      * Get all active sessions (from on-chain events)
      * Combines on-chain proofs with off-chain data
+     * If off-chain data is missing, reconstructs from on-chain metadata
      * @returns {Promise<Array>}
      */
     async getActiveSessions() {
@@ -479,8 +540,49 @@ class AttendanceApp {
         
         const sessions = [];
         for (const event of events) {
-            const session = await this.store.get(event.payload.ref);
-            if (session && session.status === 'ACTIVE') {
+            let session = await this.store.get(event.payload.ref);
+            
+            // If session not in local store, reconstruct from on-chain event metadata
+            if (!session) {
+                // Reconstruct session from on-chain event
+                const metadata = event.payload?.metadata || {};
+                session = {
+                    id: event.payload.ref,
+                    type: 'session',
+                    title: metadata.title || 'Untitled Session',
+                    description: metadata.description || '',
+                    startTime: metadata.startTime || event.timestamp,
+                    endTime: metadata.endTime || null,
+                    location: metadata.location || null,
+                    // Geofence data is included in metadata (public venue info)
+                    geofence: metadata.geofence ? {
+                        lat: metadata.geofence.lat,
+                        lng: metadata.geofence.lng,
+                        radius: metadata.geofence.radius
+                    } : null,
+                    createdBy: event.sender,
+                    createdAt: event.timestamp,
+                    status: 'ACTIVE', // Assume active if we don't have full data
+                    attendeeCount: 0,
+                    // Mark as reconstructed so we know it's from on-chain
+                    _reconstructed: true,
+                    _dataHash: event.payload?.dataHash // Store hash for verification
+                };
+                
+                // Store it locally for future use
+                await this.store.put(event.payload.ref, session);
+                console.log(`📥 Reconstructed session from on-chain: ${session.title} (${session.id})`);
+                console.log(`   Created by: ${event.sender}, Start: ${new Date(session.startTime).toLocaleString()}`);
+                if (session.geofence) {
+                    console.log(`   Location: ${session.location || 'Geofenced area'} (${session.geofence.radius}m radius)`);
+                }
+            }
+            
+            // Check if session is still active
+            const isActive = session.status === 'ACTIVE' && 
+                           (!session.endTime || Date.now() < session.endTime);
+            
+            if (isActive) {
                 sessions.push(session);
             }
         }
