@@ -65,7 +65,7 @@ const Config = {
     // CHAIN EPOCH - Increment this to reset the entire network!
     // When this changes, all old peers become incompatible and won't sync
     // ═══════════════════════════════════════════════════════════════════════════
-    CHAIN_EPOCH: 2,                    // Chain epoch - increment to force fresh start
+    CHAIN_EPOCH: 3,                    // Chain epoch - increment to force fresh start
     
     // Performance
     BATCH: {
