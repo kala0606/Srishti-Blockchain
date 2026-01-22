@@ -138,32 +138,20 @@ class WebSocketClient {
                 break;
             
             case 'registered':
-                console.log(`✅ Registered with relay server. ${data.peers?.length || 0} total peers online.`);
+                console.log(`✅ Registered with relay server. ${data.peers?.length || 0} peers online.`);
                 this.registered = true;
                 
-                // Update peer list - filter by epoch compatibility
+                // Add ALL peers - let Network layer filter by epoch after HELLO exchange
+                // (Server's epoch info might be stale; HELLO has the actual epoch)
                 if (data.peers && Array.isArray(data.peers)) {
                     this.peers.clear();
-                    let compatibleCount = 0;
-                    let incompatibleCount = 0;
-                    
                     for (const peer of data.peers) {
-                        const peerEpoch = peer.chainEpoch || 1;
-                        
-                        // Only add peers with matching epoch
-                        if (peerEpoch === this.chainEpoch) {
-                            this.peers.set(peer.nodeId, {
-                                chainLength: peer.chainLength || 0,
-                                chainEpoch: peerEpoch,
-                                lastSeen: Date.now()
-                            });
-                            compatibleCount++;
-                        } else {
-                            incompatibleCount++;
-                        }
+                        this.peers.set(peer.nodeId, {
+                            chainLength: peer.chainLength || 0,
+                            chainEpoch: peer.chainEpoch || 1,
+                            lastSeen: Date.now()
+                        });
                     }
-                    
-                    console.log(`📊 Epoch ${this.chainEpoch}: ${compatibleCount} compatible, ${incompatibleCount} incompatible peers`);
                 }
                 
                 this.onConnected(Array.from(this.peers.keys()));
@@ -171,25 +159,19 @@ class WebSocketClient {
                 break;
             
             case 'peer_joined':
-                // Default chainEpoch to 1 for old peers that don't provide it
+                // Add peer - let Network layer filter by epoch after HELLO exchange
                 const joinedPeerEpoch = data.chainEpoch || 1;
-                
-                // Only track peers with matching epoch
-                if (joinedPeerEpoch === this.chainEpoch) {
-                    console.log(`🆕 Peer joined (epoch ${joinedPeerEpoch}): ${data.nodeId}`);
-                    this.peers.set(data.nodeId, {
-                        chainLength: data.chainLength || 0,
-                        chainEpoch: joinedPeerEpoch,
-                        lastSeen: Date.now()
-                    });
-                    this.onPeerJoined(data.nodeId, {
-                        chainLength: data.chainLength || 0,
-                        chainEpoch: joinedPeerEpoch
-                    });
-                    this.onPeersUpdated(this.getPeerList());
-                } else {
-                    console.log(`⏭️ Ignoring peer ${data.nodeId} (epoch ${joinedPeerEpoch} vs ours ${this.chainEpoch})`);
-                }
+                console.log(`🆕 Peer joined: ${data.nodeId} (server epoch: ${joinedPeerEpoch})`);
+                this.peers.set(data.nodeId, {
+                    chainLength: data.chainLength || 0,
+                    chainEpoch: joinedPeerEpoch,
+                    lastSeen: Date.now()
+                });
+                this.onPeerJoined(data.nodeId, {
+                    chainLength: data.chainLength || 0,
+                    chainEpoch: joinedPeerEpoch
+                });
+                this.onPeersUpdated(this.getPeerList());
                 break;
             
             case 'peer_left':
@@ -200,19 +182,15 @@ class WebSocketClient {
                 break;
             
             case 'peers':
-                // Response to get_peers request - filter by epoch
+                // Response to get_peers request - add all, let Network filter by HELLO
                 if (data.peers && Array.isArray(data.peers)) {
                     this.peers.clear();
                     for (const peer of data.peers) {
-                        const peerEpochValue = peer.chainEpoch || 1;
-                        // Only add peers with matching epoch
-                        if (peerEpochValue === this.chainEpoch) {
-                            this.peers.set(peer.nodeId, {
-                                chainLength: peer.chainLength || 0,
-                                chainEpoch: peerEpochValue,
-                                lastSeen: Date.now()
-                            });
-                        }
+                        this.peers.set(peer.nodeId, {
+                            chainLength: peer.chainLength || 0,
+                            chainEpoch: peer.chainEpoch || 1,
+                            lastSeen: Date.now()
+                        });
                     }
                     this.onPeersUpdated(this.getPeerList());
                 }

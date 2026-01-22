@@ -113,6 +113,16 @@ class Network {
         // Initialize WebSocket client
         if (this.relayServerUrl && window.SrishtiWebSocketClient) {
             await this.initWebSocket();
+            
+            // CRITICAL: Update server with correct chainEpoch after chain is loaded/created
+            // This ensures the server has the right epoch even if connection happened before chain init
+            if (this.wsClient && this.wsClient.isConnected()) {
+                this.wsClient.updateState({ 
+                    chainLength: this.chain.getLength(),
+                    chainEpoch: this.chainEpoch 
+                });
+                console.log(`📤 Updated relay server with epoch ${this.chainEpoch}`);
+            }
         }
         
         // Start heartbeat
@@ -144,33 +154,16 @@ class Network {
                 
                 // Peer joined the network
                 onPeerJoined: (nodeId, info) => {
-                    console.log(`🟢 Peer joined: ${nodeId}`);
+                    const serverEpoch = info.chainEpoch || 1;
+                    console.log(`🟢 Peer joined: ${nodeId} (server epoch: ${serverEpoch})`);
                     
-                    // Check epoch compatibility - default to epoch 1 for peers that don't provide one
-                    const peerEpoch = (info.chainEpoch !== undefined && info.chainEpoch !== null) 
-                        ? info.chainEpoch 
-                        : 1;
-                    
-                    if (peerEpoch !== this.chainEpoch) {
-                        console.warn(`⚠️ Peer ${nodeId} has different epoch (${peerEpoch} vs ${this.chainEpoch}), ignoring`);
-                        this.rejectedPeerCount++;
-                        return;
-                    }
-                    
-                    this.compatiblePeerCount++;
-                    this.peerInfo.set(nodeId, {
-                        chainLength: info.chainLength || 0,
-                        chainEpoch: peerEpoch,
-                        isOnline: true,
-                        lastSeen: Date.now()
-                    });
-                    
-                    if (this.onPresenceUpdate) {
-                        this.onPresenceUpdate(nodeId, { isOnline: true, lastSeen: Date.now() });
-                    }
-                    
-                    // Send HELLO to new peer
+                    // ALWAYS send HELLO to discover actual epoch
+                    // Server's epoch info might be stale (registered before chain creation)
+                    // The real epoch check happens in handleHello() based on HELLO response
                     this.sendHello(nodeId);
+                    
+                    // Don't add to peerInfo yet - wait for HELLO response to verify epoch
+                    // (handleHello will add verified peers)
                 },
                 
                 // Peer left the network
@@ -187,56 +180,38 @@ class Network {
                 
                 // Initial peer list received
                 onPeersUpdated: (peers) => {
-                    // Update presence for all peers
-                    for (const peer of peers) {
-                        // Default to epoch 1 for peers that don't provide one
-                        const peerEpoch = (peer.chainEpoch !== undefined && peer.chainEpoch !== null) 
-                            ? peer.chainEpoch 
-                            : 1;
-                        
-                        if (peerEpoch !== this.chainEpoch) {
-                            continue; // Skip incompatible peers
-                        }
-                        
-                        this.peerInfo.set(peer.nodeId, {
-                            chainLength: peer.chainLength || 0,
-                            chainEpoch: peerEpoch,
-                            isOnline: true,
-                            lastSeen: Date.now()
-                        });
-                        
-                        if (this.onPresenceUpdate) {
-                            this.onPresenceUpdate(peer.nodeId, { isOnline: true, lastSeen: Date.now() });
-                        }
-                    }
+                    // Don't pre-filter by epoch - server data might be stale
+                    // Epoch verification happens via HELLO exchange
+                    // This callback is just for tracking who's online at the transport level
+                    console.log(`📋 Peer list updated: ${peers.length} peers on relay`);
                 },
                 
                 // Connected to relay server
                 onConnected: (peerIds) => {
-                    console.log(`✅ Connected to relay. ${peerIds.length} peers online.`);
+                    console.log(`✅ Connected to relay. ${peerIds.length} peers on server.`);
                     console.log(`📊 Our chain epoch: ${this.chainEpoch}`);
                     
-                    // Send HELLO to all peers
+                    // Send HELLO to ALL peers - let handleHello filter by actual epoch
+                    console.log(`📤 Sending HELLO to ${peerIds.length} peers...`);
                     for (const peerId of peerIds) {
                         this.sendHello(peerId);
                     }
                     
                     // Request sync from peers with longer chains after a delay
-                    // (gives time for HELLO responses to populate peerInfo with epoch data)
+                    // (gives time for HELLO responses to populate peerInfo with verified epoch data)
                     setTimeout(() => {
-                        // Now count compatible peers after HELLO exchange
+                        const verifiedPeers = this.peerInfo.size;
                         const compatibleCount = Array.from(this.peerInfo.values())
                             .filter(info => info.chainEpoch === this.chainEpoch && info.isOnline).length;
-                        const totalPeers = this.peerInfo.size;
                         
-                        console.log(`📊 Compatible peers after HELLO: ${compatibleCount}/${totalPeers} (epoch ${this.chainEpoch})`);
+                        console.log(`📊 After HELLO exchange: ${compatibleCount} compatible peers (${verifiedPeers} verified, ${peerIds.length} total on relay)`);
                         
-                        if (compatibleCount === 0 && totalPeers > 0) {
-                            console.warn(`⚠️ No compatible peers! ${this.rejectedPeerCount} peers rejected for epoch mismatch.`);
+                        if (compatibleCount === 0) {
+                            console.warn(`⚠️ No compatible peers found with epoch ${this.chainEpoch}`);
                         }
                         
                         this.syncWithBestPeer();
-                    }, 1000);
+                    }, 2000); // Increased to 2 seconds for HELLO exchange
                 },
                 
                 // Disconnected from relay server
