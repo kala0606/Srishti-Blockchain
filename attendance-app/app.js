@@ -14,15 +14,52 @@ class AttendanceAppUI {
 
     async init() {
         try {
-            // Wait for blockchain to be available
-            if (!window.SrishtiApp) {
-                throw new Error('Srishti blockchain not loaded. Check script loading.');
+            // Log domain information for debugging
+            console.log('🌐 Attendance App Domain:', window.location.hostname);
+            console.log('🌐 Blockchain URL:', window.SRISHTI_BLOCKCHAIN_URL);
+            console.log('🔑 LocalStorage credentials check:');
+            console.log('  - nodeId:', localStorage.getItem('srishti_node_id'));
+            console.log('  - nodeName:', localStorage.getItem('srishti_node_name'));
+            console.log('  - hasPublicKey:', !!localStorage.getItem('srishti_public_key'));
+            console.log('  - hasPrivateKey:', !!localStorage.getItem('srishti_private_key'));
+
+            // Wait for blockchain instance to be available
+            if (!window.srishtiAppInstance) {
+                throw new Error('Srishti blockchain instance not loaded. Check script loading.');
             }
 
-            // Initialize Srishti blockchain (reuse existing app initialization)
-            this.srishtiApp = window.SrishtiApp;
+            // Use the existing instance (which should have credentials loaded)
+            this.srishtiApp = window.srishtiAppInstance;
+
+            console.log('🔍 SrishtiApp instance check:');
+            console.log('  - initialized:', this.srishtiApp.initialized);
+            console.log('  - nodeId:', this.srishtiApp.nodeId);
+            console.log('  - hasKeyPair:', !!this.srishtiApp.keyPair);
+
+            // If not initialized, initialize it
             if (!this.srishtiApp.initialized) {
                 await this.srishtiApp.init();
+            }
+
+            // CRITICAL: Wait for credentials to be loaded from localStorage
+            // The main app.js loads credentials during init(), but it's async
+            let credentialWaitRetries = 0;
+            const hasStoredCredentials = localStorage.getItem('srishti_node_id') &&
+                localStorage.getItem('srishti_public_key') &&
+                localStorage.getItem('srishti_private_key');
+
+            if (hasStoredCredentials && !this.srishtiApp.nodeId) {
+                console.log('⏳ Waiting for SrishtiApp to load credentials from localStorage...');
+                while (!this.srishtiApp.nodeId && credentialWaitRetries < 20) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    credentialWaitRetries++;
+                }
+
+                if (this.srishtiApp.nodeId) {
+                    console.log('✅ Credentials loaded:', this.srishtiApp.nodeId);
+                } else {
+                    console.warn('⚠️ Credentials not loaded after waiting. May need manual login.');
+                }
             }
 
             // Wait for chain to be available (chain is always created)
@@ -638,7 +675,7 @@ function showTab(tabName) {
 let attendanceApp;
 
 function initAttendanceApp() {
-    if (!window.SrishtiApp || !window.srishtiAppInstance) {
+    if (!window.srishtiAppInstance) {
         // Wait a bit more for blockchain to initialize
         setTimeout(initAttendanceApp, 500);
         return;
