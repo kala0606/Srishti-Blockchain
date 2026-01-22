@@ -399,6 +399,13 @@
             margin-top: 4px;
         }
 
+        /* Parent select dropdown styling */
+        #parent-select option {
+            background: #1a1a2e;
+            color: #fff;
+            padding: 10px;
+        }
+
         /* Floating Action Buttons */
         .fab-container {
             position: fixed;
@@ -1074,6 +1081,88 @@
                 left: 16px;
                 min-width: auto;
                 max-width: none;
+            }
+        }
+
+        /* Chain Status Indicator - shows when behind or syncing */
+        .chain-status-indicator {
+            position: fixed;
+            top: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(251, 191, 36, 0.15);
+            border: 1px solid rgba(251, 191, 36, 0.4);
+            border-radius: 12px;
+            padding: 10px 18px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            z-index: 150;
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+            animation: fadeIn 0.3s ease;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .chain-status-indicator:hover {
+            background: rgba(251, 191, 36, 0.25);
+            transform: translateX(-50%) scale(1.02);
+        }
+
+        .chain-status-indicator.syncing {
+            background: rgba(96, 165, 250, 0.15);
+            border-color: rgba(96, 165, 250, 0.4);
+        }
+
+        .chain-status-indicator.synced {
+            background: rgba(52, 211, 153, 0.15);
+            border-color: rgba(52, 211, 153, 0.4);
+        }
+
+        .chain-status-icon {
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #FBBF24;
+        }
+
+        .chain-status-indicator.syncing .chain-status-icon {
+            color: #60A5FA;
+            animation: spin 1.5s linear infinite;
+        }
+
+        .chain-status-indicator.synced .chain-status-icon {
+            color: #34D399;
+        }
+
+        .chain-status-text {
+            font-family: 'Outfit', sans-serif;
+            font-size: 0.85em;
+            color: rgba(255, 255, 255, 0.9);
+            font-weight: 500;
+        }
+
+        .chain-status-action {
+            font-size: 0.75em;
+            color: rgba(255, 255, 255, 0.6);
+            padding-left: 8px;
+            border-left: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        @media (max-width: 768px) {
+            .chain-status-indicator {
+                top: 80px;
+                left: 16px;
+                right: 16px;
+                transform: none;
+                justify-content: center;
+            }
+            .chain-status-indicator:hover {
+                transform: scale(1.02);
             }
         }
 
@@ -2303,6 +2392,33 @@
                 <p class="parent-name" id="parent-name-display">...</p>
             </div>
             
+            <!-- Parent selection when joining without QR code -->
+            <div id="select-parent-section" class="join-info" style="display: none;">
+                <p style="margin-bottom: 12px;">Choose who to join under:</p>
+                <select id="parent-select" style="
+                    width: 100%;
+                    padding: 12px 16px;
+                    background: rgba(255, 255, 255, 0.05);
+                    border: 1px solid rgba(255, 255, 255, 0.15);
+                    border-radius: 12px;
+                    color: #fff;
+                    font-size: 1em;
+                    font-family: 'Outfit', sans-serif;
+                    cursor: pointer;
+                    appearance: none;
+                    -webkit-appearance: none;
+                    background-image: url('data:image/svg+xml;utf8,<svg fill=\"white\" height=\"24\" viewBox=\"0 0 24 24\" width=\"24\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M7 10l5 5 5-5z\"/></svg>');
+                    background-repeat: no-repeat;
+                    background-position: right 12px center;
+                    background-size: 20px;
+                ">
+                    <option value="">Select a node...</option>
+                </select>
+                <p style="margin-top: 10px; font-size: 0.85em; opacity: 0.6;">
+                    💡 Tip: Scan someone's QR code to join directly under them
+                </p>
+            </div>
+            
             <div class="onboarding-input-group">
                 <label for="user-name">YOUR NAME</label>
                 <input type="text" id="user-name" class="onboarding-input" 
@@ -2499,6 +2615,17 @@
             <span class="stat-value" id="online-nodes">0</span>
             <span class="stat-label">online</span>
         </div>
+    </div>
+
+    <!-- Chain Status Indicator (behind/syncing) -->
+    <div id="chain-status-indicator" class="chain-status-indicator" style="display: none;" onclick="triggerManualSync()">
+        <div class="chain-status-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
+            </svg>
+        </div>
+        <span class="chain-status-text" id="chain-status-text">Chain behind</span>
+        <span class="chain-status-action">Tap to sync</span>
     </div>
 
     <!-- Sync Progress Bar -->
@@ -4568,11 +4695,22 @@
                 document.getElementById('dash-genesis-hash').textContent = genesis.hash.substring(0, 16) + '...';
             }
             
-            // Network status
-            const isOnline = window.SrishtiApp.network && window.SrishtiApp.network.signaling;
-            const peerCount = window.SrishtiApp.network ? window.SrishtiApp.network.getPeerCount() : 0;
-            document.getElementById('dash-network-status').textContent = 
-                isOnline ? `🟢 Online (${peerCount} peer${peerCount !== 1 ? 's' : ''})` : '🔴 Offline';
+            // Network status - check actual connection state
+            const network = window.SrishtiApp?.network;
+            const signalingConnected = network?.signaling?.isConnected?.() || false;
+            const peerCount = network?.getPeerCount?.() || 0;
+            
+            let networkStatusText;
+            if (signalingConnected && peerCount > 0) {
+                networkStatusText = `🟢 Online (${peerCount} peer${peerCount !== 1 ? 's' : ''})`;
+            } else if (signalingConnected) {
+                networkStatusText = '🟡 Connected (no peers)';
+            } else if (network) {
+                networkStatusText = '🟠 Connecting...';
+            } else {
+                networkStatusText = '🔴 Offline';
+            }
+            document.getElementById('dash-network-status').textContent = networkStatusText;
         }
         
         function findUserBlockIndex(nodeId) {
@@ -4599,32 +4737,93 @@
             const modal = document.getElementById('onboarding-modal');
             const joinInfo = document.getElementById('join-parent-info');
             const parentDisplay = document.getElementById('parent-name-display');
+            const selectParentSection = document.getElementById('select-parent-section');
+            const parentSelect = document.getElementById('parent-select');
             const joinBtn = document.getElementById('join-btn');
             const nameInput = document.getElementById('user-name');
             const recoverBtn = document.getElementById('recover-node-btn');
             
-            // Check if joining under a parent
+            // Get existing nodes for parent selection
+            const existingNodes = Object.values(nodesData).filter(n => !n.isVirtualRoot);
+            const hasExistingNodes = existingNodes.length > 0;
+            
+            // Check if joining under a specific parent (from QR code)
             if (parentId && nodesData[parentId]) {
                 joinInfo.style.display = 'block';
                 parentDisplay.textContent = nodesData[parentId].name || 'A node';
-            } else {
+                selectParentSection.style.display = 'none';
+                modal.dataset.parentId = parentId;
+            } else if (hasExistingNodes) {
+                // No QR parent but there are nodes - show parent selection
                 joinInfo.style.display = 'none';
+                selectParentSection.style.display = 'block';
+                
+                // Populate parent select dropdown
+                parentSelect.innerHTML = '<option value="">Select a node to join under...</option>';
+                
+                // Sort nodes: ROOT first, then by name
+                const sortedNodes = [...existingNodes].sort((a, b) => {
+                    const roleA = window.SrishtiApp?.chain?.state?.nodeRoles?.[a.id] || 'USER';
+                    const roleB = window.SrishtiApp?.chain?.state?.nodeRoles?.[b.id] || 'USER';
+                    if (roleA === 'ROOT' && roleB !== 'ROOT') return -1;
+                    if (roleB === 'ROOT' && roleA !== 'ROOT') return 1;
+                    return (a.name || '').localeCompare(b.name || '');
+                });
+                
+                sortedNodes.forEach(node => {
+                    const role = window.SrishtiApp?.chain?.state?.nodeRoles?.[node.id] || 'USER';
+                    const roleLabel = role === 'ROOT' ? ' 👑 (Root)' : role === 'INSTITUTION' ? ' 🏛️' : '';
+                    const option = document.createElement('option');
+                    option.value = node.id;
+                    option.textContent = `${node.name || 'Unknown'}${roleLabel}`;
+                    parentSelect.appendChild(option);
+                });
+                
+                // Auto-select root node if exists
+                const rootNode = sortedNodes.find(n => 
+                    window.SrishtiApp?.chain?.state?.nodeRoles?.[n.id] === 'ROOT'
+                );
+                if (rootNode) {
+                    parentSelect.value = rootNode.id;
+                    modal.dataset.parentId = rootNode.id;
+                } else {
+                    modal.dataset.parentId = '';
+                }
+                
+                // Update parentId when selection changes
+                parentSelect.onchange = () => {
+                    modal.dataset.parentId = parentSelect.value;
+                    updateJoinButtonState();
+                };
+            } else {
+                // No nodes at all - this will be the first/genesis node
+                joinInfo.style.display = 'none';
+                selectParentSection.style.display = 'none';
+                modal.dataset.parentId = '';
             }
             
-            // Store parent ID for later
-            modal.dataset.parentId = parentId || '';
-            
-            // Enable/disable button based on input
+            // Enable/disable button based on input AND parent selection
             nameInput.value = '';
-            joinBtn.disabled = true;
             
-            nameInput.oninput = () => {
-                joinBtn.disabled = nameInput.value.trim().length < 2;
+            const updateJoinButtonState = () => {
+                const nameValid = nameInput.value.trim().length >= 2;
+                const parentValid = !hasExistingNodes || modal.dataset.parentId;
+                joinBtn.disabled = !nameValid || !parentValid;
             };
+            
+            updateJoinButtonState();
+            
+            nameInput.oninput = updateJoinButtonState;
             
             joinBtn.onclick = async () => {
                 const name = nameInput.value.trim();
                 if (name.length < 2) return;
+                
+                // Validate parent selection if nodes exist
+                if (hasExistingNodes && !modal.dataset.parentId) {
+                    alert('Please select a node to join under, or scan a QR code.');
+                    return;
+                }
                 
                 joinBtn.disabled = true;
                 joinBtn.innerHTML = `
@@ -4721,32 +4920,66 @@
                     console.log('✅ Network initialized for recovery');
                 }
                 
-                // Wait for sync with peers (give it time to connect and sync)
+                // Wait for sync with peers - smarter waiting based on actual node data
                 console.log('⏳ Waiting for network sync...');
                 let syncAttempts = 0;
-                const maxSyncAttempts = 20; // 10 seconds max wait
+                const maxSyncAttempts = 40; // 20 seconds max wait (increased)
+                let lastNodeCount = 0;
+                let stableCount = 0;
+                
+                // Update loading message
+                const updateRecoveryStatus = (msg) => {
+                    const loadingText = loadingMsg.querySelector('p');
+                    if (loadingText) loadingText.textContent = msg;
+                };
                 
                 while (syncAttempts < maxSyncAttempts) {
-                    const connectedPeers = window.SrishtiApp.network.getPeerCount();
+                    const connectedPeers = window.SrishtiApp.network.getPeerCount?.() || 0;
                     const chainLength = window.SrishtiApp.chain.getLength();
+                    const nodeMap = window.SrishtiApp.chain.buildNodeMap();
+                    const nodeCount = Object.keys(nodeMap).length;
                     
-                    console.log(`🔄 Sync attempt ${syncAttempts + 1}/${maxSyncAttempts}: peers=${connectedPeers}, chain=${chainLength}`);
-                    
-                    // If we have peers and chain has data, we're synced
-                    if (connectedPeers > 0 && chainLength > 0) {
-                        console.log('✅ Network sync complete');
-                        break;
+                    // Check if chain is stable (node count not changing)
+                    if (nodeCount === lastNodeCount && nodeCount > 0) {
+                        stableCount++;
+                    } else {
+                        stableCount = 0;
+                        lastNodeCount = nodeCount;
                     }
                     
-                    // If we have chain data even without peers, that's okay too
-                    if (chainLength > 0) {
-                        console.log('✅ Have chain data, proceeding...');
+                    // Update sync status in global var for recovery modal
+                    window._guestSyncStatus = {
+                        complete: stableCount >= 5,
+                        nodeCount: nodeCount,
+                        chainLength: chainLength,
+                        connectedPeers: connectedPeers
+                    };
+                    
+                    const statusMsg = connectedPeers > 0 
+                        ? `Syncing... ${nodeCount} nodes, ${connectedPeers} peer${connectedPeers > 1 ? 's' : ''}`
+                        : `Loading... ${nodeCount} nodes`;
+                    
+                    console.log(`🔄 Sync ${syncAttempts + 1}/${maxSyncAttempts}: ${statusMsg}`);
+                    updateRecoveryStatus(statusMsg);
+                    
+                    // Success conditions:
+                    // 1. We have nodes and chain has been stable for a while
+                    // 2. We have peers, nodes, and chain length indicates we're synced
+                    if ((nodeCount > 0 && stableCount >= 5) || 
+                        (connectedPeers > 0 && nodeCount > 0 && chainLength > 1 && stableCount >= 3)) {
+                        console.log('✅ Network sync complete');
+                        updateRecoveryStatus(`Synced ${nodeCount} nodes!`);
                         break;
                     }
                     
                     await new Promise(resolve => setTimeout(resolve, 500));
                     syncAttempts++;
                 }
+                
+                // Final node count check
+                const finalNodeMap = window.SrishtiApp.chain.buildNodeMap();
+                const finalNodeCount = Object.keys(finalNodeMap).length;
+                console.log(`📊 Final state: ${finalNodeCount} nodes in chain`);
                 
                 // Step 2: Search the synced chain for a node with matching phrase hash
                 console.log('🔍 Step 2: Searching chain for recovery phrase...');
@@ -4769,8 +5002,36 @@
                 
                 if (!foundNode) {
                     // Recovery phrase doesn't match any known node
-                    console.error('❌ Recovery phrase not found in network');
-                    alert(`Recovery phrase not found in the network.\n\nThis could mean:\n- The phrase was entered incorrectly\n- The node hasn't been added to the blockchain yet\n- You're on a different network/fork\n\nPlease verify your recovery phrase and try again, or join as a new node.`);
+                    const syncStatus = window._guestSyncStatus || {};
+                    const searchedNodes = Object.keys(nodes).length;
+                    const connectedPeers = syncStatus.connectedPeers || 0;
+                    
+                    console.error(`❌ Recovery phrase not found (searched ${searchedNodes} nodes)`);
+                    
+                    // Provide more helpful error message based on sync state
+                    let errorMsg = `Recovery phrase not found.\n\n`;
+                    
+                    if (searchedNodes === 0) {
+                        errorMsg += `⚠️ No nodes have been synced yet!\n\n`;
+                        errorMsg += `Please wait for the network to sync:\n`;
+                        errorMsg += `• Make sure you have an internet connection\n`;
+                        errorMsg += `• Wait for nodes to appear in the visualization\n`;
+                        errorMsg += `• Then try recovery again\n`;
+                    } else if (searchedNodes < 5 || connectedPeers === 0) {
+                        errorMsg += `⚠️ Only ${searchedNodes} node${searchedNodes > 1 ? 's' : ''} synced so far.\n\n`;
+                        errorMsg += `Your node may not have synced yet. Try:\n`;
+                        errorMsg += `• Waiting a few more moments for sync to complete\n`;
+                        errorMsg += `• Checking your network connection\n`;
+                        errorMsg += `• Trying again in 30 seconds\n`;
+                    } else {
+                        errorMsg += `Searched ${searchedNodes} nodes but no match found.\n\n`;
+                        errorMsg += `This could mean:\n`;
+                        errorMsg += `• The phrase was entered incorrectly\n`;
+                        errorMsg += `• The node was created on a different network\n`;
+                        errorMsg += `• The node hasn't been synced from all peers\n`;
+                    }
+                    
+                    alert(errorMsg);
                     return;
                 }
                 
@@ -4963,23 +5224,51 @@
             if (!indicator) return;
             
             const isMobile = window.innerWidth <= 768;
+            const syncStatus = window._guestSyncStatus || {};
+            const nodeCount = syncStatus.nodeCount || 0;
             
-            // Show checkmark briefly then transition to clickable state
+            // Show checkmark with node count
+            const loadedMessage = nodeCount > 0 
+                ? `${nodeCount} node${nodeCount > 1 ? 's' : ''} loaded!`
+                : 'Ready!';
+            
             indicator.innerHTML = `
                 <svg class="guest-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                     <polyline points="20 6 9 17 4 12"></polyline>
                 </svg>
-                <span>Blockchain loaded!</span>
+                <span>${loadedMessage}</span>
             `;
             
             // After a moment, show the join button
             setTimeout(() => {
                 indicator.classList.remove('loading');
-                indicator.innerHTML = isMobile 
-                    ? '👁️ Guest • Tap to join'
-                    : '👁️ Viewing as Guest <span style="opacity: 0.7; margin-left: 8px;">• Click to join</span>';
                 
+                // Build the content with sync indicator if still syncing in background
+                const buildContent = (mobile) => {
+                    const stillSyncing = isBlockchainSyncing();
+                    const syncDot = stillSyncing 
+                        ? '<span class="sync-pulse" style="display: inline-block; width: 6px; height: 6px; background: #60A5FA; border-radius: 50%; margin-left: 6px;"></span>'
+                        : '';
+                    
+                    if (mobile) {
+                        return `👁️ Guest • Tap to join${syncDot}`;
+                    }
+                    return `👁️ Viewing as Guest${syncDot} <span style="opacity: 0.7; margin-left: 8px;">• Click to join</span>`;
+                };
+                
+                indicator.innerHTML = buildContent(isMobile);
                 indicator.style.cursor = 'pointer';
+                
+                // Update sync indicator periodically
+                const syncCheckInterval = setInterval(() => {
+                    if (!document.getElementById('guest-indicator')) {
+                        clearInterval(syncCheckInterval);
+                        return;
+                    }
+                    const nowMobile = window.innerWidth <= 768;
+                    indicator.innerHTML = buildContent(nowMobile);
+                }, 3000);
+                indicator._syncInterval = syncCheckInterval;
                 
                 // Add hover effects
                 indicator.onmouseenter = () => {
@@ -5017,6 +5306,9 @@
                     if (indicator._resizeHandler) {
                         window.removeEventListener('resize', indicator._resizeHandler);
                     }
+                    if (indicator._syncInterval) {
+                        clearInterval(indicator._syncInterval);
+                    }
                     indicator.remove();
                 };
             }, 1200);
@@ -5029,66 +5321,113 @@
         async function waitForGuestSync() {
             return new Promise((resolve) => {
                 const startTime = Date.now();
-                const maxWaitTime = 8000; // 8 seconds max wait
-                const minWaitTime = 1500; // Minimum time to show loading for better UX
+                const maxWaitTime = 15000; // 15 seconds max wait (increased for better sync)
+                const minWaitTime = 2000;  // Minimum time to show loading for better UX
+                const nodeWaitTime = 5000; // Wait at least 5s if we're connecting to peers
                 
                 let lastChainLength = window.SrishtiApp?.chain?.getLength() || 0;
+                let lastNodeCount = 0;
                 let stableCount = 0;
-                const stableThreshold = 3; // Chain needs to be stable for 3 checks
+                const stableThreshold = 5; // Chain needs to be stable for 5 checks (~2s)
+                let hadPeersAtSomePoint = false;
                 
                 const checkSync = () => {
                     const elapsed = Date.now() - startTime;
                     const chainLength = window.SrishtiApp?.chain?.getLength() || 0;
                     const connectedPeers = window.SrishtiApp?.network?.peers?.size || 0;
                     const isSignalingConnected = window.SrishtiApp?.network?.signaling?.isConnected?.() || false;
+                    const availablePeers = window.SrishtiApp?.network?.signaling?.availablePeers?.length || 0;
+                    
+                    // Count actual nodes in chain (excluding genesis/virtual)
+                    const nodeMap = window.SrishtiApp?.chain?.buildNodeMap?.() || {};
+                    const nodeCount = Object.keys(nodeMap).length;
+                    
+                    // Track if we ever had peers (means network is active)
+                    if (connectedPeers > 0 || availablePeers > 0) {
+                        hadPeersAtSomePoint = true;
+                    }
                     
                     // Calculate progress based on different stages
-                    let progress = 30;
-                    let message = 'Syncing blockchain...';
+                    let progress = 10;
+                    let message = 'Connecting to network...';
                     
                     if (isSignalingConnected) {
-                        progress = 40;
-                        message = 'Connected to network...';
+                        progress = 20;
+                        message = 'Looking for peers...';
+                    }
+                    
+                    if (availablePeers > 0) {
+                        progress = 30;
+                        message = `Found ${availablePeers} peer${availablePeers > 1 ? 's' : ''}, connecting...`;
                     }
                     
                     if (connectedPeers > 0) {
-                        progress = 60;
-                        message = `Found ${connectedPeers} peer${connectedPeers > 1 ? 's' : ''}...`;
+                        progress = 50;
+                        message = `Connected to ${connectedPeers} peer${connectedPeers > 1 ? 's' : ''}, syncing...`;
                     }
                     
-                    if (chainLength > 0) {
-                        progress = 70 + Math.min(25, chainLength * 5);
-                        message = `Loading ${chainLength} block${chainLength > 1 ? 's' : ''}...`;
+                    if (chainLength > 1) {
+                        progress = 60 + Math.min(20, chainLength * 2);
+                        message = `Syncing... ${chainLength} blocks`;
                     }
                     
-                    // Check if chain is stable (not receiving new blocks)
-                    if (chainLength === lastChainLength && chainLength > 0) {
+                    if (nodeCount > 0) {
+                        progress = 80 + Math.min(15, nodeCount * 3);
+                        message = `Loading ${nodeCount} node${nodeCount > 1 ? 's' : ''}...`;
+                    }
+                    
+                    // Check if chain/nodes are stable (not receiving new data)
+                    if (chainLength === lastChainLength && nodeCount === lastNodeCount && nodeCount > 0) {
                         stableCount++;
                     } else {
                         stableCount = 0;
                         lastChainLength = chainLength;
+                        lastNodeCount = nodeCount;
                     }
                     
                     updateGuestLoadingProgress(progress, message);
                     
-                    // Sync complete conditions:
-                    // 1. Chain is stable (no new blocks for a few checks) after min wait
-                    // 2. Max wait time exceeded
-                    // 3. We have chain data and signaling connection timed out
-                    
-                    const isStable = stableCount >= stableThreshold && elapsed >= minWaitTime;
+                    // Sync complete conditions with smarter logic:
+                    const hasNodes = nodeCount > 0;
+                    const isStable = stableCount >= stableThreshold;
+                    const pastMinWait = elapsed >= minWaitTime;
+                    const pastNodeWait = elapsed >= nodeWaitTime;
                     const timedOut = elapsed >= maxWaitTime;
-                    const hasLocalData = chainLength > 0 && elapsed >= minWaitTime && !isSignalingConnected;
                     
-                    if (isStable || timedOut || hasLocalData) {
-                        updateGuestLoadingProgress(100, 'Ready!');
+                    // Don't finish too early if we're actively connecting/syncing
+                    const stillConnecting = (availablePeers > 0 && connectedPeers === 0 && elapsed < nodeWaitTime);
+                    const stillSyncing = (connectedPeers > 0 && !isStable && elapsed < maxWaitTime - 3000);
+                    
+                    // Complete if:
+                    // 1. We have nodes, chain is stable, and past minimum wait
+                    // 2. Timed out completely
+                    // 3. We have nodes, no peers available (offline mode), past node wait time
+                    
+                    const syncComplete = (hasNodes && isStable && pastMinWait && !stillSyncing) ||
+                                        timedOut ||
+                                        (hasNodes && !hadPeersAtSomePoint && pastNodeWait);
+                    
+                    if (syncComplete) {
+                        // Store sync status for recovery modal to check
+                        window._guestSyncStatus = {
+                            complete: true,
+                            nodeCount: nodeCount,
+                            chainLength: chainLength,
+                            hadPeers: hadPeersAtSomePoint,
+                            connectedPeers: connectedPeers,
+                            timedOut: timedOut
+                        };
                         
-                        if (timedOut) {
-                            console.log(`⏰ Guest sync timeout - proceeding with ${chainLength} blocks`);
-                        } else if (hasLocalData) {
-                            console.log(`📦 Using local chain data - ${chainLength} blocks`);
+                        updateGuestLoadingProgress(100, hasNodes ? `${nodeCount} nodes loaded!` : 'Ready!');
+                        
+                        if (timedOut && !hasNodes) {
+                            console.log(`⏰ Guest sync timeout - no nodes found (chain: ${chainLength} blocks)`);
+                        } else if (timedOut) {
+                            console.log(`⏰ Guest sync timeout - ${nodeCount} nodes, ${chainLength} blocks`);
+                        } else if (!hadPeersAtSomePoint) {
+                            console.log(`📦 Offline mode - ${nodeCount} nodes from local storage`);
                         } else {
-                            console.log(`✅ Guest sync complete - ${chainLength} blocks from ${connectedPeers} peers`);
+                            console.log(`✅ Guest sync complete - ${nodeCount} nodes, ${chainLength} blocks from ${connectedPeers} peers`);
                         }
                         
                         resolve();
@@ -5099,10 +5438,182 @@
                     setTimeout(checkSync, 400);
                 };
                 
+                // Initialize sync status
+                window._guestSyncStatus = { complete: false, nodeCount: 0 };
+                
                 // Start checking after a brief delay
                 setTimeout(checkSync, 300);
             });
         }
+        
+        /**
+         * Check if blockchain is still actively syncing
+         * @returns {boolean}
+         */
+        function isBlockchainSyncing() {
+            const status = window._guestSyncStatus;
+            if (!status || !status.complete) return true;
+            
+            // Also check if new blocks are coming in
+            const currentLength = window.SrishtiApp?.chain?.getLength() || 0;
+            const nodeMap = window.SrishtiApp?.chain?.buildNodeMap?.() || {};
+            const currentNodes = Object.keys(nodeMap).length;
+            
+            // If we have more data now than when sync "completed", we're still syncing
+            if (currentNodes > status.nodeCount || currentLength > status.chainLength) {
+                return true;
+            }
+            
+            return false;
+        }
+        
+        // Make it globally accessible for Recovery.js
+        window.isBlockchainSyncing = isBlockchainSyncing;
+        
+        // Track known peer chain lengths for "behind" detection
+        let knownPeerChainLength = 0;
+        let lastSyncTime = 0;
+        let syncInProgress = false;
+        
+        /**
+         * Update chain status indicator (behind/syncing/synced)
+         */
+        function updateChainStatus() {
+            const indicator = document.getElementById('chain-status-indicator');
+            const statusText = document.getElementById('chain-status-text');
+            if (!indicator || !statusText) return;
+            
+            const ourLength = window.SrishtiApp?.chain?.getLength() || 0;
+            const network = window.SrishtiApp?.network;
+            
+            // Check if we're actively syncing
+            if (syncInProgress || network?.syncing) {
+                indicator.style.display = 'flex';
+                indicator.className = 'chain-status-indicator syncing';
+                statusText.textContent = `Syncing... ${ourLength} blocks`;
+                return;
+            }
+            
+            // Get peer chain lengths from network's peerInfo map
+            if (network && network.peerInfo) {
+                let maxPeerLength = ourLength;
+                for (const [peerId, info] of network.peerInfo) {
+                    if (info.chainLength && info.chainLength > maxPeerLength) {
+                        maxPeerLength = info.chainLength;
+                    }
+                }
+                knownPeerChainLength = Math.max(knownPeerChainLength, maxPeerLength);
+            }
+            
+            // Show indicator if behind
+            if (knownPeerChainLength > ourLength) {
+                const behind = knownPeerChainLength - ourLength;
+                indicator.style.display = 'flex';
+                indicator.className = 'chain-status-indicator';
+                statusText.textContent = `${behind} block${behind > 1 ? 's' : ''} behind (${ourLength}/${knownPeerChainLength})`;
+            } else if (indicator.style.display !== 'none' && !syncInProgress) {
+                // Show synced briefly then hide
+                indicator.className = 'chain-status-indicator synced';
+                statusText.textContent = `Synced (${ourLength} blocks)`;
+                setTimeout(() => {
+                    if (!syncInProgress && knownPeerChainLength <= ourLength) {
+                        indicator.style.display = 'none';
+                    }
+                }, 3000);
+            }
+        }
+        
+        /**
+         * Trigger manual sync with all connected peers
+         */
+        async function triggerManualSync() {
+            const network = window.SrishtiApp?.network;
+            const indicator = document.getElementById('chain-status-indicator');
+            const statusText = document.getElementById('chain-status-text');
+            
+            if (!network || !indicator) {
+                console.warn('⚠️ Network not available for sync');
+                return;
+            }
+            
+            if (syncInProgress) {
+                console.log('⏳ Sync already in progress');
+                return;
+            }
+            
+            syncInProgress = true;
+            lastSyncTime = Date.now();
+            
+            // Update UI
+            indicator.className = 'chain-status-indicator syncing';
+            statusText.textContent = 'Requesting sync...';
+            
+            console.log('🔄 Manual sync triggered');
+            
+            try {
+                // Request sync from all connected peers
+                const peers = Array.from(network.peers?.keys() || []);
+                if (peers.length === 0) {
+                    statusText.textContent = 'No peers connected';
+                    setTimeout(() => {
+                        syncInProgress = false;
+                        updateChainStatus();
+                    }, 2000);
+                    return;
+                }
+                
+                statusText.textContent = `Syncing from ${peers.length} peer${peers.length > 1 ? 's' : ''}...`;
+                
+                // Request sync from each peer
+                for (const peerId of peers) {
+                    await network.requestSync(peerId);
+                }
+                
+                // Wait for sync to complete (with timeout)
+                let syncWaitTime = 0;
+                const maxSyncWait = 15000; // 15 seconds max
+                
+                const waitForSync = setInterval(() => {
+                    syncWaitTime += 500;
+                    const currentLength = window.SrishtiApp?.chain?.getLength() || 0;
+                    
+                    if (currentLength >= knownPeerChainLength || syncWaitTime >= maxSyncWait) {
+                        clearInterval(waitForSync);
+                        syncInProgress = false;
+                        
+                        // Update known peer length
+                        knownPeerChainLength = currentLength;
+                        
+                        updateChainStatus();
+                        
+                        if (currentLength >= knownPeerChainLength) {
+                            console.log(`✅ Sync complete: ${currentLength} blocks`);
+                        } else {
+                            console.log(`⏰ Sync timeout: ${currentLength} blocks`);
+                        }
+                    } else {
+                        statusText.textContent = `Syncing... ${currentLength} blocks`;
+                    }
+                }, 500);
+                
+            } catch (error) {
+                console.error('Sync failed:', error);
+                syncInProgress = false;
+                statusText.textContent = 'Sync failed';
+                setTimeout(() => updateChainStatus(), 2000);
+            }
+        }
+        
+        // Make sync functions globally accessible
+        window.triggerManualSync = triggerManualSync;
+        window.updateChainStatus = updateChainStatus;
+        
+        // Periodically check chain status
+        setInterval(() => {
+            if (!syncInProgress) {
+                updateChainStatus();
+            }
+        }, 10000); // Check every 10 seconds
         
         function showQRModal() {
             const modal = document.getElementById('qr-modal');
@@ -5616,8 +6127,36 @@
                     console.log('🔄 Initializing network for returning user...');
                     await window.SrishtiApp.initNetwork(false); // false = not guest mode
                 } else if (window.SrishtiApp && !window.SrishtiApp.network && window.SrishtiApp.nodeId && !window.SrishtiApp.keyPair) {
-                    // Node ID exists but no key pair (recovery scenario) - stay in guest mode for network
-                    console.log(`ℹ️ Node ID exists (${window.SrishtiApp.nodeId}) but no private key - network will remain in guest mode for P2P`);
+                    // Node ID exists but no key pair (recovery scenario)
+                    // Initialize network in guest mode so they can still sync blockchain
+                    console.log(`ℹ️ Node ID exists (${window.SrishtiApp.nodeId}) but no private key - initializing network in guest mode for sync`);
+                    try {
+                        await window.SrishtiApp.initNetwork(true); // true = guest mode for sync
+                        console.log('✅ Guest mode network initialized for returning user (read-only)');
+                        
+                        // Show chain status indicator to let them know they may need to sync
+                        setTimeout(() => {
+                            updateChainStatus();
+                            // Show the indicator briefly to let them know sync is happening
+                            const indicator = document.getElementById('chain-status-indicator');
+                            if (indicator) {
+                                indicator.style.display = 'flex';
+                                indicator.className = 'chain-status-indicator syncing';
+                                document.getElementById('chain-status-text').textContent = 'Syncing blockchain...';
+                            }
+                        }, 1000);
+                    } catch (error) {
+                        console.warn('⚠️ Failed to initialize guest network for returning user:', error);
+                    }
+                } else if (window.SrishtiApp && !window.SrishtiApp.network) {
+                    // No network and no node - try guest mode anyway for chain sync
+                    console.log('🔄 No network detected, initializing guest mode for sync...');
+                    try {
+                        await window.SrishtiApp.initNetwork(true);
+                        console.log('✅ Guest mode network initialized');
+                    } catch (error) {
+                        console.warn('⚠️ Guest network initialization failed:', error);
+                    }
                 }
                 
                 // Mark ourselves as online
@@ -5710,6 +6249,20 @@
             
             // Start animation
             animate();
+            
+            // Check chain status after a brief delay (allows sync to start)
+            setTimeout(() => {
+                updateChainStatus();
+                // If we have a network, trigger initial sync check
+                if (window.SrishtiApp?.network && currentUser) {
+                    const peers = Array.from(window.SrishtiApp.network.peers?.keys() || []);
+                    if (peers.length > 0) {
+                        console.log(`📡 Initial sync check with ${peers.length} peer(s)`);
+                        // Request sync from first peer to check if we're behind
+                        window.SrishtiApp.network.requestSync(peers[0]);
+                    }
+                }
+            }, 3000);
             
             // Update glows every 5 seconds
             setInterval(updateNodeGlows, 5000);

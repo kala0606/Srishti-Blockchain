@@ -524,8 +524,21 @@ class SrishtiApp {
                 if (syncBar) {
                     syncBar.style.display = 'none';
                 }
+                // Update chain status indicator
+                if (typeof window.updateChainStatus === 'function') {
+                    window.updateChainStatus();
+                }
             }, 500);
             return;
+        }
+        
+        // Update chain status indicator when sync completes
+        if (progressData.status === 'complete') {
+            setTimeout(() => {
+                if (typeof window.updateChainStatus === 'function') {
+                    window.updateChainStatus();
+                }
+            }, 1000);
         }
         
         // Show the sync bar
