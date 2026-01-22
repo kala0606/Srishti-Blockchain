@@ -5894,7 +5894,7 @@
                 if (window.SrishtiApp && window.SrishtiApp.isGuest && window.SrishtiApp.network) {
                     console.log('🔄 Disconnecting guest network to join with real identity...');
                     try {
-                        window.SrishtiApp.network.disconnect();
+                        window.SrishtiApp.network.close();
                     } catch (e) {
                         console.warn('Error disconnecting guest network:', e);
                     }
@@ -6118,7 +6118,7 @@
                     console.log('🔄 Disconnecting guest network for returning user...');
                     if (window.SrishtiApp.network) {
                         try {
-                            window.SrishtiApp.network.disconnect();
+                            window.SrishtiApp.network.close();
                         } catch (e) {
                             console.warn('Error disconnecting guest network:', e);
                         }
