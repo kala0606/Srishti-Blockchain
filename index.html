@@ -5943,6 +5943,7 @@
                 if (dappReturnUrl && window.SrishtiApp && window.SrishtiApp.keyPair && window.SrishtiApp.keyPair.privateKey && window.SrishtiSessionAuth) {
                     // User just created account and has a pending dApp redirect
                     try {
+                        console.log('✅ Generating session token for dApp after registration...');
                         const dAppOrigin = new URL(dappReturnUrl).origin;
                         const token = await window.SrishtiSessionAuth.generateToken(
                             nodeId,
@@ -5953,6 +5954,7 @@
                             }
                         );
                         
+                        console.log('✅ Session token generated, redirecting to dApp...');
                         sessionStorage.removeItem('dapp_return_url');
                         
                         // Redirect to dApp with token
@@ -5961,8 +5963,9 @@
                         window.location.href = returnUrlObj.toString();
                         return; // Exit early - redirecting
                     } catch (error) {
-                        console.error('Failed to generate session token for dApp:', error);
+                        console.error('❌ Failed to generate session token for dApp:', error);
                         sessionStorage.removeItem('dapp_return_url');
+                        alert('Failed to generate session token. Please try again.');
                     }
                 }
                 
@@ -6049,40 +6052,20 @@
                 console.log('✅ Wallet Provider initialized for dApp authentication');
             }
             
-            // Check for dApp login request
+            // Check for dApp login request (store for later processing after credentials are loaded)
             const urlParams = new URLSearchParams(window.location.search);
             const dappLogin = urlParams.get('dapp_login');
             const returnUrl = urlParams.get('return_url');
             
-            if (dappLogin === 'true' && returnUrl && window.SrishtiApp && window.SrishtiApp.nodeId && window.SrishtiApp.keyPair && window.SrishtiApp.keyPair.privateKey) {
-                // User is logged in - generate session token and redirect
-                try {
-                    if (window.SrishtiSessionAuth) {
-                        const dAppOrigin = new URL(returnUrl).origin;
-                        const token = await window.SrishtiSessionAuth.generateToken(
-                            window.SrishtiApp.nodeId,
-                            window.SrishtiApp.keyPair.privateKey,
-                            {
-                                expiresIn: 24 * 60 * 60, // 24 hours
-                                dAppOrigin: dAppOrigin
-                            }
-                        );
-                        
-                        // Redirect to dApp with token
-                        const returnUrlObj = new URL(returnUrl);
-                        returnUrlObj.searchParams.set('session_token', token);
-                        window.location.href = returnUrlObj.toString();
-                        return; // Exit early - redirecting
-                    }
-                } catch (error) {
-                    console.error('Failed to generate session token:', error);
-                    alert('Failed to generate session token. Please try again.');
-                }
-            } else if (dappLogin === 'true' && returnUrl) {
-                // User needs to log in first - they'll be redirected after login
-                console.log('dApp login requested, but user not logged in. Will redirect after login.');
-                // Store return URL for after login
+            if (dappLogin === 'true' && returnUrl) {
+                console.log('🔐 dApp login requested:', returnUrl);
+                // Store return URL - will process after credentials are loaded
                 sessionStorage.setItem('dapp_return_url', returnUrl);
+                // Clean up URL params
+                const cleanUrl = new URL(window.location.href);
+                cleanUrl.searchParams.delete('dapp_login');
+                cleanUrl.searchParams.delete('return_url');
+                window.history.replaceState({}, '', cleanUrl.toString());
             }
             
             // Check for join parameter in URL
@@ -6152,6 +6135,36 @@
             await new Promise(resolve => setTimeout(resolve, 300));
             loadingEl.style.display = 'none';
             
+            // Check for dApp redirect one more time after everything is loaded
+            // (in case credentials loaded asynchronously)
+            setTimeout(async () => {
+                const dappReturnUrl = sessionStorage.getItem('dapp_return_url');
+                if (dappReturnUrl && window.SrishtiApp && window.SrishtiApp.nodeId && window.SrishtiApp.keyPair && window.SrishtiApp.keyPair.privateKey && window.SrishtiSessionAuth) {
+                    try {
+                        console.log('✅ Delayed check: Generating session token for dApp...');
+                        const dAppOrigin = new URL(dappReturnUrl).origin;
+                        const token = await window.SrishtiSessionAuth.generateToken(
+                            window.SrishtiApp.nodeId,
+                            window.SrishtiApp.keyPair.privateKey,
+                            {
+                                expiresIn: 24 * 60 * 60, // 24 hours
+                                dAppOrigin: dAppOrigin
+                            }
+                        );
+                        
+                        console.log('✅ Session token generated, redirecting to dApp...');
+                        sessionStorage.removeItem('dapp_return_url');
+                        
+                        // Redirect to dApp with token
+                        const returnUrlObj = new URL(dappReturnUrl);
+                        returnUrlObj.searchParams.set('session_token', token);
+                        window.location.href = returnUrlObj.toString();
+                    } catch (error) {
+                        console.error('❌ Failed to generate session token for dApp (delayed check):', error);
+                    }
+                }
+            }, 2000); // Wait 2 seconds for any async credential loading
+            
             // Check if returning user - trust localStorage if we have valid data
             // Note: We check localStorage directly here (not app.nodeId) because app.js loads from localStorage
             // during init, so they should match. If they don't, we still trust localStorage as source of truth.
@@ -6187,29 +6200,45 @@
                 
                 // Check if there's a pending dApp login redirect
                 const dappReturnUrl = sessionStorage.getItem('dapp_return_url');
-                if (dappReturnUrl && window.SrishtiApp && window.SrishtiApp.nodeId && window.SrishtiApp.keyPair && window.SrishtiApp.keyPair.privateKey && window.SrishtiSessionAuth) {
-                    // User just logged in and has a pending dApp redirect
-                    try {
-                        const dAppOrigin = new URL(dappReturnUrl).origin;
-                        const token = await window.SrishtiSessionAuth.generateToken(
-                            window.SrishtiApp.nodeId,
-                            window.SrishtiApp.keyPair.privateKey,
-                            {
-                                expiresIn: 24 * 60 * 60, // 24 hours
-                                dAppOrigin: dAppOrigin
-                            }
-                        );
-                        
-                        sessionStorage.removeItem('dapp_return_url');
-                        
-                        // Redirect to dApp with token
-                        const returnUrlObj = new URL(dappReturnUrl);
-                        returnUrlObj.searchParams.set('session_token', token);
-                        window.location.href = returnUrlObj.toString();
-                        return; // Exit early - redirecting
-                    } catch (error) {
-                        console.error('Failed to generate session token for dApp:', error);
-                        sessionStorage.removeItem('dapp_return_url');
+                if (dappReturnUrl) {
+                    console.log('🔍 Checking dApp redirect:', {
+                        hasNodeId: !!window.SrishtiApp?.nodeId,
+                        hasKeyPair: !!window.SrishtiApp?.keyPair,
+                        hasPrivateKey: !!window.SrishtiApp?.keyPair?.privateKey,
+                        hasSessionAuth: !!window.SrishtiSessionAuth
+                    });
+                    
+                    if (window.SrishtiApp && window.SrishtiApp.nodeId && window.SrishtiApp.keyPair && window.SrishtiApp.keyPair.privateKey && window.SrishtiSessionAuth) {
+                        // User is logged in and has a pending dApp redirect
+                        try {
+                            console.log('✅ Generating session token for dApp...');
+                            const dAppOrigin = new URL(dappReturnUrl).origin;
+                            const token = await window.SrishtiSessionAuth.generateToken(
+                                window.SrishtiApp.nodeId,
+                                window.SrishtiApp.keyPair.privateKey,
+                                {
+                                    expiresIn: 24 * 60 * 60, // 24 hours
+                                    dAppOrigin: dAppOrigin
+                                }
+                            );
+                            
+                            console.log('✅ Session token generated, redirecting to dApp...');
+                            sessionStorage.removeItem('dapp_return_url');
+                            
+                            // Redirect to dApp with token
+                            const returnUrlObj = new URL(dappReturnUrl);
+                            returnUrlObj.searchParams.set('session_token', token);
+                            window.location.href = returnUrlObj.toString();
+                            return; // Exit early - redirecting
+                        } catch (error) {
+                            console.error('❌ Failed to generate session token for dApp:', error);
+                            sessionStorage.removeItem('dapp_return_url');
+                            alert('Failed to generate session token. Please try again.');
+                        }
+                    } else {
+                        console.log('⏳ Waiting for credentials to load before redirecting to dApp...');
+                        // Credentials not loaded yet, but return URL is stored
+                        // Will redirect once credentials are available (handled in node creation flow too)
                     }
                 }
                 
