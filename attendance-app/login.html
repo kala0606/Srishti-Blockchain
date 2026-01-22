@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Srishti Attendance</title>
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .login-container {
+            background: white;
+            border-radius: 16px;
+            padding: 40px;
+            max-width: 500px;
+            width: 100%;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+        }
+
+        h1 {
+            color: #667eea;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 500;
+        }
+
+        input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+            font-family: monospace;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        button {
+            width: 100%;
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 14px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.3s;
+            margin-top: 10px;
+        }
+
+        button:hover {
+            background: #5568d3;
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+        }
+
+        .success {
+            background: #d4edda;
+            color: #155724;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+        }
+
+        .help-text {
+            font-size: 12px;
+            color: #666;
+            margin-top: 4px;
+        }
+
+        .info-box {
+            background: #e7f3ff;
+            border-left: 4px solid #2196F3;
+            padding: 12px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+        }
+
+        .info-box p {
+            margin: 0;
+            color: #1976D2;
+            font-size: 14px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="login-container">
+        <h1>📋 Srishti Attendance</h1>
+        <p class="subtitle">Login with your institution credentials</p>
+
+        <div id="message"></div>
+
+        <div class="info-box">
+            <p><strong>ℹ️ Institution Login Only</strong></p>
+            <p style="margin-top: 4px;">Enter your existing institution node credentials. To create a new institution,
+                use the main Srishti Blockchain app.</p>
+        </div>
+
+        <form id="loginForm">
+            <div class="form-group">
+                <label>Node ID *</label>
+                <input type="text" id="nodeId" required placeholder="node_..." autocomplete="off">
+                <p class="help-text">Your institution's node ID (e.g., node_5455464688a4a819)</p>
+            </div>
+
+            <div class="form-group">
+                <label>Public Key *</label>
+                <input type="text" id="publicKey" required placeholder="Your public key" autocomplete="off">
+                <p class="help-text">Your institution's public key</p>
+            </div>
+
+            <div class="form-group">
+                <label>Private Key *</label>
+                <input type="password" id="privateKey" required placeholder="Your private key" autocomplete="off">
+                <p class="help-text">⚠️ Keep this secure! Never share your private key</p>
+            </div>
+
+            <button type="submit">Login to Attendance App</button>
+        </form>
+
+        <p class="help-text" style="margin-top: 20px; text-align: center; color: #999;">
+            Don't have an institution account? <br>
+            <a href="https://kala0606.github.io/Srishti-Blockchain/" target="_blank"
+                style="color: #667eea; text-decoration: none;">Create one on the main blockchain →</a>
+        </p>
+    </div>
+
+    <script>
+        // Handle login
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const nodeId = document.getElementById('nodeId').value.trim();
+            const publicKey = document.getElementById('publicKey').value.trim();
+            const privateKey = document.getElementById('privateKey').value.trim();
+
+            if (!nodeId || !publicKey || !privateKey) {
+                showMessage('Please fill in all fields', 'error');
+                return;
+            }
+
+            // Validate node ID format
+            if (!nodeId.startsWith('node_')) {
+                showMessage('Invalid node ID format. Should start with "node_"', 'error');
+                return;
+            }
+
+            // Store credentials in localStorage
+            localStorage.setItem('srishti_node_id', nodeId);
+            localStorage.setItem('srishti_public_key', publicKey);
+            localStorage.setItem('srishti_private_key', privateKey);
+
+            showMessage('✅ Credentials saved! Redirecting...', 'success');
+
+            setTimeout(() => {
+                window.location.href = 'index.html';
+            }, 1000);
+        });
+
+        function showMessage(text, type) {
+            const messageEl = document.getElementById('message');
+            messageEl.className = type;
+            messageEl.textContent = text;
+        }
+
+        // Check if already logged in
+        const existingNodeId = localStorage.getItem('srishti_node_id');
+        if (existingNodeId) {
+            showMessage('Already logged in as ' + existingNodeId + '. Redirecting...', 'success');
+            setTimeout(() => {
+                window.location.href = 'index.html';
+            }, 1500);
+        }
+    </script>
+</body>
+
+</html>
