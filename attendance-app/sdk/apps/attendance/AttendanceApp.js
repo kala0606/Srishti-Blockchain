@@ -28,7 +28,8 @@ class AttendanceApp {
         SESSION_END: 'SESSION_END',
         MARK_PRESENT: 'MARK_PRESENT',
         VERIFY: 'VERIFY',
-        ISSUE_CERTIFICATE: 'ISSUE_CERTIFICATE'
+        ISSUE_CERTIFICATE: 'ISSUE_CERTIFICATE',
+        STUDENT_REGISTER: 'STUDENT_REGISTER' // Register student ID to wallet address
     };
     
     // Attendance status
@@ -50,8 +51,17 @@ class AttendanceApp {
         this.sdk = sdk;
         this.store = sdk.getAppStore(AttendanceApp.APP_ID);
         
+        // Student registry: wallet address -> student ID mapping
+        this.studentRegistry = new Map();
+        
+        // QR code generators for active sessions (professor only)
+        this.qrGenerators = new Map(); // sessionId -> AttendanceQRCode instance
+        
         // Set up event listener for real-time updates
         this._setupEventListener();
+        
+        // Load student registry
+        this._loadStudentRegistry();
     }
     
     /**
@@ -72,7 +82,48 @@ class AttendanceApp {
             if (this.onVerifyEvent && event.action === AttendanceApp.ACTIONS.VERIFY) {
                 this.onVerifyEvent(event);
             }
+            if (event.action === AttendanceApp.ACTIONS.STUDENT_REGISTER) {
+                // Update local registry
+                const { studentId, walletAddress } = event.payload || {};
+                if (studentId && walletAddress) {
+                    this.studentRegistry.set(walletAddress, studentId);
+                    await this._saveStudentRegistry();
+                }
+            }
         });
+    }
+    
+    /**
+     * Load student registry from storage
+     * @private
+     */
+    async _loadStudentRegistry() {
+        try {
+            const registry = await this.store.get('student_registry');
+            if (registry && Array.isArray(registry)) {
+                registry.forEach(({ walletAddress, studentId }) => {
+                    this.studentRegistry.set(walletAddress, studentId);
+                });
+            }
+        } catch (error) {
+            console.warn('Failed to load student registry:', error);
+        }
+    }
+    
+    /**
+     * Save student registry to storage
+     * @private
+     */
+    async _saveStudentRegistry() {
+        try {
+            const registry = Array.from(this.studentRegistry.entries()).map(([walletAddress, studentId]) => ({
+                walletAddress,
+                studentId
+            }));
+            await this.store.put('student_registry', registry);
+        } catch (error) {
+            console.warn('Failed to save student registry:', error);
+        }
     }
     
     // ═══════════════════════════════════════════════════════════════════════════
@@ -213,6 +264,148 @@ class AttendanceApp {
     }
     
     // ═══════════════════════════════════════════════════════════════════════════
+    // STUDENT REGISTRY
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    /**
+     * Register a student ID for the current wallet address
+     * @param {string} studentId - Student ID (e.g., "STU12345")
+     * @returns {Promise<boolean>}
+     */
+    async registerStudent(studentId) {
+        if (!studentId || typeof studentId !== 'string') {
+            throw new Error('Valid student ID is required');
+        }
+        
+        const walletAddress = this.sdk.nodeId;
+        
+        // Update local registry
+        this.studentRegistry.set(walletAddress, studentId);
+        await this._saveStudentRegistry();
+        
+        // Submit on-chain (optional - for cross-device sync)
+        await this.sdk.submitAppEvent(
+            AttendanceApp.APP_ID,
+            AttendanceApp.ACTIONS.STUDENT_REGISTER,
+            {
+                studentId: studentId,
+                walletAddress: walletAddress
+            }
+        );
+        
+        console.log(`✅ Student registered: ${studentId} -> ${walletAddress}`);
+        return true;
+    }
+    
+    /**
+     * Get student ID for a wallet address
+     * @param {string} [walletAddress] - Wallet address (defaults to current node)
+     * @returns {string|null}
+     */
+    getStudentId(walletAddress = null) {
+        const address = walletAddress || this.sdk.nodeId;
+        return this.studentRegistry.get(address) || null;
+    }
+    
+    /**
+     * Get all registered students
+     * @returns {Array<{walletAddress: string, studentId: string}>}
+     */
+    getAllStudents() {
+        return Array.from(this.studentRegistry.entries()).map(([walletAddress, studentId]) => ({
+            walletAddress,
+            studentId
+        }));
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════════════
+    // QR CODE GENERATION (Professors)
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    /**
+     * Start generating dynamic QR codes for a session
+     * @param {string} sessionId - Session ID
+     * @param {Function} onQRUpdate - Callback when QR updates
+     * @returns {Promise<AttendanceQRCode>}
+     */
+    async startQRGeneration(sessionId, onQRUpdate = null) {
+        if (!this.sdk.isInstitution() && !this.sdk.isRoot()) {
+            throw new Error('Only institutions can generate QR codes');
+        }
+        
+        const session = await this.store.get(sessionId);
+        if (!session || session.createdBy !== this.sdk.nodeId) {
+            throw new Error('Session not found or you are not the creator');
+        }
+        
+        // Try to get private key from SrishtiApp (main app context)
+        let privateKey = null;
+        const srishtiApp = window.SrishtiApp || window.srishtiAppInstance;
+        if (srishtiApp && srishtiApp.keyPair && srishtiApp.keyPair.privateKey) {
+            privateKey = srishtiApp.keyPair.privateKey;
+        } else {
+            // Try to get from localStorage and import
+            const privateKeyBase64 = localStorage.getItem('srishti_private_key');
+            if (privateKeyBase64 && window.SrishtiKeys) {
+                try {
+                    privateKey = await window.SrishtiKeys.importPrivateKey(privateKeyBase64);
+                } catch (error) {
+                    console.warn('Failed to import private key from localStorage:', error);
+                }
+            }
+        }
+        
+        if (!privateKey) {
+            throw new Error('Private key not available. Please ensure you are logged in with your institution account in the main blockchain app.');
+        }
+        
+        // Load QR code module
+        if (!window.SrishtiAttendanceQRCode) {
+            throw new Error('AttendanceQRCode module not loaded');
+        }
+        
+        const QRGenerator = window.SrishtiAttendanceQRCode;
+        const qrGenerator = new QRGenerator({
+            sessionId: sessionId,
+            professorNodeId: this.sdk.nodeId,
+            privateKey: privateKey,
+            refreshInterval: 10000 // 10 seconds
+        });
+        
+        // Start generating
+        await qrGenerator.start(onQRUpdate);
+        
+        // Store generator
+        this.qrGenerators.set(sessionId, qrGenerator);
+        
+        console.log(`✅ QR code generation started for session: ${sessionId}`);
+        return qrGenerator;
+    }
+    
+    /**
+     * Stop generating QR codes for a session
+     * @param {string} sessionId - Session ID
+     */
+    stopQRGeneration(sessionId) {
+        const generator = this.qrGenerators.get(sessionId);
+        if (generator) {
+            generator.stop();
+            this.qrGenerators.delete(sessionId);
+            console.log(`✅ QR code generation stopped for session: ${sessionId}`);
+        }
+    }
+    
+    /**
+     * Get current QR code for a session
+     * @param {string} sessionId - Session ID
+     * @returns {Object|null}
+     */
+    getCurrentQR(sessionId) {
+        const generator = this.qrGenerators.get(sessionId);
+        return generator ? generator.getCurrentQR() : null;
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════════════
     // ATTENDANCE MARKING (Students)
     // ═══════════════════════════════════════════════════════════════════════════
     
@@ -221,13 +414,18 @@ class AttendanceApp {
      * 
      * @param {string} sessionId - Session ID
      * @param {Object} [options] - Attendance options
-     * @param {Object} [options.location] - Current location
+     * @param {Object} [options.location] - Current location (for geofencing)
      * @param {number} options.location.lat - Latitude
      * @param {number} options.location.lng - Longitude
+     * @param {Object|string} [options.qrCode] - QR code data from scanner (JSON string or object)
      * @returns {Promise<string>} Attendance record ID
      * 
      * @example
-     * // With geolocation
+     * // With QR code (recommended - prevents proxy attendance)
+     * const qrData = await scanQRCode(); // From QR scanner
+     * await app.markAttendance(sessionId, { qrCode: qrData });
+     * 
+     * // With geolocation (alternative)
      * navigator.geolocation.getCurrentPosition(async (pos) => {
      *     await app.markAttendance(sessionId, {
      *         location: { lat: pos.coords.latitude, lng: pos.coords.longitude }
@@ -293,7 +491,57 @@ class AttendanceApp {
             throw new Error('Attendance already marked for this session');
         }
         
-        // Validate geofence if required
+        // ═══════════════════════════════════════════════════════════════════
+        // QR CODE VERIFICATION (Primary method - prevents proxy attendance)
+        // ═══════════════════════════════════════════════════════════════════
+        let qrProof = null;
+        if (options.qrCode) {
+            // Parse QR code if string
+            let qrData = typeof options.qrCode === 'string' 
+                ? window.SrishtiAttendanceQRCode?.parseQR(options.qrCode)
+                : options.qrCode;
+            
+            if (!qrData) {
+                throw new Error('Invalid QR code data');
+            }
+            
+            // Verify QR code
+            if (!window.SrishtiAttendanceQRCode) {
+                throw new Error('AttendanceQRCode module not loaded');
+            }
+            
+            const verification = await window.SrishtiAttendanceQRCode.verifyQR(
+                qrData,
+                this.sdk.chain,
+                30000 // 30 second max age
+            );
+            
+            if (!verification.valid) {
+                throw new Error(`QR code verification failed: ${verification.error}`);
+            }
+            
+            // Verify QR is for this session
+            if (qrData.sessionId !== sessionId) {
+                throw new Error('QR code is for a different session');
+            }
+            
+            // Verify QR is from session creator
+            if (qrData.professorNodeId !== session.createdBy) {
+                throw new Error('QR code is not from the session creator');
+            }
+            
+            qrProof = {
+                timestamp: qrData.timestamp,
+                nonce: qrData.nonce,
+                signature: qrData.signature
+            };
+            
+            console.log('✅ QR code verified successfully');
+        }
+        
+        // ═══════════════════════════════════════════════════════════════════
+        // GEOFENCE VERIFICATION (Alternative/Additional method)
+        // ═══════════════════════════════════════════════════════════════════
         let distanceFromVenue = null;
         if (session.geofence && options.location) {
             // Ensure we have full geofence data
@@ -309,19 +557,30 @@ class AttendanceApp {
                     `Must be within ${session.geofence.radius}m to mark attendance.`
                 );
             }
-        } else if (session.geofence && !options.location) {
-            throw new Error('This session requires location verification. Please enable location access.');
+        } else if (session.geofence && !options.location && !qrProof) {
+            // Require either QR code OR location if geofence is set
+            throw new Error('This session requires location verification or QR code. Please enable location access or scan the QR code.');
         }
+        
+        // Require at least one proof method (QR code preferred)
+        if (!qrProof && !options.location) {
+            throw new Error('Please provide either a QR code (recommended) or location data to mark attendance.');
+        }
+        
+        // Get student ID if registered
+        const studentId = this.getStudentId() || this.sdk.nodeId;
         
         // Full attendance data (OFF-CHAIN)
         const attendanceData = {
             id: recordId,
             type: 'attendance',
             sessionId: sessionId,
-            studentId: this.sdk.nodeId,
+            studentId: studentId, // Use registered student ID if available
+            walletAddress: this.sdk.nodeId,
             timestamp: Date.now(),
             location: options.location || null,
             distanceFromVenue: distanceFromVenue,
+            qrProof: qrProof, // QR code proof (prevents proxy attendance)
             status: AttendanceApp.STATUS.PENDING,
             owner: this.sdk.nodeId
         };

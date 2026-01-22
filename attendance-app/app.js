@@ -315,6 +315,7 @@ class AttendanceAppUI {
             // Load initial data
             await this.loadSessions();
             await this.loadActiveSessions();
+            await this.loadCurrentRegistration();
             await this.loadHistory();
             await this.loadCertificates();
             
@@ -395,9 +396,16 @@ class AttendanceAppUI {
                 const tabName = tab.textContent.toLowerCase().replace(/\s+/g, '');
                 if (tabName.includes('sessions')) this.loadSessions();
                 if (tabName.includes('attend')) this.loadActiveSessions();
+                if (tabName.includes('register')) this.loadCurrentRegistration();
                 if (tabName.includes('history')) this.loadHistory();
                 if (tabName.includes('certificates')) this.loadCertificates();
             });
+        });
+        
+        // Register student ID form
+        document.getElementById('registerForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await this.registerStudent();
         });
     }
 
@@ -478,6 +486,7 @@ class AttendanceAppUI {
                         <p><strong>Created:</strong> ${new Date(session.createdAt).toLocaleString()}</p>
                         <div class="actions">
                             <button onclick="attendanceApp.viewSession('${session.id}')">View</button>
+                            ${isActive ? `<button onclick="attendanceApp.showQRCode('${session.id}')">📱 Show QR Code</button>` : ''}
                             ${isActive ? `<button class="btn-secondary" onclick="attendanceApp.endSession('${session.id}')">End</button>` : ''}
                             <button class="btn-secondary" onclick="attendanceApp.bulkVerify('${session.id}')">Verify All</button>
                         </div>
@@ -517,7 +526,8 @@ class AttendanceAppUI {
                         <p><strong>Time:</strong> ${new Date(session.startTime).toLocaleString()}</p>
                         ${myAttendance ? `<p><strong>Status:</strong> <span class="badge ${myAttendance.status.toLowerCase()}">${myAttendance.status}</span></p>` : ''}
                         <div class="actions">
-                            ${canMark ? `<button onclick="attendanceApp.markAttendance('${session.id}')">Mark Attendance</button>` : ''}
+                            ${canMark ? `<button onclick="attendanceApp.scanQRAndMark('${session.id}')">📷 Scan QR Code & Mark</button>` : ''}
+                            ${canMark ? `<button class="btn-secondary" onclick="attendanceApp.markAttendance('${session.id}')">Mark with Location</button>` : ''}
                             ${myAttendance ? `<button disabled>Already Marked</button>` : ''}
                         </div>
                     </div>
@@ -530,7 +540,7 @@ class AttendanceAppUI {
         }
     }
 
-    async markAttendance(sessionId) {
+    async markAttendance(sessionId, qrCode = null) {
         const errorEl = document.getElementById('attendError');
         errorEl.innerHTML = '';
 
@@ -550,7 +560,7 @@ class AttendanceAppUI {
                 });
             }
 
-            await this.attendance.markAttendance(sessionId, { location });
+            await this.attendance.markAttendance(sessionId, { location, qrCode });
 
             errorEl.innerHTML = '<div class="success">✅ Attendance marked successfully!</div>';
 
@@ -559,6 +569,222 @@ class AttendanceAppUI {
             await this.loadHistory();
         } catch (error) {
             errorEl.innerHTML = `<div class="error">❌ ${error.message}</div>`;
+        }
+    }
+    
+    async scanQRAndMark(sessionId) {
+        try {
+            // Check if QR scanner is available
+            if (!window.QRScanner) {
+                throw new Error('QR scanner not available. Please ensure the QR scanner library is loaded.');
+            }
+            
+            const scanner = new window.QRScanner();
+            
+            // Show scanner modal
+            scanner.onScanCallback = async (qrData) => {
+                try {
+                    // Parse QR data
+                    let qrCodeData = null;
+                    if (typeof qrData === 'string') {
+                        qrCodeData = window.SrishtiAttendanceQRCode?.parseQR(qrData);
+                    } else {
+                        qrCodeData = qrData;
+                    }
+                    
+                    if (!qrCodeData) {
+                        throw new Error('Invalid QR code format');
+                    }
+                    
+                    // Mark attendance with QR code
+                    await this.markAttendance(sessionId, qrCodeData);
+                    scanner.close();
+                } catch (error) {
+                    alert(`Error: ${error.message}`);
+                }
+            };
+            
+            scanner.open();
+        } catch (error) {
+            const errorEl = document.getElementById('attendError');
+            errorEl.innerHTML = `<div class="error">❌ ${error.message}</div>`;
+        }
+    }
+    
+    async showQRCode(sessionId) {
+        try {
+            // Start QR generation if not already started
+            let qrGenerator = this.attendance.qrGenerators?.get(sessionId);
+            if (!qrGenerator) {
+                qrGenerator = await this.attendance.startQRGeneration(sessionId, (qrData) => {
+                    this.updateQRDisplay(sessionId, qrData);
+                });
+            }
+            
+            // Show QR code modal
+            const qrData = qrGenerator.getCurrentQR();
+            if (qrData) {
+                this.showQRModal(sessionId, qrData);
+            }
+        } catch (error) {
+            alert(`Error: ${error.message}`);
+        }
+    }
+    
+    showQRModal(sessionId, qrData) {
+        // Create modal
+        const modal = document.createElement('div');
+        modal.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+        `;
+        
+        const content = document.createElement('div');
+        content.style.cssText = `
+            background: white;
+            padding: 24px;
+            border-radius: 12px;
+            max-width: 400px;
+            text-align: center;
+        `;
+        
+        const qrContainer = document.createElement('div');
+        qrContainer.id = `qr-${sessionId}`;
+        qrContainer.style.cssText = `
+            width: 300px;
+            height: 300px;
+            margin: 20px auto;
+            background: white;
+            border: 2px solid #667eea;
+            border-radius: 8px;
+            padding: 10px;
+        `;
+        
+        content.innerHTML = `
+            <h3>📱 Attendance QR Code</h3>
+            <p style="color: #666; margin-bottom: 16px;">Students scan this code to mark attendance</p>
+            <p style="color: #999; font-size: 0.9em;">QR code refreshes every 10 seconds</p>
+        `;
+        content.appendChild(qrContainer);
+        
+        const closeBtn = document.createElement('button');
+        closeBtn.textContent = 'Close';
+        closeBtn.style.cssText = `
+            margin-top: 16px;
+            padding: 8px 24px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+        `;
+        closeBtn.onclick = () => {
+            document.body.removeChild(modal);
+        };
+        content.appendChild(closeBtn);
+        
+        modal.appendChild(content);
+        document.body.appendChild(modal);
+        
+        // Generate QR code visual
+        this.generateQRVisual(qrContainer, JSON.stringify(qrData));
+        
+        // Update QR code every 10 seconds
+        const updateInterval = setInterval(() => {
+            const currentQR = this.attendance.getCurrentQR(sessionId);
+            if (currentQR) {
+                this.generateQRVisual(qrContainer, JSON.stringify(currentQR));
+            }
+        }, 10000);
+        
+        // Clean up on close
+        closeBtn.onclick = () => {
+            clearInterval(updateInterval);
+            document.body.removeChild(modal);
+        };
+    }
+    
+    generateQRVisual(container, qrData) {
+        // Use QRCode library if available
+        if (typeof QRCode !== 'undefined') {
+            container.innerHTML = '';
+            new QRCode(container, {
+                text: qrData,
+                width: 280,
+                height: 280,
+                colorDark: '#000000',
+                colorLight: '#ffffff',
+                correctLevel: QRCode.CorrectLevel.M
+            });
+        } else if (typeof QRCodeStyling !== 'undefined') {
+            container.innerHTML = '';
+            const qr = new QRCodeStyling({
+                width: 280,
+                height: 280,
+                data: qrData,
+                dotsOptions: { color: '#000000', type: 'rounded' },
+                backgroundOptions: { color: '#ffffff' }
+            });
+            qr.append(container);
+        } else {
+            // Fallback: show data as text
+            container.innerHTML = `
+                <div style="padding: 20px; word-break: break-all; font-size: 0.8em;">
+                    ${qrData.substring(0, 100)}...
+                    <br><br>
+                    <small>Install QRCode library to see visual QR code</small>
+                </div>
+            `;
+        }
+    }
+    
+    updateQRDisplay(sessionId, qrData) {
+        const container = document.getElementById(`qr-${sessionId}`);
+        if (container) {
+            this.generateQRVisual(container, JSON.stringify(qrData));
+        }
+    }
+    
+    async registerStudent() {
+        const errorEl = document.getElementById('registerError');
+        errorEl.innerHTML = '';
+        
+        try {
+            const studentId = document.getElementById('studentId').value.trim();
+            if (!studentId) {
+                throw new Error('Student ID is required');
+            }
+            
+            await this.attendance.registerStudent(studentId);
+            
+            errorEl.innerHTML = '<div class="success">✅ Student ID registered successfully!</div>';
+            document.getElementById('registerForm').reset();
+            
+            await this.loadCurrentRegistration();
+        } catch (error) {
+            errorEl.innerHTML = `<div class="error">❌ ${error.message}</div>`;
+        }
+    }
+    
+    async loadCurrentRegistration() {
+        const currentEl = document.getElementById('currentStudentId');
+        try {
+            const studentId = this.attendance.getStudentId();
+            if (studentId) {
+                currentEl.innerHTML = `<strong>${studentId}</strong> (Wallet: ${this.sdk.nodeId})`;
+            } else {
+                currentEl.innerHTML = '<em>No student ID registered</em>';
+            }
+        } catch (error) {
+            currentEl.innerHTML = `<span style="color: red;">Error: ${error.message}</span>`;
         }
     }
 

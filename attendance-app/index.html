@@ -272,6 +272,7 @@
             <button class="tab active" onclick="showTab('sessions')">My Sessions</button>
             <button class="tab" onclick="showTab('create')">Create Session</button>
             <button class="tab" onclick="showTab('attend')">Mark Attendance</button>
+            <button class="tab" onclick="showTab('register')">Register Student ID</button>
             <button class="tab" onclick="showTab('history')">My History</button>
             <button class="tab" onclick="showTab('certificates')">Certificates</button>
         </div>
@@ -339,6 +340,29 @@
             <div id="activeSessionsList" class="loading">Loading active sessions...</div>
         </div>
         
+        <!-- Register Student ID Tab -->
+        <div id="register" class="tab-content">
+            <h2>Register Student ID</h2>
+            <p style="color: #666; margin-bottom: 20px;">
+                Link your wallet address to a student ID. This helps institutions identify you in attendance records.
+            </p>
+            <div id="registerError"></div>
+            <form id="registerForm">
+                <div class="form-group">
+                    <label>Student ID *</label>
+                    <input type="text" id="studentId" required placeholder="e.g., STU12345 or 2024CS001">
+                    <small style="color: #666; margin-top: 4px; display: block;">
+                        Your student ID as registered with your institution
+                    </small>
+                </div>
+                <button type="submit">Register Student ID</button>
+            </form>
+            <div id="currentRegistration" style="margin-top: 20px; padding: 16px; background: #f8f9fa; border-radius: 8px;">
+                <strong>Current Registration:</strong>
+                <div id="currentStudentId" style="margin-top: 8px; color: #666;">Loading...</div>
+            </div>
+        </div>
+        
         <!-- My History Tab -->
         <div id="history" class="tab-content">
             <h2>My Attendance History</h2>
@@ -396,10 +420,11 @@
             'config.js'
         ];
         
-        function loadScript(src) {
+        function loadScript(src, baseUrl = null) {
             return new Promise((resolve, reject) => {
                 const script = document.createElement('script');
-                script.src = SRISHTI_BLOCKCHAIN_URL + src;
+                const url = baseUrl || SRISHTI_BLOCKCHAIN_URL;
+                script.src = url + src;
                 script.onload = resolve;
                 script.onerror = () => reject(new Error(`Failed to load ${src}`));
                 document.head.appendChild(script);
@@ -429,12 +454,21 @@
                 // Load SDK files from main blockchain repo
                 const sdkScripts = [
                     'sdk/SrishtiSDK.js',
-                    'sdk/AppDataStore.js',
-                    'sdk/apps/attendance/AttendanceApp.js'
+                    'sdk/AppDataStore.js'
                 ];
                 
                 for (const src of sdkScripts) {
                     await loadScript(src); // Load from main blockchain repo (SRISHTI_BLOCKCHAIN_URL)
+                }
+                
+                // Load attendance app files from local directory (relative to attendance-app folder)
+                const attendanceScripts = [
+                    'sdk/apps/attendance/AttendanceQRCode.js',
+                    'sdk/apps/attendance/AttendanceApp.js'
+                ];
+                
+                for (const src of attendanceScripts) {
+                    await loadScript(src, './'); // Load from local attendance-app directory
                 }
                 
                 // Load main app.js (creates SrishtiApp instance)
@@ -470,6 +504,9 @@
         
         loadBlockchain();
     </script>
+    
+    <!-- QR Code Library (for generating QR codes) -->
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
     
     <!-- Attendance App UI (loaded after blockchain is ready) -->
     <script src="app.js"></script>
