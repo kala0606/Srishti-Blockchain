@@ -1499,17 +1499,36 @@ class Chain {
             throw new Error('SrishtiBlock not loaded');
         }
         
-        console.log(`🔄 replaceChain: Validating ${newBlocks.length} blocks...`);
+        console.log(`🔄 replaceChain: Processing ${newBlocks.length} blocks...`);
         
-        // Convert to Block objects
-        const blocks = newBlocks.map((blockData, i) => {
-            const block = window.SrishtiBlock.fromJSON(blockData);
-            // Verify index matches position in array
+        // Convert to Block objects and check for index corruption
+        const blocks = [];
+        let hasCorruption = false;
+        
+        for (let i = 0; i < newBlocks.length; i++) {
+            const block = window.SrishtiBlock.fromJSON(newBlocks[i]);
+            blocks.push(block);
+            
+            // Check if index matches position in array
             if (block.index !== i) {
-                console.error(`❌ Block at position ${i} has wrong index ${block.index}`);
+                console.error(`❌ CHAIN CORRUPTION DETECTED:`);
+                console.error(`   Block at position ${i} has index ${block.index}`);
+                console.error(`   Block type: ${block.data?.type || 'unknown'}`);
+                hasCorruption = true;
             }
-            return block;
-        });
+        }
+        
+        // If corrupted, clear storage and start fresh
+        if (hasCorruption) {
+            console.error(`🔧 Chain storage is corrupted. Clearing and starting fresh...`);
+            if (this.storage) {
+                await this.storage.clear();
+            }
+            // Create new genesis
+            await this.createGenesisBlock();
+            console.log(`✅ Fresh chain created after corruption`);
+            return true;
+        }
         
         // Create temporary chain for validation
         const tempChain = new Chain(blocks[0]);
@@ -1517,8 +1536,7 @@ class Chain {
             try {
                 await tempChain.addBlock(blocks[i]);
             } catch (error) {
-                console.error(`❌ replaceChain failed at block ${i}:`, error.message);
-                console.error(`   Block index: ${blocks[i].index}, Expected: ${tempChain.blocks.length}`);
+                console.error(`❌ replaceChain validation failed at block ${i}:`, error.message);
                 throw error;
             }
         }
