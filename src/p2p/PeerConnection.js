@@ -26,7 +26,7 @@ class PeerConnection {
     }
     
     /**
-     * Create WebRTC configuration with redundant STUN servers
+     * Create WebRTC configuration with redundant STUN/TURN servers
      * @returns {RTCConfiguration}
      */
     getRTCConfiguration() {
@@ -36,31 +36,32 @@ class PeerConnection {
                 { urls: 'stun:stun.l.google.com:19302' },
                 { urls: 'stun:stun1.l.google.com:19302' },
                 { urls: 'stun:stun2.l.google.com:19302' },
-                { urls: 'stun:stun3.l.google.com:19302' },
-                { urls: 'stun:stun4.l.google.com:19302' },
-                // OpenRelay TURN servers (free, no signup required)
-                // https://www.metered.ca/tools/openrelay/
+                // OpenRelay TURN servers (free, no signup)
+                // UDP on port 80 (most likely to work through firewalls)
                 {
                     urls: 'turn:openrelay.metered.ca:80',
                     username: 'openrelayproject',
                     credential: 'openrelayproject'
                 },
-                {
-                    urls: 'turn:openrelay.metered.ca:443',
-                    username: 'openrelayproject',
-                    credential: 'openrelayproject'
-                },
+                // TCP on port 443 (works through most firewalls)
                 {
                     urls: 'turn:openrelay.metered.ca:443?transport=tcp',
                     username: 'openrelayproject',
                     credential: 'openrelayproject'
+                },
+                // TURNS (TLS-wrapped TURN) - works through strictest firewalls
+                {
+                    urls: 'turns:openrelay.metered.ca:443?transport=tcp',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
                 }
             ],
-            // Pre-gather candidates to speed up connection
-            iceCandidatePoolSize: 10,
-            // Bundle all media to reduce ICE candidates
+            // Use all available connection methods
+            iceTransportPolicy: 'all',
+            // Pre-gather candidates
+            iceCandidatePoolSize: 5,
+            // Bundle all media
             bundlePolicy: 'max-bundle',
-            // Require multiplexing to reduce port usage
             rtcpMuxPolicy: 'require'
         };
     }
@@ -115,7 +116,28 @@ class PeerConnection {
         const answer = await this.pc.createAnswer();
         await this.pc.setLocalDescription(answer);
         
-        return this.pc.localDescription;
+        // Wait for ICE gathering (with timeout)
+        return new Promise((resolve) => {
+            // Resolve immediately if already complete
+            if (this.pc.iceGatheringState === 'complete') {
+                resolve(this.pc.localDescription);
+                return;
+            }
+            
+            // Set a timeout - don't wait forever
+            const timeout = setTimeout(() => {
+                console.log('⏱️ ICE gathering timeout, sending current candidates');
+                resolve(this.pc.localDescription);
+            }, 2000);
+            
+            // Or resolve when gathering completes
+            this.pc.addEventListener('icegatheringstatechange', () => {
+                if (this.pc.iceGatheringState === 'complete') {
+                    clearTimeout(timeout);
+                    resolve(this.pc.localDescription);
+                }
+            });
+        });
     }
     
     /**
@@ -191,20 +213,31 @@ class PeerConnection {
         // Handle ICE candidates - send to peer via signaling
         this.pc.onicecandidate = (event) => {
             if (event.candidate) {
+                console.log(`🧊 ICE candidate: ${event.candidate.type || 'unknown'} - ${event.candidate.address || 'relay'}`);
                 this.onIceCandidate(event.candidate);
             }
         };
         
-        // Handle ICE connection state (only log failures)
+        // Handle ICE gathering state
+        this.pc.onicegatheringstatechange = () => {
+            console.log(`🧊 ICE gathering state: ${this.pc.iceGatheringState}`);
+        };
+        
+        // Handle ICE connection state
         this.pc.oniceconnectionstatechange = () => {
-            if (this.pc.iceConnectionState === 'failed') {
-                console.error('❌ ICE connection failed - NAT traversal issue');
+            const state = this.pc.iceConnectionState;
+            console.log(`🧊 ICE connection state: ${state}`);
+            if (state === 'failed') {
+                console.error('❌ ICE connection failed - NAT traversal issue. Try different network.');
+            } else if (state === 'disconnected') {
+                console.warn('⚠️ ICE disconnected - peer may have left');
             }
         };
         
         // Handle connection state changes
         this.pc.onconnectionstatechange = () => {
             const state = this.pc.connectionState;
+            console.log(`📡 Connection state: ${state}`);
             if (state === 'connected') {
                 console.log(`✅ WebRTC connected`);
                 this.connected = true;
@@ -219,6 +252,7 @@ class PeerConnection {
         
         // Handle incoming data channel (for answerer)
         this.pc.ondatachannel = (event) => {
+            console.log('📡 Incoming data channel received');
             this.dataChannel = event.channel;
             this.setupDataChannel();
         };
