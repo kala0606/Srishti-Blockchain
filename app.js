@@ -844,13 +844,33 @@ class SrishtiApp {
      * @returns {string} - Role (USER, INSTITUTION, GOVERNANCE_ADMIN, ROOT)
      */
     getMyRole() {
-        if (!this.chain || !this.nodeId) {
-            console.warn('⚠️ [App.getMyRole] Chain or nodeId not available');
+        if (!this.chain) {
+            console.warn('⚠️ [App.getMyRole] Chain not available');
             return 'USER';
         }
-        const role = this.chain.getNodeRole(this.nodeId);
+
+        // 🔧 FIX: If in guest mode, use the real nodeId from localStorage
+        // Guest mode creates a temporary nodeId for network operations,
+        // but we want to check the role of the REAL logged-in node
+        let nodeIdToCheck = this.nodeId;
+        if (this.isGuest) {
+            const savedNodeId = localStorage.getItem('srishti_node_id');
+            if (savedNodeId) {
+                nodeIdToCheck = savedNodeId;
+                console.log('🔍 [App.getMyRole] Using real nodeId from localStorage:', savedNodeId, '(not guest nodeId:', this.nodeId, ')');
+            }
+        }
+
+        if (!nodeIdToCheck) {
+            console.warn('⚠️ [App.getMyRole] No nodeId available');
+            return 'USER';
+        }
+
+        const role = this.chain.getNodeRole(nodeIdToCheck);
         console.log('🔍 [App.getMyRole] Query:', {
-            nodeId: this.nodeId,
+            nodeId: nodeIdToCheck,
+            isGuest: this.isGuest,
+            guestNodeId: this.isGuest ? this.nodeId : null,
             role,
             stateRoles: this.chain.state.nodeRoles
         });
@@ -862,8 +882,19 @@ class SrishtiApp {
      * @returns {boolean}
      */
     isInstitution() {
-        if (!this.chain || !this.nodeId) return false;
-        return this.chain.isVerifiedInstitution(this.nodeId);
+        if (!this.chain) return false;
+
+        // 🔧 FIX: Use real nodeId from localStorage if in guest mode
+        let nodeIdToCheck = this.nodeId;
+        if (this.isGuest) {
+            const savedNodeId = localStorage.getItem('srishti_node_id');
+            if (savedNodeId) {
+                nodeIdToCheck = savedNodeId;
+            }
+        }
+
+        if (!nodeIdToCheck) return false;
+        return this.chain.isVerifiedInstitution(nodeIdToCheck);
     }
 
     /**
