@@ -447,6 +447,9 @@ class AttendanceAppUI {
             // Reset form
             document.getElementById('createForm').reset();
 
+            // Wait a moment for the session to be stored
+            await new Promise(resolve => setTimeout(resolve, 500));
+
             // Reload sessions
             await this.loadSessions();
 
@@ -462,7 +465,17 @@ class AttendanceAppUI {
         listEl.innerHTML = '<div class="loading">Loading...</div>';
 
         try {
-            const sessions = await this.attendance.getMySessions();
+            // First try to get sessions from local store
+            let sessions = await this.attendance.getMySessions();
+            
+            // If no sessions found, also check on-chain events (in case they were created but not stored locally)
+            if (sessions.length === 0) {
+                console.log('No sessions in local store, checking on-chain events...');
+                const allSessions = await this.attendance.getAllSessions();
+                // Filter to only sessions created by current user
+                sessions = allSessions.filter(s => s.createdBy === this.sdk.nodeId || s.owner === this.sdk.nodeId);
+                console.log(`Found ${sessions.length} sessions from on-chain events`);
+            }
 
             if (sessions.length === 0) {
                 listEl.innerHTML = '<div class="empty-state">No sessions created yet</div>';

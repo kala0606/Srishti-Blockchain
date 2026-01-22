@@ -178,6 +178,7 @@ class AttendanceApp {
             geofence: options.geofence || null,
             maxParticipants: options.maxParticipants || null,
             createdBy: this.sdk.nodeId,
+            owner: this.sdk.nodeId, // For querying by owner
             createdAt: Date.now(),
             status: 'ACTIVE',
             attendeeCount: 0
@@ -185,6 +186,7 @@ class AttendanceApp {
         
         // Store full data OFF-CHAIN
         await this.store.put(sessionId, sessionData);
+        console.log(`💾 Session stored locally: ${sessionId}`, sessionData);
         
         // Hash for on-chain reference
         const dataHash = await this.sdk.hashData(sessionData);
@@ -464,6 +466,7 @@ class AttendanceApp {
                     radius: metadata.geofence.radius
                 } : null,
                 createdBy: event.sender,
+                owner: event.sender, // For querying by owner
                 createdAt: event.timestamp,
                 status: 'ACTIVE',
                 attendeeCount: 0,
@@ -773,7 +776,9 @@ class AttendanceApp {
      * @returns {Promise<Array>}
      */
     async getMySessions() {
-        return await this.store.query('owner', this.sdk.nodeId);
+        const sessions = await this.store.query('owner', this.sdk.nodeId);
+        console.log(`📋 getMySessions: Found ${sessions.length} sessions for ${this.sdk.nodeId}`);
+        return sessions;
     }
     
     /**
@@ -820,6 +825,7 @@ class AttendanceApp {
                         radius: metadata.geofence.radius
                     } : null,
                     createdBy: event.sender,
+                    owner: event.sender, // For querying by owner
                     createdAt: event.timestamp,
                     status: 'ACTIVE', // Assume active if we don't have full data
                     attendeeCount: 0,
@@ -851,6 +857,7 @@ class AttendanceApp {
     
     /**
      * Get all sessions (from on-chain)
+     * Reconstructs from on-chain events if not in local store
      * @returns {Promise<Array>}
      */
     async getAllSessions() {
@@ -861,10 +868,37 @@ class AttendanceApp {
         
         const sessions = [];
         for (const event of events) {
-            const session = await this.store.get(event.payload.ref);
-            if (session) {
-                sessions.push(session);
+            let session = await this.store.get(event.payload.ref);
+            
+            // If not in local store, reconstruct from on-chain metadata
+            if (!session) {
+                const metadata = event.payload?.metadata || {};
+                session = {
+                    id: event.payload.ref,
+                    type: 'session',
+                    title: metadata.title || 'Untitled Session',
+                    description: metadata.description || '',
+                    startTime: metadata.startTime || event.timestamp,
+                    endTime: metadata.endTime || null,
+                    location: metadata.location || null,
+                    geofence: metadata.geofence ? {
+                        lat: metadata.geofence.lat,
+                        lng: metadata.geofence.lng,
+                        radius: metadata.geofence.radius
+                    } : null,
+                    createdBy: event.sender,
+                    owner: event.sender,
+                    createdAt: event.timestamp,
+                    status: 'ACTIVE',
+                    attendeeCount: 0,
+                    _reconstructed: true
+                };
+                
+                // Store it locally for future use
+                await this.store.put(event.payload.ref, session);
             }
+            
+            sessions.push(session);
         }
         
         return sessions;
