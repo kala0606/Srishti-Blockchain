@@ -64,6 +64,8 @@ class AttendanceAppUI {
             const tokenData = await window.SrishtiDAppAuth.handleLoginCallback(this.srishtiApp.chain);
             if (tokenData) {
                 console.log('✅ Authenticated via session token:', tokenData.nodeId);
+                // Clear redirect attempts on successful auth
+                sessionStorage.removeItem('dapp_redirect_attempts');
                 this.srishtiApp.nodeId = tokenData.nodeId;
                 
                 // Get node name from chain
@@ -84,12 +86,60 @@ class AttendanceAppUI {
                 const isAuthenticated = await window.SrishtiDAppAuth.isAuthenticated(this.srishtiApp.chain);
                 
                 if (!isAuthenticated) {
+                    // Check if we're already in a redirect loop (prevent infinite loops)
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const hasSessionToken = urlParams.get('session_token');
+                    const redirectAttempts = sessionStorage.getItem('dapp_redirect_attempts') || '0';
+                    const maxAttempts = 3;
+                    
+                    // If we have a session_token in URL but it's invalid, don't redirect again
+                    if (hasSessionToken) {
+                        console.warn('⚠️ Session token in URL but invalid. Not redirecting to prevent loop.');
+                        this.updateStatus('disconnected', '⚠️ Invalid session token. Please log in to the main blockchain app first.');
+                        document.getElementById('userInfo').innerHTML = `
+                            <div style="background: #fff3cd; padding: 16px; border-radius: 8px; margin-top: 10px;">
+                                <strong>🔐 Login Required</strong><br>
+                                Your session token is invalid or expired.<br>
+                                <a href="${window.SRISHTI_BLOCKCHAIN_URL || 'https://kala0606.github.io/Srishti-Blockchain/'}" target="_blank" style="color: #667eea; text-decoration: underline;">
+                                    Click here to log in to the blockchain →
+                                </a>
+                                <br><small>After logging in, return to this page.</small>
+                            </div>
+                        `;
+                        this.initialized = false;
+                        return;
+                    }
+                    
+                    // Prevent redirect loops
+                    if (parseInt(redirectAttempts) >= maxAttempts) {
+                        console.error('❌ Too many redirect attempts. Stopping to prevent infinite loop.');
+                        this.updateStatus('disconnected', '⚠️ Authentication failed. Too many redirect attempts.');
+                        document.getElementById('userInfo').innerHTML = `
+                            <div style="background: #ffebee; padding: 16px; border-radius: 8px; margin-top: 10px;">
+                                <strong>⚠️ Redirect Loop Detected</strong><br>
+                                Please clear your browser data and try again, or log in to the main blockchain app first.<br>
+                                <a href="${window.SRISHTI_BLOCKCHAIN_URL || 'https://kala0606.github.io/Srishti-Blockchain/'}" target="_blank" style="color: #667eea; text-decoration: underline;">
+                                    Go to Blockchain App →
+                                </a>
+                            </div>
+                        `;
+                        sessionStorage.removeItem('dapp_redirect_attempts');
+                        this.initialized = false;
+                        return;
+                    }
+                    
+                    // Increment redirect attempts
+                    sessionStorage.setItem('dapp_redirect_attempts', String(parseInt(redirectAttempts) + 1));
+                    
                     // No valid session - redirect to main app for login
                     console.log('🔐 No valid session found. Redirecting to main app for login...');
-                    const returnUrl = encodeURIComponent(window.location.href);
+                    const returnUrl = encodeURIComponent(window.location.href.split('?')[0]); // Remove any existing params
                     window.SrishtiDAppAuth.initiateLogin(returnUrl, window.SRISHTI_BLOCKCHAIN_URL);
                     return; // Exit early - will redirect
                 }
+                
+                // Clear redirect attempts on successful auth
+                sessionStorage.removeItem('dapp_redirect_attempts');
                 
                 // We have a valid session
                 const nodeId = await window.SrishtiDAppAuth.getNodeId(this.srishtiApp.chain);

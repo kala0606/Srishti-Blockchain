@@ -103,9 +103,44 @@ class SrishtiApp {
                         privateKey: await window.SrishtiKeys.importPrivateKey(savedPrivateKey)
                     };
                     console.log('✅ Existing node loaded:', savedNodeName);
+                    
+                    // Try to restore from IndexedDB backup if localStorage key seems corrupted
                 } catch (error) {
-                    // If key import fails (e.g., corrupted key), try to load with just public key
-                    console.warn('⚠️ Failed to import private key, attempting read-only mode:', error);
+                    // If key import fails (e.g., corrupted key), try IndexedDB backup
+                    console.warn('⚠️ Failed to import private key from localStorage, checking IndexedDB backup...', error);
+                    
+                    try {
+                        // Try to load from IndexedDB backup
+                        const backupKeys = await this.storage.getKeys(savedNodeId);
+                        if (backupKeys && backupKeys.privateKey) {
+                            console.log('🔄 Found backup in IndexedDB, attempting restore...');
+                            try {
+                                const restoredKey = await window.SrishtiKeys.importPrivateKey(backupKeys.privateKey);
+                                if (restoredKey) {
+                                    // Restore from backup
+                                    localStorage.setItem('srishti_private_key', backupKeys.privateKey);
+                                    localStorage.setItem('srishti_public_key', backupKeys.publicKey || savedPublicKey);
+                                    console.log('✅ Private key restored from IndexedDB backup');
+                                    
+                                    this.nodeId = savedNodeId;
+                                    this.currentUser = { id: savedNodeId, name: savedNodeName || 'Unknown' };
+                                    this.publicKeyBase64 = backupKeys.publicKey || savedPublicKey;
+                                    this.keyPair = {
+                                        publicKey: await window.SrishtiKeys.importPublicKey(backupKeys.publicKey || savedPublicKey),
+                                        privateKey: restoredKey
+                                    };
+                                    console.log('✅ Node loaded from backup:', savedNodeName);
+                                    return; // Successfully restored
+                                }
+                            } catch (backupError) {
+                                console.warn('⚠️ Backup key also failed to import:', backupError);
+                            }
+                        }
+                    } catch (storageError) {
+                        console.warn('⚠️ Could not check IndexedDB backup:', storageError);
+                    }
+                    
+                    // If backup also fails, fall back to read-only mode
                     try {
                         this.nodeId = savedNodeId;
                         this.currentUser = { id: savedNodeId, name: savedNodeName || 'Unknown' };
@@ -115,6 +150,8 @@ class SrishtiApp {
                             privateKey: null // No private key = read-only mode
                         };
                         console.log('✅ Node loaded in read-only mode (private key unavailable):', savedNodeName);
+                        console.warn('⚠️ IMPORTANT: Your private key is missing. You cannot sign transactions.');
+                        console.warn('⚠️ To restore full access, you may need to create a new account or use recovery options.');
                     } catch (publicKeyError) {
                         console.error('❌ Failed to import public key as well:', publicKeyError);
                         // Still set nodeId so it can be verified on chain
@@ -293,10 +330,31 @@ class SrishtiApp {
             if (!trimmedName) {
                 throw new Error('Node name cannot be empty');
             }
+            
+            // Validate key can be imported before saving
+            try {
+                const testKey = await window.SrishtiKeys.importPrivateKey(privateKeyBase64);
+                if (!testKey) {
+                    throw new Error('Private key validation failed');
+                }
+                console.log('✅ Private key validated before saving');
+            } catch (error) {
+                console.error('❌ Private key validation failed:', error);
+                throw new Error('Failed to validate private key. Please try again.');
+            }
+            
             localStorage.setItem('srishti_node_id', this.nodeId);
             localStorage.setItem('srishti_node_name', trimmedName);
             localStorage.setItem('srishti_public_key', this.publicKeyBase64);
             localStorage.setItem('srishti_private_key', privateKeyBase64);
+            
+            // Verify key was saved correctly
+            const savedKey = localStorage.getItem('srishti_private_key');
+            if (savedKey !== privateKeyBase64) {
+                console.error('❌ Private key save verification failed - keys do not match');
+                throw new Error('Failed to save private key correctly. Please try again.');
+            }
+            console.log('✅ Private key saved and verified in localStorage');
 
             this.currentUser = { id: this.nodeId, name: trimmedName };
 

@@ -6082,13 +6082,19 @@
                 // Decode the return URL (it comes URL-encoded from the query param)
                 const decodedReturnUrl = decodeURIComponent(returnUrl);
                 console.log('🔐 dApp login requested:', decodedReturnUrl);
-                // Store decoded return URL - will process after credentials are loaded
+                
+                // Check if user is already logged in - if not, just store URL and continue normal flow
+                // Don't redirect immediately - let the normal login flow handle it
                 sessionStorage.setItem('dapp_return_url', decodedReturnUrl);
-                // Clean up URL params
+                
+                // Clean up URL params to prevent redirect loops
                 const cleanUrl = new URL(window.location.href);
                 cleanUrl.searchParams.delete('dapp_login');
                 cleanUrl.searchParams.delete('return_url');
                 window.history.replaceState({}, '', cleanUrl.toString());
+                
+                // Don't redirect here - wait for credentials to load first
+                // The redirect will happen after login/registration completes
             }
             
             // Check for join parameter in URL
@@ -6258,6 +6264,7 @@
                     };
                     console.log('🔍 Checking dApp redirect:', debugInfo);
                     
+                    // Only redirect if we have ALL required credentials
                     if (window.SrishtiApp && window.SrishtiApp.nodeId && window.SrishtiApp.keyPair && window.SrishtiApp.keyPair.privateKey && window.SrishtiSessionAuth) {
                         // User is logged in and has a pending dApp redirect
                         try {
@@ -6317,12 +6324,15 @@
                     } else {
                         console.log('⏳ Waiting for credentials to load before redirecting to dApp...', debugInfo);
                         
-                        // If we have nodeId but no private key, show helpful message
+                        // If we have nodeId but no private key, clear the redirect request
+                        // Don't redirect without a private key - it will just cause a loop
                         if (window.SrishtiApp?.nodeId && !window.SrishtiApp?.keyPair?.privateKey) {
-                            console.warn('⚠️ Node ID found but private key is missing. User needs to re-login.');
-                            // Clear the stored return URL and show message
+                            console.warn('⚠️ Node ID found but private key is missing. Cannot generate session token.');
+                            console.warn('⚠️ Clearing dApp redirect request to prevent loop.');
+                            // Clear the stored return URL to prevent redirect loop
                             sessionStorage.removeItem('dapp_return_url');
-                            alert('Your private key is missing. Please log out and log back in to generate a new session token for the dApp.');
+                            // Show message but don't redirect
+                            console.log('ℹ️ User needs to log in with valid credentials first. dApp redirect cancelled.');
                         }
                         // Credentials not loaded yet, but return URL is stored
                         // Will redirect once credentials are available (handled in node creation flow too)
