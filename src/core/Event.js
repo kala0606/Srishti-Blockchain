@@ -74,7 +74,8 @@ class Event {
             timestamp: Date.now(),
             message: options.message || 'Srishti timeline begins',
             creator: options.creatorId || 'genesis',
-            uniqueId: options.uniqueId || null // Optional unique identifier for genesis blocks
+            uniqueId: options.uniqueId || null, // Optional unique identifier for genesis blocks
+            chainEpoch: options.chainEpoch || 1  // Chain epoch for network compatibility
         };
     }
     
