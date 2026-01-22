@@ -461,6 +461,22 @@
                     await loadScript(src); // Load from main blockchain repo (SRISHTI_BLOCKCHAIN_URL)
                 }
                 
+                // Load QR Scanner (same as main app)
+                // Ensure html5-qrcode is loaded first (it's loaded in body, but verify)
+                if (typeof Html5Qrcode === 'undefined') {
+                    console.warn('⚠️ html5-qrcode not loaded yet, waiting...');
+                    let retries = 0;
+                    while (typeof Html5Qrcode === 'undefined' && retries < 50) {
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                        retries++;
+                    }
+                    if (typeof Html5Qrcode === 'undefined') {
+                        throw new Error('html5-qrcode library not loaded. Please ensure it is included in the page.');
+                    }
+                }
+                await loadScript('docs/qr-scanner-blockchain.js'); // Load from main blockchain repo
+                console.log('✅ QR Scanner loaded');
+                
                 // Load attendance app files from local directory (relative to attendance-app folder)
                 const attendanceScripts = [
                     'sdk/apps/attendance/AttendanceQRCode.js',
@@ -505,9 +521,11 @@
         loadBlockchain();
     </script>
     
-    <!-- QR Code Library (for generating QR codes) -->
-    <!-- Using multiple sources for reliability -->
+    <!-- QR Code Libraries -->
+    <!-- For generating QR codes -->
     <script src="https://unpkg.com/qrcode@1.5.3/build/qrcode.min.js"></script>
+    <!-- For scanning QR codes (same as main app) -->
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     <script>
         // Verify QRCode library loaded and create compatibility wrapper
         window.addEventListener('load', () => {
