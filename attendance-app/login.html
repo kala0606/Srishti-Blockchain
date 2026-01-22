@@ -62,7 +62,6 @@
             border-radius: 8px;
             font-size: 14px;
             transition: border-color 0.3s;
-            font-family: monospace;
         }
 
         input:focus {
@@ -88,11 +87,6 @@
             background: #5568d3;
         }
 
-        button:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-        }
-
         .error {
             background: #f8d7da;
             color: #721c24;
@@ -114,63 +108,31 @@
             color: #666;
             margin-top: 4px;
         }
-
-        .info-box {
-            background: #e7f3ff;
-            border-left: 4px solid #2196F3;
-            padding: 12px;
-            margin-bottom: 20px;
-            border-radius: 4px;
-        }
-
-        .info-box p {
-            margin: 0;
-            color: #1976D2;
-            font-size: 14px;
-        }
     </style>
 </head>
 
 <body>
     <div class="login-container">
         <h1>📋 Srishti Attendance</h1>
-        <p class="subtitle">Login with your institution credentials</p>
+        <p class="subtitle">Login to manage attendance on the blockchain</p>
 
         <div id="message"></div>
 
-        <div class="info-box">
-            <p><strong>ℹ️ Institution Login Only</strong></p>
-            <p style="margin-top: 4px;">Enter your existing institution node credentials. To create a new institution,
-                use the main Srishti Blockchain app.</p>
-        </div>
-
         <form id="loginForm">
             <div class="form-group">
-                <label>Node ID *</label>
-                <input type="text" id="nodeId" required placeholder="node_..." autocomplete="off">
-                <p class="help-text">Your institution's node ID (e.g., node_5455464688a4a819)</p>
+                <label>Node ID</label>
+                <input type="text" id="nodeId" required placeholder="node_...">
+                <p class="help-text">Your institution's node ID from the blockchain</p>
             </div>
 
             <div class="form-group">
-                <label>Public Key *</label>
-                <input type="text" id="publicKey" required placeholder="Your public key" autocomplete="off">
-                <p class="help-text">Your institution's public key</p>
+                <label>Private Key</label>
+                <input type="password" id="privateKey" required placeholder="Your private key">
+                <p class="help-text">Keep this secure! Never share your private key</p>
             </div>
 
-            <div class="form-group">
-                <label>Private Key *</label>
-                <input type="password" id="privateKey" required placeholder="Your private key" autocomplete="off">
-                <p class="help-text">⚠️ Keep this secure! Never share your private key</p>
-            </div>
-
-            <button type="submit">Login to Attendance App</button>
+            <button type="submit">Login</button>
         </form>
-
-        <p class="help-text" style="margin-top: 20px; text-align: center; color: #999;">
-            Don't have an institution account? <br>
-            <a href="https://kala0606.github.io/Srishti-Blockchain/" target="_blank"
-                style="color: #667eea; text-decoration: none;">Create one on the main blockchain →</a>
-        </p>
     </div>
 
     <script>
@@ -179,26 +141,18 @@
             e.preventDefault();
 
             const nodeId = document.getElementById('nodeId').value.trim();
-            const publicKey = document.getElementById('publicKey').value.trim();
             const privateKey = document.getElementById('privateKey').value.trim();
 
-            if (!nodeId || !publicKey || !privateKey) {
+            if (!nodeId || !privateKey) {
                 showMessage('Please fill in all fields', 'error');
-                return;
-            }
-
-            // Validate node ID format
-            if (!nodeId.startsWith('node_')) {
-                showMessage('Invalid node ID format. Should start with "node_"', 'error');
                 return;
             }
 
             // Store credentials in localStorage
             localStorage.setItem('srishti_node_id', nodeId);
-            localStorage.setItem('srishti_public_key', publicKey);
             localStorage.setItem('srishti_private_key', privateKey);
 
-            showMessage('✅ Credentials saved! Redirecting...', 'success');
+            showMessage('Credentials saved! Redirecting...', 'success');
 
             setTimeout(() => {
                 window.location.href = 'index.html';
@@ -212,12 +166,11 @@
         }
 
         // Check if already logged in
-        const existingNodeId = localStorage.getItem('srishti_node_id');
-        if (existingNodeId) {
-            showMessage('Already logged in as ' + existingNodeId + '. Redirecting...', 'success');
+        if (localStorage.getItem('srishti_node_id')) {
+            showMessage('Already logged in. Redirecting...', 'success');
             setTimeout(() => {
                 window.location.href = 'index.html';
-            }, 1500);
+            }, 1000);
         }
     </script>
 </body>
