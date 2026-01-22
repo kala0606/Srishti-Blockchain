@@ -94,14 +94,35 @@ class SrishtiApp {
 
             if (savedNodeId && savedPublicKey && savedPrivateKey) {
                 // Load existing keys
-                this.nodeId = savedNodeId;
-                this.currentUser = { id: savedNodeId, name: savedNodeName || 'Unknown' };
-                this.publicKeyBase64 = savedPublicKey;
-                this.keyPair = {
-                    publicKey: await window.SrishtiKeys.importPublicKey(savedPublicKey),
-                    privateKey: await window.SrishtiKeys.importPrivateKey(savedPrivateKey)
-                };
-                console.log('✅ Existing node loaded:', savedNodeName);
+                try {
+                    this.nodeId = savedNodeId;
+                    this.currentUser = { id: savedNodeId, name: savedNodeName || 'Unknown' };
+                    this.publicKeyBase64 = savedPublicKey;
+                    this.keyPair = {
+                        publicKey: await window.SrishtiKeys.importPublicKey(savedPublicKey),
+                        privateKey: await window.SrishtiKeys.importPrivateKey(savedPrivateKey)
+                    };
+                    console.log('✅ Existing node loaded:', savedNodeName);
+                } catch (error) {
+                    // If key import fails (e.g., corrupted key), try to load with just public key
+                    console.warn('⚠️ Failed to import private key, attempting read-only mode:', error);
+                    try {
+                        this.nodeId = savedNodeId;
+                        this.currentUser = { id: savedNodeId, name: savedNodeName || 'Unknown' };
+                        this.publicKeyBase64 = savedPublicKey;
+                        this.keyPair = {
+                            publicKey: await window.SrishtiKeys.importPublicKey(savedPublicKey),
+                            privateKey: null // No private key = read-only mode
+                        };
+                        console.log('✅ Node loaded in read-only mode (private key unavailable):', savedNodeName);
+                    } catch (publicKeyError) {
+                        console.error('❌ Failed to import public key as well:', publicKeyError);
+                        // Still set nodeId so it can be verified on chain
+                        this.nodeId = savedNodeId;
+                        this.currentUser = { id: savedNodeId, name: savedNodeName || 'Unknown' };
+                        console.log('⚠️ Node ID set but keys unavailable - read-only mode');
+                    }
+                }
             } else {
                 // Will create node during onboarding
                 console.log('📝 No existing node found');

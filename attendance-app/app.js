@@ -92,7 +92,8 @@ class AttendanceAppUI {
             // CRITICAL: Wait for credentials to be loaded from localStorage
             // The main app.js loads credentials during init(), but it's async
             let credentialWaitRetries = 0;
-            const hasStoredCredentials = localStorage.getItem('srishti_node_id') &&
+            const storedNodeId = localStorage.getItem('srishti_node_id');
+            const hasStoredCredentials = storedNodeId &&
                 localStorage.getItem('srishti_public_key') &&
                 localStorage.getItem('srishti_private_key');
 
@@ -121,11 +122,53 @@ class AttendanceAppUI {
                 throw new Error('Blockchain chain not available. Initialization may have failed.');
             }
 
+            // FALLBACK: If credentials couldn't be loaded (e.g., private key import failed)
+            // but we have a nodeId in localStorage, check if it exists on the chain
+            // This handles cases where the private key is corrupted but the nodeId is valid
+            if (!this.srishtiApp.nodeId && storedNodeId && this.srishtiApp.chain) {
+                console.log('🔄 Checking if stored nodeId exists on chain...');
+                const nodes = this.srishtiApp.chain.buildNodeMap();
+                const institutions = this.srishtiApp.chain.getInstitutions();
+                const node = nodes[storedNodeId];
+                const institution = institutions.verified?.[storedNodeId];
+                
+                if (node || institution) {
+                    console.log('✅ Found node on chain, setting nodeId (read-only mode)');
+                    this.srishtiApp.nodeId = storedNodeId;
+                    const storedNodeName = localStorage.getItem('srishti_node_name');
+                    if (storedNodeName) {
+                        this.srishtiApp.currentUser = { id: storedNodeId, name: storedNodeName };
+                    } else if (institution) {
+                        this.srishtiApp.currentUser = { id: storedNodeId, name: institution.name };
+                    } else if (node) {
+                        this.srishtiApp.currentUser = { id: storedNodeId, name: node.name };
+                    }
+                    
+                    // Set public key if available (even without private key, we can verify identity)
+                    const storedPublicKey = localStorage.getItem('srishti_public_key');
+                    if (storedPublicKey) {
+                        try {
+                            this.srishtiApp.publicKeyBase64 = storedPublicKey;
+                            this.srishtiApp.keyPair = {
+                                publicKey: await window.SrishtiKeys.importPublicKey(storedPublicKey),
+                                privateKey: null // No private key = read-only mode
+                            };
+                            console.log('✅ Public key loaded (read-only mode - no private key)');
+                        } catch (e) {
+                            console.warn('⚠️ Could not import public key:', e);
+                        }
+                    }
+                } else {
+                    console.warn('⚠️ Stored nodeId not found on chain:', storedNodeId);
+                }
+            }
+
             // Network might not exist if user hasn't created a node yet
             // Try to initialize network in guest mode for read-only access
             // BUT: Only use guest mode if there's NO stored credentials
             if (!this.srishtiApp.network && typeof this.srishtiApp.initNetwork === 'function') {
                 // Wait a bit for SrishtiApp to load credentials from localStorage
+                // Also wait for our fallback nodeId setting to complete
                 let credentialRetries = 0;
                 while (!this.srishtiApp.nodeId && credentialRetries < 10) {
                     const hasStoredId = localStorage.getItem('srishti_node_id');
@@ -139,18 +182,32 @@ class AttendanceAppUI {
                     }
                 }
 
+                // Check if we have a nodeId (either from credentials or from chain fallback)
+                const hasNodeId = !!this.srishtiApp.nodeId;
                 const hasStoredCredentials = localStorage.getItem('srishti_node_id') &&
                     localStorage.getItem('srishti_public_key') &&
                     localStorage.getItem('srishti_private_key');
 
-                if (hasStoredCredentials) {
-                    console.log('🔄 Attempting to initialize network with stored credentials...');
+                // If we have a nodeId (even without full credentials), try to initialize network
+                // The network might work in read-only mode without private key
+                if (hasNodeId) {
+                    console.log('🔄 Attempting to initialize network with nodeId (may be read-only)...');
                     try {
-                        // Use stored credentials, NOT guest mode
+                        // Try to initialize network - it may work even without private key for read-only
                         await this.srishtiApp.initNetwork(false);
-                        console.log('✅ Network initialized with stored credentials');
+                        console.log('✅ Network initialized with nodeId');
                     } catch (error) {
-                        console.warn('Failed to initialize network with stored credentials:', error);
+                        console.warn('Failed to initialize network with nodeId:', error);
+                        // If that fails, try guest mode as fallback
+                        if (!hasStoredCredentials) {
+                            console.log('🔄 Falling back to guest mode...');
+                            try {
+                                await this.srishtiApp.initNetwork(true); // true = guestMode
+                                console.log('✅ Network initialized in guest mode');
+                            } catch (guestError) {
+                                console.warn('Failed to initialize network in guest mode:', guestError);
+                            }
+                        }
                     }
                 } else {
                     console.log('🔄 Attempting to initialize network in guest mode...');
