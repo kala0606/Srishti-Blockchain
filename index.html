@@ -6179,11 +6179,41 @@
                 if (window.walletManager) {
                     window.walletManager.setAuthenticated(nodeId, name);
                     window.walletManager.checkAuthState(); // Refresh auth state
-                    console.log('✅ User authenticated in wallet');
+                    
+                    // Verify authentication state is correct
+                    const authState = {
+                        isAuthenticated: window.walletManager.isAuthenticated,
+                        hasNodeId: !!window.SrishtiApp?.nodeId,
+                        hasKeyPair: !!window.SrishtiApp?.keyPair,
+                        hasPrivateKey: !!window.SrishtiApp?.keyPair?.privateKey,
+                        nodeId: window.SrishtiApp?.nodeId,
+                        walletNodeId: window.walletManager.currentUser?.nodeId,
+                        canGenerateTokens: !!(window.SrishtiApp?.nodeId && window.SrishtiApp?.keyPair?.privateKey)
+                    };
+                    console.log('🔍 Auth state after login:', authState);
+                    
+                    // Verify state consistency
+                    if (!window.walletManager.verifyAuthState()) {
+                        console.warn('⚠️ Auth state mismatch detected, fixing...');
+                        window.walletManager.setAuthenticated(nodeId, name);
+                    }
+                    
+                    if (!authState.canGenerateTokens) {
+                        console.warn('⚠️ Cannot generate session tokens - private key missing. User is in read-only mode.');
+                    } else {
+                        console.log('✅ User authenticated and can generate session tokens for dApps');
+                    }
                 }
                 
                 // Force refresh authentication UI state
                 refreshAuthUIState();
+                
+                // Ensure app state is properly set for session token generation
+                if (window.SrishtiApp && !window.SrishtiApp.nodeId) {
+                    console.warn('⚠️ App nodeId not set after login, setting it now...');
+                    window.SrishtiApp.nodeId = nodeId;
+                    window.SrishtiApp.currentUser = { id: nodeId, name: name };
+                }
                 
                 // Show recovery phrase FIRST, then welcome
                 if (window.SrishtiRecovery && recoveryPhrase) {

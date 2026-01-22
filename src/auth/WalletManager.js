@@ -72,12 +72,51 @@ class WalletManager {
      * @param {string} name - Node name
      */
     setAuthenticated(nodeId, name) {
+        // Check if private key actually exists
+        const hasPrivateKey = !!(this.app?.keyPair?.privateKey || localStorage.getItem('srishti_private_key'));
+        
         this.isAuthenticated = true;
         this.currentUser = {
             nodeId: nodeId,
             name: name,
-            hasPrivateKey: true
+            hasPrivateKey: hasPrivateKey
         };
+        
+        console.log('✅ WalletManager.setAuthenticated:', {
+            nodeId,
+            name,
+            hasPrivateKey,
+            appHasKeyPair: !!this.app?.keyPair,
+            appHasPrivateKey: !!this.app?.keyPair?.privateKey
+        });
+    }
+    
+    /**
+     * Verify authentication state matches app state
+     * @returns {boolean} True if state is consistent
+     */
+    verifyAuthState() {
+        if (!this.app) {
+            return false;
+        }
+        
+        const localStorageNodeId = localStorage.getItem('srishti_node_id');
+        const appNodeId = this.app.nodeId;
+        const walletNodeId = this.currentUser?.nodeId;
+        
+        // Check if all nodeIds match
+        if (localStorageNodeId && appNodeId && walletNodeId) {
+            if (localStorageNodeId !== appNodeId || localStorageNodeId !== walletNodeId) {
+                console.warn('⚠️ Auth state mismatch detected:', {
+                    localStorage: localStorageNodeId,
+                    app: appNodeId,
+                    wallet: walletNodeId
+                });
+                return false;
+            }
+        }
+        
+        return true;
     }
 
     /**
