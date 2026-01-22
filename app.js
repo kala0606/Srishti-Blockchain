@@ -422,36 +422,43 @@ class SrishtiApp {
             });
             
             const checkSync = () => {
-                const connectedPeers = this.network.peers?.size || 0;
+                // Use peerInfo for VERIFIED compatible peers (after HELLO exchange)
+                const verifiedPeers = this.network.peerInfo?.size || 0;
+                const rawPeerCount = this.network.wsClient?.peers?.size || 0;
                 const compatiblePeers = this.network.compatiblePeerCount || 0;
                 const rejectedPeers = this.network.rejectedPeerCount || 0;
-                const pendingConnections = this.network.pendingConnections?.size || 0;
                 const chainLength = this.chain.getLength();
                 const elapsed = Date.now() - startTime;
                 
-                // Only count compatible peers (not raw signaling count which includes old-epoch peers)
-                const hasCompatiblePeers = connectedPeers > 0 || (pendingConnections > 0 && rejectedPeers === 0);
+                // Only count VERIFIED compatible peers (not raw count which includes unverified/incompatible)
+                const hasCompatiblePeers = verifiedPeers > 0;
                 const timeout = hasCompatiblePeers ? longTimeout : shortTimeout;
                 
-                console.log(`🔄 Sync check: elapsed=${elapsed}ms, connected=${connectedPeers}, compatible=${compatiblePeers}, rejected=${rejectedPeers}, chain=${chainLength}`);
+                console.log(`🔄 Sync check: elapsed=${elapsed}ms, verified=${verifiedPeers}, raw=${rawPeerCount}, rejected=${rejectedPeers}, chain=${chainLength}`);
                 
                 // Update progress based on current state
-                if (pendingConnections > 0 && connectedPeers === 0 && rejectedPeers === 0) {
+                if (rawPeerCount > 0 && verifiedPeers === 0 && rejectedPeers === 0) {
                     this.updateSyncProgress({
                         status: 'connecting',
-                        message: 'Connecting to network...',
+                        message: 'Verifying peers...',
                         progress: 10 + Math.min(30, (elapsed / timeout) * 30)
                     });
-                } else if (connectedPeers > 0 && chainLength <= 1) {
+                } else if (verifiedPeers > 0 && chainLength <= 1) {
                     this.updateSyncProgress({
                         status: 'syncing',
                         message: 'Connected! Syncing blockchain...',
                         progress: 40 + Math.min(30, (elapsed / timeout) * 30)
                     });
+                } else if (rawPeerCount > 0 && rejectedPeers > 0 && verifiedPeers === 0) {
+                    this.updateSyncProgress({
+                        status: 'connecting',
+                        message: 'Starting fresh network...',
+                        progress: 30
+                    });
                 }
                 
-                // If we have connected peers and chain has been updated beyond genesis - success!
-                if (connectedPeers > 0 && chainLength > 1) {
+                // If we have verified compatible peers and chain has been updated beyond genesis - success!
+                if (verifiedPeers > 0 && chainLength > 1) {
                     console.log(`✅ Initial sync complete. Chain length: ${chainLength}`);
                     this.updateSyncProgress({
                         status: 'complete',
@@ -465,7 +472,7 @@ class SrishtiApp {
                 }
                 
                 // If all peers were rejected (old epoch), no point waiting - start fresh
-                if (rejectedPeers > 0 && compatiblePeers === 0 && connectedPeers === 0 && elapsed >= 2000) {
+                if (rejectedPeers > 0 && verifiedPeers === 0 && elapsed >= 2000) {
                     console.log(`🚀 All ${rejectedPeers} peers rejected (old epoch) - starting fresh network`);
                     this.updateSyncProgress({
                         status: 'idle',
@@ -477,14 +484,14 @@ class SrishtiApp {
                 
                 // If timeout reached
                 if (elapsed >= timeout) {
-                    if (hasCompatiblePeers && connectedPeers === 0) {
+                    if (rawPeerCount > 0 && verifiedPeers === 0) {
                         console.log(`⏰ Sync timeout - peers available but P2P connection not established`);
                         this.updateSyncProgress({
                             status: 'idle',
                             message: 'Connection timeout'
                         });
                     } else {
-                        console.log(`⏰ Sync timeout after ${timeout}ms. Chain: ${chainLength}, Connected: ${connectedPeers}`);
+                        console.log(`⏰ Sync timeout after ${timeout}ms. Chain: ${chainLength}, Verified peers: ${verifiedPeers}`);
                         this.updateSyncProgress({
                             status: 'idle'
                         });
