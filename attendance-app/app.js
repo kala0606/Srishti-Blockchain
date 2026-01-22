@@ -23,6 +23,45 @@ class AttendanceAppUI {
             console.log('  - hasPublicKey:', !!localStorage.getItem('srishti_public_key'));
             console.log('  - hasPrivateKey:', !!localStorage.getItem('srishti_private_key'));
 
+            // AUTO-RECOVERY: If we have private key but missing public key/node id
+            // This happens if user manually added private key or if login failed to save others
+            const storedPrivateKey = localStorage.getItem('srishti_private_key');
+            if (storedPrivateKey && (!localStorage.getItem('srishti_public_key') || !localStorage.getItem('srishti_node_id'))) {
+                console.log('🔄 Attempting to recover credentials from Private Key...');
+                try {
+                    // We need to load SrishtiKeys first if not available
+                    if (!window.SrishtiKeys && window.srishtiAppInstance && window.srishtiAppInstance.SrishtiKeys) {
+                        window.SrishtiKeys = window.srishtiAppInstance.SrishtiKeys;
+                    }
+
+                    if (window.SrishtiKeys) {
+                        const privateKey = await window.SrishtiKeys.importPrivateKey(storedPrivateKey);
+                        const jwk = await crypto.subtle.exportKey('jwk', privateKey);
+
+                        // Derive public key from JWK 'x' parameter
+                        if (jwk.x) {
+                            const xBase64 = jwk.x.replace(/-/g, '+').replace(/_/g, '/');
+                            const xBinary = atob(xBase64);
+                            const xBytes = new Uint8Array(xBinary.length);
+                            for (let i = 0; i < xBinary.length; i++) xBytes[i] = xBinary.charCodeAt(i);
+
+                            const publicKey = await crypto.subtle.importKey(
+                                'raw', xBytes, { name: 'Ed25519', namedCurve: 'Ed25519' }, true, ['verify']
+                            );
+
+                            const publicKeyBase64 = await window.SrishtiKeys.exportPublicKeyBase64(publicKey);
+                            const nodeId = await window.SrishtiKeys.generateNodeId(publicKey);
+
+                            localStorage.setItem('srishti_node_id', nodeId);
+                            localStorage.setItem('srishti_public_key', publicKeyBase64);
+                            console.log('✅ Credentials recovered successfully:', nodeId);
+                        }
+                    }
+                } catch (e) {
+                    console.warn('⚠️ Credential recovery failed:', e);
+                }
+            }
+
             // Check if user is logged in
             const hasCredentials = localStorage.getItem('srishti_node_id') &&
                 localStorage.getItem('srishti_private_key');
