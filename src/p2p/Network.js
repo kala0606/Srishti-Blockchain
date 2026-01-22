@@ -49,6 +49,9 @@ class Network {
         
         // Protocol version for compatibility
         this.protocolVersion = window.SrishtiConfig?.PROTOCOL_VERSION || 1;
+        
+        // Chain epoch for network reset compatibility
+        this.chainEpoch = window.SrishtiConfig?.CHAIN_EPOCH || 1;
     }
     
     /**
@@ -96,7 +99,8 @@ class Network {
         // Attempt pending connections (nodes we want to connect to)
         this.attemptPendingConnections();
         
-        console.log('🌐 Network initialized');
+        console.log(`🌐 Network initialized (Chain Epoch: ${this.chainEpoch})`);
+        console.log(`   Peers with different epochs will be automatically rejected.`);
     }
     
     /**
@@ -511,7 +515,8 @@ class Network {
             publicKey: null, // TODO: encode public key
             chainLength: this.chain.getLength(),
             latestHash: this.chain.getLatestBlock()?.hash || null,
-            protocolVersion: this.protocolVersion // Include protocol version
+            protocolVersion: this.protocolVersion, // Include protocol version
+            chainEpoch: this.chainEpoch // Include chain epoch for network reset compatibility
         });
         
         connection.send(hello);
@@ -678,6 +683,18 @@ class Network {
      * Handle HELLO message
      */
     async handleHello(message, peerId) {
+        // ═══════════════════════════════════════════════════════════════════
+        // CRITICAL: Check chain epoch compatibility FIRST
+        // Peers with different epochs are from old/reset networks
+        // ═══════════════════════════════════════════════════════════════════
+        const theirEpoch = message.chainEpoch || 1;
+        if (theirEpoch !== this.chainEpoch) {
+            console.warn(`🚫 REJECTING peer ${peerId}: Chain epoch mismatch (ours: ${this.chainEpoch}, theirs: ${theirEpoch})`);
+            console.warn(`   This peer is from an old/different network. Disconnecting...`);
+            this.disconnectPeer(peerId, false); // Don't retry - epoch mismatch is permanent
+            return;
+        }
+        
         // Update activity in connection manager
         if (this.connectionManager) {
             this.connectionManager.updateActivity(peerId);
@@ -695,6 +712,7 @@ class Network {
             latestHash: message.latestHash,
             protocolVersion: message.protocolVersion || 1,
             nodeType: message.nodeType || 'LIGHT',
+            chainEpoch: theirEpoch,
             isOnline: true,
             lastSeen: Date.now()
         });
@@ -818,6 +836,21 @@ class Network {
                     total: theirLength,
                     message: `Syncing ${theirLength} blocks...`
                 });
+            }
+            
+            // ═══════════════════════════════════════════════════════════════════
+            // CRITICAL: Validate CHAIN EPOCH first - this is the primary filter!
+            // ═══════════════════════════════════════════════════════════════════
+            if (theirLength > 0) {
+                const theirGenesis = receivedBlocks[0];
+                const theirChainEpoch = theirGenesis?.data?.chainEpoch || 1;
+                
+                if (theirChainEpoch !== this.chainEpoch) {
+                    console.warn(`🚫 REJECTING chain from ${peerId}: Chain epoch mismatch!`);
+                    console.warn(`   Our epoch: ${this.chainEpoch}, Their epoch: ${theirChainEpoch}`);
+                    console.warn(`   This chain is from an old/different network reset.`);
+                    return; // Don't sync old epoch chain
+                }
             }
             
             // Validate genesis signature to prevent syncing old chains after reset

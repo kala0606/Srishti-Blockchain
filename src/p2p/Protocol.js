@@ -44,7 +44,8 @@ class Protocol {
             chainLength: info.chainLength || 0,
             latestHash: info.latestHash || null,
             protocolVersion: info.protocolVersion || 1,
-            nodeType: info.nodeType || 'LIGHT'
+            nodeType: info.nodeType || 'LIGHT',
+            chainEpoch: info.chainEpoch || (window.SrishtiConfig?.CHAIN_EPOCH || 1) // Chain epoch for compatibility
         };
     }
     

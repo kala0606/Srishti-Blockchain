@@ -84,18 +84,22 @@ class Chain {
         // Clear existing chain first
         await this.clearChain();
         
+        // Get chain epoch from config (this is the KEY for network resets!)
+        const chainEpoch = window.SrishtiConfig?.CHAIN_EPOCH || 1;
+        
         // Generate unique message to ensure each genesis block is different
         // This prevents nodes from syncing old chains after reset
         const uniqueId = options.uniqueId || Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
         const timestamp = Date.now();
         const uniqueMessage = options.message 
-            ? `${options.message} [${uniqueId}]` 
-            : `Srishti timeline begins - ${timestamp} [${uniqueId}]`;
+            ? `${options.message} [epoch:${chainEpoch}][${uniqueId}]` 
+            : `Srishti timeline begins - Epoch ${chainEpoch} - ${timestamp} [${uniqueId}]`;
         
         const genesisEvent = window.SrishtiEvent.createGenesis({
             message: uniqueMessage,
             creatorId: options.creatorId || 'genesis',
-            uniqueId: uniqueId // Store unique ID for reference
+            uniqueId: uniqueId, // Store unique ID for reference
+            chainEpoch: chainEpoch // Store chain epoch in genesis
         });
         
         const genesisBlock = new window.SrishtiBlock({

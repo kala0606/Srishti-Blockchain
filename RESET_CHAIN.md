@@ -1,6 +1,34 @@
 # How to Reset the Chain
 
-## Quick Reset (Browser Console)
+## 🚨 Network-Wide Reset (Recommended)
+
+To reset the **entire network** so ALL nodes start fresh (old nodes become incompatible):
+
+### Step 1: Increment CHAIN_EPOCH in `config.js`
+
+```javascript
+// In config.js, find and increment:
+CHAIN_EPOCH: 2,  // Change from 1 to 2 (or increment by 1)
+```
+
+### Step 2: Commit and Deploy
+
+```bash
+git add config.js
+git commit -m "Reset chain: increment CHAIN_EPOCH to X"
+git push
+```
+
+### That's it!
+
+When the new version deploys to GitHub Pages:
+- ✅ All new visitors get a fresh network
+- ✅ Old nodes with different epochs are automatically rejected
+- ✅ No old data syncs to new nodes
+
+---
+
+## Quick Reset (Single Browser)
 
 Paste this into your browser console:
 

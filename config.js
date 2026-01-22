@@ -61,6 +61,12 @@ const Config = {
     // Protocol Version
     PROTOCOL_VERSION: 2,               // Protocol version for compatibility
     
+    // ═══════════════════════════════════════════════════════════════════════════
+    // CHAIN EPOCH - Increment this to reset the entire network!
+    // When this changes, all old peers become incompatible and won't sync
+    // ═══════════════════════════════════════════════════════════════════════════
+    CHAIN_EPOCH: 2,                    // Chain epoch - increment to force fresh start
+    
     // Performance
     BATCH: {
         WRITE_SIZE: 50,                 // Batch write size
