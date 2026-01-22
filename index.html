@@ -5164,6 +5164,70 @@
         }
         
         /**
+         * Refresh authentication UI state - ensures UI matches authentication status
+         * Call this after login/logout to update the UI
+         */
+        function refreshAuthUIState() {
+            // Check authentication state
+            let isAuthenticated = false;
+            if (window.walletManager) {
+                window.walletManager.checkAuthState();
+                isAuthenticated = window.walletManager.isAuthenticated;
+            } else {
+                // Fallback: check localStorage directly
+                const nodeId = localStorage.getItem('srishti_node_id');
+                const publicKey = localStorage.getItem('srishti_public_key');
+                const nodeName = localStorage.getItem('srishti_node_name');
+                isAuthenticated = !!(nodeId && publicKey && nodeName);
+            }
+            
+            if (isAuthenticated) {
+                // User is authenticated - remove guest UI and show FAB icons
+                console.log('🔄 Refreshing UI: User is authenticated');
+                
+                // Remove guest indicator
+                const guestIndicator = document.getElementById('guest-indicator');
+                if (guestIndicator) {
+                    if (guestIndicator._resizeHandler) {
+                        window.removeEventListener('resize', guestIndicator._resizeHandler);
+                    }
+                    if (guestIndicator._syncInterval) {
+                        clearInterval(guestIndicator._syncInterval);
+                    }
+                    guestIndicator.remove();
+                    console.log('✅ Removed guest indicator');
+                }
+                
+                // Remove guest join button
+                const guestBtn = document.getElementById('guest-join-btn');
+                if (guestBtn) guestBtn.remove();
+                
+                // Remove QR hint
+                const qrHint = document.getElementById('qr-join-hint');
+                if (qrHint) qrHint.remove();
+                
+                // Hide onboarding modal
+                hideOnboardingModal();
+                
+                // Show FAB icons
+                const fabContainer = document.querySelector('.fab-container');
+                if (fabContainer) {
+                    fabContainer.style.display = 'flex';
+                }
+                
+                // Ensure app is not in guest mode
+                if (window.SrishtiApp && window.SrishtiApp.isGuest) {
+                    console.log('🔄 Disabling guest mode for authenticated user');
+                    window.SrishtiApp.isGuest = false;
+                }
+            } else {
+                // User is not authenticated - this function shouldn't be called in this case
+                // but if it is, we'll just log it
+                console.log('ℹ️ refreshAuthUIState called but user is not authenticated');
+            }
+        }
+        
+        /**
          * Show guest mode - shows loading state first, then ready state after blockchain loads
          * @param {boolean} showLoadingFirst - If true, show loading state initially
          */
@@ -6114,8 +6178,12 @@
                 // Mark user as authenticated in WalletManager
                 if (window.walletManager) {
                     window.walletManager.setAuthenticated(nodeId, name);
+                    window.walletManager.checkAuthState(); // Refresh auth state
                     console.log('✅ User authenticated in wallet');
                 }
+                
+                // Force refresh authentication UI state
+                refreshAuthUIState();
                 
                 // Show recovery phrase FIRST, then welcome
                 if (window.SrishtiRecovery && recoveryPhrase) {
@@ -6595,6 +6663,9 @@
                     fabContainer.style.display = 'flex';
                 }
                 
+                // Refresh auth UI state to ensure everything is in sync
+                refreshAuthUIState();
+                
                 // If they were in guest mode, disconnect guest network and reinitialize with real identity
                 if (window.SrishtiApp && window.SrishtiApp.isGuest) {
                     console.log('🔄 Disconnecting guest network for returning user...');
@@ -6674,6 +6745,11 @@
                 
                 // Trigger a UI update with current user
                 updateStats();
+                
+                // Refresh auth UI state after a short delay to ensure everything is synced
+                setTimeout(() => {
+                    refreshAuthUIState();
+                }, 500);
             } else {
                 // New user - show guest mode with loading state first
                 console.log('👁️ New user - entering guest mode with loading state');
