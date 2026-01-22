@@ -22,32 +22,58 @@ class SessionAuth {
      * @returns {Promise<string>} Base64-encoded session token
      */
     static async generateToken(nodeId, privateKey, options = {}) {
-        const expiresIn = options.expiresIn || 24 * 60 * 60; // 24 hours default
-        const expiresAt = Date.now() + (expiresIn * 1000);
-        const nonce = crypto.getRandomValues(new Uint8Array(16));
-        const nonceBase64 = btoa(String.fromCharCode(...nonce));
-        
-        const tokenData = {
-            nodeId: nodeId,
-            expiresAt: expiresAt,
-            nonce: nonceBase64,
-            dAppOrigin: options.dAppOrigin || null,
-            issuedAt: Date.now()
-        };
-        
-        // Sign the token data
-        const tokenString = JSON.stringify(tokenData);
-        const signature = await window.SrishtiKeys.sign(privateKey, tokenString);
-        
-        // Create token object
-        const token = {
-            data: tokenData,
-            signature: signature
-        };
-        
-        // Encode as base64
-        const tokenJson = JSON.stringify(token);
-        return btoa(tokenJson);
+        try {
+            if (!nodeId) {
+                throw new Error('nodeId is required');
+            }
+            
+            if (!privateKey) {
+                throw new Error('privateKey is required');
+            }
+            
+            if (!window.SrishtiKeys) {
+                throw new Error('SrishtiKeys library not loaded');
+            }
+            
+            const expiresIn = options.expiresIn || 24 * 60 * 60; // 24 hours default
+            const expiresAt = Date.now() + (expiresIn * 1000);
+            const nonce = crypto.getRandomValues(new Uint8Array(16));
+            const nonceBase64 = btoa(String.fromCharCode(...nonce));
+            
+            const tokenData = {
+                nodeId: nodeId,
+                expiresAt: expiresAt,
+                nonce: nonceBase64,
+                dAppOrigin: options.dAppOrigin || null,
+                issuedAt: Date.now()
+            };
+            
+            // Sign the token data
+            const tokenString = JSON.stringify(tokenData);
+            
+            if (typeof window.SrishtiKeys.sign !== 'function') {
+                throw new Error('SrishtiKeys.sign is not a function');
+            }
+            
+            const signature = await window.SrishtiKeys.sign(privateKey, tokenString);
+            
+            if (!signature) {
+                throw new Error('Signature generation returned null or undefined');
+            }
+            
+            // Create token object
+            const token = {
+                data: tokenData,
+                signature: signature
+            };
+            
+            // Encode as base64
+            const tokenJson = JSON.stringify(token);
+            return btoa(tokenJson);
+        } catch (error) {
+            console.error('SessionAuth.generateToken error:', error);
+            throw new Error(`Failed to generate session token: ${error.message}`);
+        }
     }
     
     /**

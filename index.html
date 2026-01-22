@@ -5944,6 +5944,11 @@
                     // User just created account and has a pending dApp redirect
                     try {
                         console.log('✅ Generating session token for dApp after registration...');
+                        
+                        if (!window.SrishtiKeys) {
+                            throw new Error('SrishtiKeys library not loaded');
+                        }
+                        
                         const dAppOrigin = new URL(dappReturnUrl).origin;
                         const token = await window.SrishtiSessionAuth.generateToken(
                             nodeId,
@@ -5964,8 +5969,13 @@
                         return; // Exit early - redirecting
                     } catch (error) {
                         console.error('❌ Failed to generate session token for dApp:', error);
+                        console.error('Error details:', {
+                            message: error.message,
+                            stack: error.stack,
+                            name: error.name
+                        });
                         sessionStorage.removeItem('dapp_return_url');
-                        alert('Failed to generate session token. Please try again.');
+                        alert(`Failed to generate session token: ${error.message || 'Unknown error'}. Please check the console for details.`);
                     }
                 }
                 
@@ -6142,6 +6152,11 @@
                 if (dappReturnUrl && window.SrishtiApp && window.SrishtiApp.nodeId && window.SrishtiApp.keyPair && window.SrishtiApp.keyPair.privateKey && window.SrishtiSessionAuth) {
                     try {
                         console.log('✅ Delayed check: Generating session token for dApp...');
+                        
+                        if (!window.SrishtiKeys) {
+                            throw new Error('SrishtiKeys library not loaded');
+                        }
+                        
                         const dAppOrigin = new URL(dappReturnUrl).origin;
                         const token = await window.SrishtiSessionAuth.generateToken(
                             window.SrishtiApp.nodeId,
@@ -6161,6 +6176,11 @@
                         window.location.href = returnUrlObj.toString();
                     } catch (error) {
                         console.error('❌ Failed to generate session token for dApp (delayed check):', error);
+                        console.error('Error details:', {
+                            message: error.message,
+                            stack: error.stack,
+                            name: error.name
+                        });
                     }
                 }
             }, 2000); // Wait 2 seconds for any async credential loading
@@ -6201,18 +6221,33 @@
                 // Check if there's a pending dApp login redirect
                 const dappReturnUrl = sessionStorage.getItem('dapp_return_url');
                 if (dappReturnUrl) {
-                    console.log('🔍 Checking dApp redirect:', {
+                    const debugInfo = {
                         hasNodeId: !!window.SrishtiApp?.nodeId,
                         hasKeyPair: !!window.SrishtiApp?.keyPair,
                         hasPrivateKey: !!window.SrishtiApp?.keyPair?.privateKey,
-                        hasSessionAuth: !!window.SrishtiSessionAuth
-                    });
+                        hasSessionAuth: !!window.SrishtiSessionAuth,
+                        hasSrishtiKeys: !!window.SrishtiKeys,
+                        nodeId: window.SrishtiApp?.nodeId
+                    };
+                    console.log('🔍 Checking dApp redirect:', debugInfo);
                     
                     if (window.SrishtiApp && window.SrishtiApp.nodeId && window.SrishtiApp.keyPair && window.SrishtiApp.keyPair.privateKey && window.SrishtiSessionAuth) {
                         // User is logged in and has a pending dApp redirect
                         try {
                             console.log('✅ Generating session token for dApp...');
+                            
+                            // Verify SrishtiKeys is available
+                            if (!window.SrishtiKeys) {
+                                throw new Error('SrishtiKeys library not loaded');
+                            }
+                            
                             const dAppOrigin = new URL(dappReturnUrl).origin;
+                            console.log('📝 Token details:', {
+                                nodeId: window.SrishtiApp.nodeId,
+                                dAppOrigin: dAppOrigin,
+                                privateKeyType: window.SrishtiApp.keyPair.privateKey?.constructor?.name
+                            });
+                            
                             const token = await window.SrishtiSessionAuth.generateToken(
                                 window.SrishtiApp.nodeId,
                                 window.SrishtiApp.keyPair.privateKey,
@@ -6232,11 +6267,16 @@
                             return; // Exit early - redirecting
                         } catch (error) {
                             console.error('❌ Failed to generate session token for dApp:', error);
+                            console.error('Error details:', {
+                                message: error.message,
+                                stack: error.stack,
+                                name: error.name
+                            });
                             sessionStorage.removeItem('dapp_return_url');
-                            alert('Failed to generate session token. Please try again.');
+                            alert(`Failed to generate session token: ${error.message || 'Unknown error'}. Please check the console for details.`);
                         }
                     } else {
-                        console.log('⏳ Waiting for credentials to load before redirecting to dApp...');
+                        console.log('⏳ Waiting for credentials to load before redirecting to dApp...', debugInfo);
                         // Credentials not loaded yet, but return URL is stored
                         // Will redirect once credentials are available (handled in node creation flow too)
                     }
