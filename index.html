@@ -6329,9 +6329,34 @@
                         if (window.SrishtiApp?.nodeId && !window.SrishtiApp?.keyPair?.privateKey) {
                             console.warn('⚠️ Node ID found but private key is missing. Cannot generate session token.');
                             console.warn('⚠️ Clearing dApp redirect request to prevent loop.');
+                            
                             // Clear the stored return URL to prevent redirect loop
                             sessionStorage.removeItem('dapp_return_url');
-                            // Show message but don't redirect
+                            
+                            // Show user-friendly message
+                            const hasDappReturnUrl = !!dappReturnUrl;
+                            if (hasDappReturnUrl) {
+                                // Show a modal or alert explaining the issue
+                                setTimeout(() => {
+                                    const message = `⚠️ Private Key Missing\n\n` +
+                                        `Your account exists but your private key is missing or corrupted.\n\n` +
+                                        `To fix this:\n` +
+                                        `1. Click OK to clear corrupted data\n` +
+                                        `2. You'll need to create a new account or use recovery options\n\n` +
+                                        `This will allow you to use dApps again.`;
+                                    
+                                    if (confirm(message)) {
+                                        // Clear corrupted keys but keep node info
+                                        localStorage.removeItem('srishti_private_key');
+                                        localStorage.removeItem('srishti_public_key');
+                                        // Keep nodeId and nodeName so user knows which account they had
+                                        console.log('✅ Cleared corrupted keys. User can now create new account.');
+                                        alert('Corrupted keys cleared. Please refresh and create a new account, or use recovery options if available.');
+                                        window.location.reload();
+                                    }
+                                }, 1000);
+                            }
+                            
                             console.log('ℹ️ User needs to log in with valid credentials first. dApp redirect cancelled.');
                         }
                         // Credentials not loaded yet, but return URL is stored
