@@ -6581,11 +6581,12 @@
                 }
                 
                 // Clean up any guest mode UI if present (in case it was shown during loading)
+                // Note: guestIndicator was already removed above at line 6443, but check again to be safe
                 const guestBtn = document.getElementById('guest-join-btn');
-                const guestIndicator = document.getElementById('guest-indicator');
+                const guestIndicatorAgain = document.getElementById('guest-indicator');
                 const qrHint = document.getElementById('qr-join-hint');
                 if (guestBtn) guestBtn.remove();
-                if (guestIndicator) guestIndicator.remove();
+                if (guestIndicatorAgain) guestIndicatorAgain.remove();
                 if (qrHint) qrHint.remove();
                 
                 // Ensure FAB icons are visible for logged-in users
