@@ -32,37 +32,28 @@ class PeerConnection {
     getRTCConfiguration() {
         return {
             iceServers: [
-                // Google STUN servers (most reliable)
+                // Google STUN servers (most reliable, always free)
                 { urls: 'stun:stun.l.google.com:19302' },
                 { urls: 'stun:stun1.l.google.com:19302' },
                 { urls: 'stun:stun2.l.google.com:19302' },
                 { urls: 'stun:stun3.l.google.com:19302' },
                 { urls: 'stun:stun4.l.google.com:19302' },
-                // Alternative public STUN servers for redundancy
-                { urls: 'stun:stun.stunprotocol.org:3478' },
-                // Free TURN servers - multiple providers for redundancy
-                // Metered.ca TURN (free tier)
+                // OpenRelay TURN servers (free, no signup required)
+                // https://www.metered.ca/tools/openrelay/
                 {
-                    urls: [
-                        'turn:a.relay.metered.ca:80',
-                        'turn:a.relay.metered.ca:80?transport=tcp',
-                        'turn:a.relay.metered.ca:443',
-                        'turn:a.relay.metered.ca:443?transport=tcp'
-                    ],
-                    username: 'e7e6c4c3a0c9c0b7f8d5a2e1',
-                    credential: 'qwertyuiopasdfgh'
+                    urls: 'turn:openrelay.metered.ca:80',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
                 },
-                // Twilio TURN (free testing servers)
                 {
-                    urls: 'turn:global.turn.twilio.com:3478?transport=udp',
-                    username: 'f4b4035eaa76f4a55de5f4351567653ee4ff6fa97b50b6b334fcc1be9c27212d',
-                    credential: 'w1uxM55V9yVoqyVFjt+mxDBV0F5HJlH3lVcqMhkq6GM='
+                    urls: 'turn:openrelay.metered.ca:443',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
                 },
-                // ExpressTURN servers
                 {
-                    urls: 'turn:turn.expressturn.com:3478',
-                    username: 'efV3BHKLUFTDWG1234',
-                    credential: 'T8P6nq9jYj0bXxyz'
+                    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
                 }
             ],
             // Pre-gather candidates to speed up connection
