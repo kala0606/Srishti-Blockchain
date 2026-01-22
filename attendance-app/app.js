@@ -51,6 +51,17 @@ class AttendanceAppUI {
                 throw new Error('Blockchain chain not available. Initialization may have failed.');
             }
 
+            // Wait for chain to be fully loaded (has blocks processed)
+            // This ensures node map is built before token verification
+            retries = 0;
+            while (this.srishtiApp.chain.getLength() === 0 && retries < 30) {
+                await new Promise(resolve => setTimeout(resolve, 200));
+                retries++;
+            }
+            
+            // Give it a bit more time for state to be built
+            await new Promise(resolve => setTimeout(resolve, 500));
+
             // ═══════════════════════════════════════════════════════════════════
             // SESSION TOKEN AUTHENTICATION (No private keys needed!)
             // ═══════════════════════════════════════════════════════════════════

@@ -60,6 +60,17 @@ class dAppAuth {
             return null;
         }
         
+        // Wait for chain to be fully loaded (node map built)
+        // This ensures we can verify the token with the node's public key
+        let retries = 0;
+        while (chain.getLength() === 0 && retries < 30) {
+            await new Promise(resolve => setTimeout(resolve, 200));
+            retries++;
+        }
+        
+        // Give chain a moment to build node map
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
         // Verify and store token
         const tokenData = await window.SrishtiSessionAuth.verifyToken(token, chain);
         

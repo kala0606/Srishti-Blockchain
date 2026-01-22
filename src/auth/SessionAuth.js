@@ -110,19 +110,39 @@ class SessionAuth {
             const node = nodes[token.data.nodeId];
             
             if (!node || !node.publicKey) {
-                console.warn('Node not found on chain or missing public key');
+                console.warn('Node not found on chain or missing public key', {
+                    nodeId: token.data.nodeId,
+                    nodeExists: !!node,
+                    hasPublicKey: node ? !!node.publicKey : false,
+                    availableNodes: Object.keys(nodes).length
+                });
                 return null;
             }
             
             // Import public key
-            const publicKey = await window.SrishtiKeys.importPublicKey(node.publicKey);
+            let publicKey;
+            try {
+                publicKey = await window.SrishtiKeys.importPublicKey(node.publicKey);
+            } catch (error) {
+                console.error('Failed to import public key:', error, {
+                    nodeId: token.data.nodeId,
+                    publicKeyFormat: typeof node.publicKey,
+                    publicKeyLength: node.publicKey ? node.publicKey.length : 0
+                });
+                return null;
+            }
             
             // Verify signature
             const tokenString = JSON.stringify(token.data);
             const isValid = await window.SrishtiKeys.verify(publicKey, tokenString, token.signature);
             
             if (!isValid) {
-                console.warn('Token signature invalid');
+                console.warn('Token signature invalid', {
+                    nodeId: token.data.nodeId,
+                    tokenData: token.data,
+                    signatureLength: token.signature ? token.signature.length : 0,
+                    publicKeyAvailable: !!publicKey
+                });
                 return null;
             }
             
