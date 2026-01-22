@@ -91,7 +91,7 @@ class WalletManager {
 
     /**
      * Generate session token for dApp
-     * @param {string} dAppUrl - dApp URL
+     * @param {string} dAppUrl - dApp URL (must be absolute)
      * @returns {Promise<string>} Session token
      */
     async generateSessionTokenForDApp(dAppUrl) {
@@ -104,7 +104,15 @@ class WalletManager {
         }
 
         try {
-            const dAppOrigin = new URL(dAppUrl).origin;
+            // Ensure dAppUrl is an absolute URL
+            let absoluteUrl = dAppUrl;
+            if (!dAppUrl.startsWith('http://') && !dAppUrl.startsWith('https://')) {
+                // If relative, convert to absolute using current origin
+                const baseUrl = window.location.origin + window.location.pathname.replace(/\/[^/]*$/, '/');
+                absoluteUrl = new URL(dAppUrl, baseUrl).toString();
+            }
+            
+            const dAppOrigin = new URL(absoluteUrl).origin;
             const token = await window.SrishtiSessionAuth.generateToken(
                 this.app.nodeId,
                 this.app.keyPair.privateKey,
@@ -123,7 +131,7 @@ class WalletManager {
 
     /**
      * Launch a dApp with authentication
-     * @param {string} dAppUrl - dApp URL
+     * @param {string} dAppUrl - dApp URL (can be relative or absolute)
      * @param {boolean} [newWindow=true] - Open in new window
      */
     async launchDApp(dAppUrl, newWindow = true) {
@@ -132,11 +140,19 @@ class WalletManager {
         }
 
         try {
-            // Generate session token
-            const token = await this.generateSessionTokenForDApp(dAppUrl);
+            // Ensure dAppUrl is an absolute URL
+            let absoluteUrl = dAppUrl;
+            if (!dAppUrl.startsWith('http://') && !dAppUrl.startsWith('https://')) {
+                // If relative, convert to absolute using current origin
+                const baseUrl = window.location.origin + window.location.pathname.replace(/\/[^/]*$/, '/');
+                absoluteUrl = new URL(dAppUrl, baseUrl).toString();
+            }
+            
+            // Generate session token (uses absoluteUrl internally)
+            const token = await this.generateSessionTokenForDApp(absoluteUrl);
 
             // Add token to URL
-            const url = new URL(dAppUrl);
+            const url = new URL(absoluteUrl);
             url.searchParams.set('session_token', token);
 
             // Launch dApp

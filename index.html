@@ -5942,11 +5942,20 @@
                 return;
             }
             
-            // Map dApp IDs to URLs
+            // Map dApp IDs to URLs - always use absolute URLs
+            let baseUrl = window.SRISHTI_BLOCKCHAIN_URL;
+            if (!baseUrl) {
+                // Use current origin as base URL
+                baseUrl = window.location.origin + window.location.pathname.replace(/\/[^/]*$/, '/');
+            }
+            
+            // Ensure baseUrl ends with /
+            if (!baseUrl.endsWith('/')) {
+                baseUrl += '/';
+            }
+            
             const dAppUrls = {
-                'attendance': window.SRISHTI_BLOCKCHAIN_URL 
-                    ? new URL('attendance-app/index.html', window.SRISHTI_BLOCKCHAIN_URL).toString()
-                    : './attendance-app/index.html'
+                'attendance': new URL('attendance-app/index.html', baseUrl).toString()
             };
             
             const dAppUrl = dAppUrls[dAppId];
@@ -5954,6 +5963,8 @@
                 alert(`dApp "${dAppId}" not found`);
                 return;
             }
+            
+            console.log('🚀 Launching dApp:', dAppUrl);
             
             try {
                 await window.walletManager.launchDApp(dAppUrl, true); // true = open in new window
