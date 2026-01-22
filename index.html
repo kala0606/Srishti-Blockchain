@@ -5949,7 +5949,17 @@
                             throw new Error('SrishtiKeys library not loaded');
                         }
                         
-                        const dAppOrigin = new URL(dappReturnUrl).origin;
+                        // Ensure URL is properly decoded
+                        let decodedUrl = dappReturnUrl;
+                        try {
+                            // Try to decode if it's still encoded
+                            decodedUrl = decodeURIComponent(dappReturnUrl);
+                        } catch (e) {
+                            // If decode fails, use as-is (might already be decoded)
+                            decodedUrl = dappReturnUrl;
+                        }
+                        
+                        const dAppOrigin = new URL(decodedUrl).origin;
                         const token = await window.SrishtiSessionAuth.generateToken(
                             nodeId,
                             window.SrishtiApp.keyPair.privateKey,
@@ -5963,7 +5973,7 @@
                         sessionStorage.removeItem('dapp_return_url');
                         
                         // Redirect to dApp with token
-                        const returnUrlObj = new URL(dappReturnUrl);
+                        const returnUrlObj = new URL(decodedUrl);
                         returnUrlObj.searchParams.set('session_token', token);
                         window.location.href = returnUrlObj.toString();
                         return; // Exit early - redirecting
@@ -5972,7 +5982,8 @@
                         console.error('Error details:', {
                             message: error.message,
                             stack: error.stack,
-                            name: error.name
+                            name: error.name,
+                            dappReturnUrl: dappReturnUrl
                         });
                         sessionStorage.removeItem('dapp_return_url');
                         alert(`Failed to generate session token: ${error.message || 'Unknown error'}. Please check the console for details.`);
@@ -6068,9 +6079,11 @@
             const returnUrl = urlParams.get('return_url');
             
             if (dappLogin === 'true' && returnUrl) {
-                console.log('🔐 dApp login requested:', returnUrl);
-                // Store return URL - will process after credentials are loaded
-                sessionStorage.setItem('dapp_return_url', returnUrl);
+                // Decode the return URL (it comes URL-encoded from the query param)
+                const decodedReturnUrl = decodeURIComponent(returnUrl);
+                console.log('🔐 dApp login requested:', decodedReturnUrl);
+                // Store decoded return URL - will process after credentials are loaded
+                sessionStorage.setItem('dapp_return_url', decodedReturnUrl);
                 // Clean up URL params
                 const cleanUrl = new URL(window.location.href);
                 cleanUrl.searchParams.delete('dapp_login');
@@ -6152,12 +6165,25 @@
                 if (dappReturnUrl && window.SrishtiApp && window.SrishtiApp.nodeId && window.SrishtiApp.keyPair && window.SrishtiApp.keyPair.privateKey && window.SrishtiSessionAuth) {
                     try {
                         console.log('✅ Delayed check: Generating session token for dApp...');
+                        console.log('📝 Return URL from storage:', dappReturnUrl);
                         
                         if (!window.SrishtiKeys) {
                             throw new Error('SrishtiKeys library not loaded');
                         }
                         
-                        const dAppOrigin = new URL(dappReturnUrl).origin;
+                        // Ensure URL is properly decoded
+                        let decodedUrl = dappReturnUrl;
+                        try {
+                            // Try to decode if it's still encoded
+                            decodedUrl = decodeURIComponent(dappReturnUrl);
+                        } catch (e) {
+                            // If decode fails, use as-is (might already be decoded)
+                            decodedUrl = dappReturnUrl;
+                        }
+                        
+                        const dAppOrigin = new URL(decodedUrl).origin;
+                        console.log('📝 dApp Origin:', dAppOrigin);
+                        
                         const token = await window.SrishtiSessionAuth.generateToken(
                             window.SrishtiApp.nodeId,
                             window.SrishtiApp.keyPair.privateKey,
@@ -6171,7 +6197,7 @@
                         sessionStorage.removeItem('dapp_return_url');
                         
                         // Redirect to dApp with token
-                        const returnUrlObj = new URL(dappReturnUrl);
+                        const returnUrlObj = new URL(decodedUrl);
                         returnUrlObj.searchParams.set('session_token', token);
                         window.location.href = returnUrlObj.toString();
                     } catch (error) {
@@ -6179,7 +6205,8 @@
                         console.error('Error details:', {
                             message: error.message,
                             stack: error.stack,
-                            name: error.name
+                            name: error.name,
+                            dappReturnUrl: dappReturnUrl
                         });
                     }
                 }
@@ -6241,11 +6268,22 @@
                                 throw new Error('SrishtiKeys library not loaded');
                             }
                             
-                            const dAppOrigin = new URL(dappReturnUrl).origin;
+                            // Ensure URL is properly decoded
+                            let decodedUrl = dappReturnUrl;
+                            try {
+                                // Try to decode if it's still encoded
+                                decodedUrl = decodeURIComponent(dappReturnUrl);
+                            } catch (e) {
+                                // If decode fails, use as-is (might already be decoded)
+                                decodedUrl = dappReturnUrl;
+                            }
+                            
+                            const dAppOrigin = new URL(decodedUrl).origin;
                             console.log('📝 Token details:', {
                                 nodeId: window.SrishtiApp.nodeId,
                                 dAppOrigin: dAppOrigin,
-                                privateKeyType: window.SrishtiApp.keyPair.privateKey?.constructor?.name
+                                privateKeyType: window.SrishtiApp.keyPair.privateKey?.constructor?.name,
+                                returnUrl: decodedUrl
                             });
                             
                             const token = await window.SrishtiSessionAuth.generateToken(
@@ -6261,7 +6299,7 @@
                             sessionStorage.removeItem('dapp_return_url');
                             
                             // Redirect to dApp with token
-                            const returnUrlObj = new URL(dappReturnUrl);
+                            const returnUrlObj = new URL(decodedUrl);
                             returnUrlObj.searchParams.set('session_token', token);
                             window.location.href = returnUrlObj.toString();
                             return; // Exit early - redirecting
@@ -6270,13 +6308,22 @@
                             console.error('Error details:', {
                                 message: error.message,
                                 stack: error.stack,
-                                name: error.name
+                                name: error.name,
+                                dappReturnUrl: dappReturnUrl
                             });
                             sessionStorage.removeItem('dapp_return_url');
                             alert(`Failed to generate session token: ${error.message || 'Unknown error'}. Please check the console for details.`);
                         }
                     } else {
                         console.log('⏳ Waiting for credentials to load before redirecting to dApp...', debugInfo);
+                        
+                        // If we have nodeId but no private key, show helpful message
+                        if (window.SrishtiApp?.nodeId && !window.SrishtiApp?.keyPair?.privateKey) {
+                            console.warn('⚠️ Node ID found but private key is missing. User needs to re-login.');
+                            // Clear the stored return URL and show message
+                            sessionStorage.removeItem('dapp_return_url');
+                            alert('Your private key is missing. Please log out and log back in to generate a new session token for the dApp.');
+                        }
                         // Credentials not loaded yet, but return URL is stored
                         // Will redirect once credentials are available (handled in node creation flow too)
                     }
