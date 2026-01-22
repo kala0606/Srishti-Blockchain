@@ -149,6 +149,11 @@ class Chain {
         // Verify block index
         const expectedIndex = this.blocks.length;
         if (block.index !== expectedIndex) {
+            console.error(`❌ Block index mismatch details:`);
+            console.error(`   Expected index: ${expectedIndex}`);
+            console.error(`   Got index: ${block.index}`);
+            console.error(`   Current chain length: ${this.blocks.length}`);
+            console.error(`   Block data type: ${block.data?.type || 'unknown'}`);
             throw new Error(`Block index mismatch: expected ${expectedIndex}, got ${block.index}`);
         }
         
@@ -1494,13 +1499,28 @@ class Chain {
             throw new Error('SrishtiBlock not loaded');
         }
         
-        // Convert to Block objects
-        const blocks = newBlocks.map(blockData => window.SrishtiBlock.fromJSON(blockData));
+        console.log(`🔄 replaceChain: Validating ${newBlocks.length} blocks...`);
         
-        // Create temporary chain
+        // Convert to Block objects
+        const blocks = newBlocks.map((blockData, i) => {
+            const block = window.SrishtiBlock.fromJSON(blockData);
+            // Verify index matches position in array
+            if (block.index !== i) {
+                console.error(`❌ Block at position ${i} has wrong index ${block.index}`);
+            }
+            return block;
+        });
+        
+        // Create temporary chain for validation
         const tempChain = new Chain(blocks[0]);
         for (let i = 1; i < blocks.length; i++) {
-            await tempChain.addBlock(blocks[i]);
+            try {
+                await tempChain.addBlock(blocks[i]);
+            } catch (error) {
+                console.error(`❌ replaceChain failed at block ${i}:`, error.message);
+                console.error(`   Block index: ${blocks[i].index}, Expected: ${tempChain.blocks.length}`);
+                throw error;
+            }
         }
         
         // Validate
