@@ -296,12 +296,54 @@ class Recovery {
             z-index: 10000;
         `;
 
+        // Check sync status
+        const syncStatus = window._guestSyncStatus || {};
+        const nodeCount = syncStatus.nodeCount || 0;
+        const isStillSyncing = !syncStatus.complete || (typeof window.isBlockchainSyncing === 'function' && window.isBlockchainSyncing());
+        
+        // Build sync warning if needed
+        const syncWarning = (isStillSyncing || nodeCount === 0) ? `
+            <div id="recovery-sync-warning" style="
+                background: rgba(251, 191, 36, 0.15);
+                border: 1px solid rgba(251, 191, 36, 0.3);
+                border-radius: 8px;
+                padding: 12px;
+                margin-bottom: 15px;
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            ">
+                <span style="font-size: 18px;">⏳</span>
+                <div style="text-align: left;">
+                    <div style="color: #FCD34D; font-size: 13px; font-weight: 500;">
+                        ${nodeCount === 0 ? 'Network syncing...' : `Syncing (${nodeCount} nodes loaded)`}
+                    </div>
+                    <div style="color: rgba(251, 191, 36, 0.7); font-size: 11px;">
+                        Recovery may fail if your node hasn't synced yet. Wait for more nodes to load.
+                    </div>
+                </div>
+            </div>
+        ` : `
+            <div style="
+                background: rgba(74, 222, 128, 0.15);
+                border: 1px solid rgba(74, 222, 128, 0.3);
+                border-radius: 8px;
+                padding: 10px;
+                margin-bottom: 15px;
+                color: #4ADE80;
+                font-size: 12px;
+            ">
+                ✓ ${nodeCount} nodes synced from network
+            </div>
+        `;
+
         overlay.innerHTML = `
             <div style="background: #1a1a2e; padding: 30px; border-radius: 16px; max-width: 400px; text-align: center;">
                 <h2 style="color: #fff; margin-bottom: 10px;">🔄 Recover Your Node</h2>
-                <p style="color: #888; margin-bottom: 20px; font-size: 14px;">
+                <p style="color: #888; margin-bottom: 15px; font-size: 14px;">
                     Enter your 12-word recovery phrase to restore your node identity.
                 </p>
+                ${syncWarning}
                 <textarea id="recovery-phrase-input" placeholder="Enter your 12 words separated by spaces..." style="
                     width: 100%;
                     height: 100px;
@@ -313,6 +355,7 @@ class Recovery {
                     font-size: 14px;
                     margin-bottom: 15px;
                     resize: none;
+                    box-sizing: border-box;
                 "></textarea>
                 <input type="text" id="recovery-name-input" placeholder="Your name" style="
                     width: 100%;
@@ -343,14 +386,51 @@ class Recovery {
                         border-radius: 8px;
                         font-size: 14px;
                         cursor: pointer;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        gap: 8px;
                     ">Recover</button>
                 </div>
             </div>
         `;
 
         document.body.appendChild(overlay);
+        
+        // Update sync warning periodically
+        const updateSyncWarning = () => {
+            const warningEl = document.getElementById('recovery-sync-warning');
+            if (!warningEl) return;
+            
+            const currentStatus = window._guestSyncStatus || {};
+            const currentNodes = currentStatus.nodeCount || 0;
+            const stillSyncing = !currentStatus.complete || (typeof window.isBlockchainSyncing === 'function' && window.isBlockchainSyncing());
+            
+            if (!stillSyncing && currentNodes > 0) {
+                // Sync complete - update to success state
+                warningEl.style.background = 'rgba(74, 222, 128, 0.15)';
+                warningEl.style.borderColor = 'rgba(74, 222, 128, 0.3)';
+                warningEl.innerHTML = `
+                    <span style="font-size: 18px;">✓</span>
+                    <div style="text-align: left;">
+                        <div style="color: #4ADE80; font-size: 13px; font-weight: 500;">
+                            Sync complete!
+                        </div>
+                        <div style="color: rgba(74, 222, 128, 0.7); font-size: 11px;">
+                            ${currentNodes} nodes loaded from network
+                        </div>
+                    </div>
+                `;
+            } else if (currentNodes > 0) {
+                // Still syncing but have some nodes
+                warningEl.querySelector('div > div:first-child').textContent = `Syncing (${currentNodes} nodes loaded)`;
+            }
+        };
+        
+        const syncInterval = setInterval(updateSyncWarning, 2000);
 
         document.getElementById('recovery-cancel').onclick = () => {
+            clearInterval(syncInterval);
             overlay.remove();
         };
 
@@ -374,6 +454,7 @@ class Recovery {
                 return;
             }
 
+            clearInterval(syncInterval);
             overlay.remove();
             if (onRecover) {
                 onRecover({ phrase, name });
