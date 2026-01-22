@@ -1,0 +1,641 @@
+/**
+ * Srishti Attendance App - First dApp Built on Srishti SDK
+ * 
+ * A decentralized attendance management system for institutions.
+ * 
+ * Features:
+ * - Institutions create attendance sessions (classes, events, meetings)
+ * - Students mark attendance with location proof
+ * - Institutions verify attendance
+ * - Attendance certificates as soulbound tokens
+ * 
+ * Data Architecture:
+ * - ON-CHAIN: Minimal proofs (session exists, attendance marked, verified)
+ * - OFF-CHAIN: Full session details, attendee info, location data
+ * 
+ * @version 1.0.0
+ * @requires SrishtiSDK
+ * @requires SrishtiAppDataStore
+ */
+
+class AttendanceApp {
+    // App identifier - used for all on-chain events
+    static APP_ID = 'srishti.attendance.v1';
+    
+    // App-specific action types
+    static ACTIONS = {
+        SESSION_CREATE: 'SESSION_CREATE',
+        SESSION_END: 'SESSION_END',
+        MARK_PRESENT: 'MARK_PRESENT',
+        VERIFY: 'VERIFY',
+        ISSUE_CERTIFICATE: 'ISSUE_CERTIFICATE'
+    };
+    
+    // Attendance status
+    static STATUS = {
+        PENDING: 'PENDING',
+        VERIFIED: 'VERIFIED',
+        REJECTED: 'REJECTED'
+    };
+    
+    /**
+     * Create a new Attendance App instance
+     * @param {SrishtiSDK} sdk - Initialized SDK instance
+     */
+    constructor(sdk) {
+        if (!sdk) {
+            throw new Error('AttendanceApp requires a SrishtiSDK instance');
+        }
+        
+        this.sdk = sdk;
+        this.store = sdk.getAppStore(AttendanceApp.APP_ID);
+        
+        // Set up event listener for real-time updates
+        this._setupEventListener();
+    }
+    
+    /**
+     * Set up listener for attendance-related events
+     * @private
+     */
+    _setupEventListener() {
+        this.sdk.onAppEvent(AttendanceApp.APP_ID, async (event) => {
+            console.log(`📋 Attendance event: ${event.action}`, event.payload);
+            
+            // Trigger custom callbacks if set
+            if (this.onSessionEvent && event.action === AttendanceApp.ACTIONS.SESSION_CREATE) {
+                this.onSessionEvent(event);
+            }
+            if (this.onAttendanceEvent && event.action === AttendanceApp.ACTIONS.MARK_PRESENT) {
+                this.onAttendanceEvent(event);
+            }
+            if (this.onVerifyEvent && event.action === AttendanceApp.ACTIONS.VERIFY) {
+                this.onVerifyEvent(event);
+            }
+        });
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SESSION MANAGEMENT (Institution only)
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    /**
+     * Create an attendance session
+     * 
+     * @param {Object} options - Session options
+     * @param {string} options.title - Session title
+     * @param {string} [options.description] - Session description
+     * @param {number} [options.startTime] - Start timestamp (defaults to now)
+     * @param {number} [options.endTime] - End timestamp (null for open-ended)
+     * @param {string} [options.location] - Location description
+     * @param {Object} [options.geofence] - Geofence for location verification
+     * @param {number} options.geofence.lat - Latitude
+     * @param {number} options.geofence.lng - Longitude
+     * @param {number} options.geofence.radius - Radius in meters
+     * @param {number} [options.maxParticipants] - Max attendees
+     * @returns {Promise<string>} Session ID
+     * 
+     * @example
+     * const sessionId = await app.createSession({
+     *     title: 'Blockchain 101 - Lecture 5',
+     *     description: 'Introduction to consensus mechanisms',
+     *     location: 'Room 301, CS Building',
+     *     geofence: { lat: 12.9716, lng: 77.5946, radius: 100 }
+     * });
+     */
+    async createSession(options) {
+        // Verify institution status
+        if (!this.sdk.isInstitution() && !this.sdk.isRoot()) {
+            throw new Error('Only verified institutions can create attendance sessions');
+        }
+        
+        if (!options.title) {
+            throw new Error('Session title is required');
+        }
+        
+        const sessionId = this.sdk.generateId('sess');
+        
+        // Full session data (stored OFF-CHAIN)
+        const sessionData = {
+            id: sessionId,
+            type: 'session',
+            title: options.title,
+            description: options.description || '',
+            startTime: options.startTime || Date.now(),
+            endTime: options.endTime || null,
+            location: options.location || null,
+            geofence: options.geofence || null,
+            maxParticipants: options.maxParticipants || null,
+            createdBy: this.sdk.nodeId,
+            createdAt: Date.now(),
+            status: 'ACTIVE',
+            attendeeCount: 0
+        };
+        
+        // Store full data OFF-CHAIN
+        await this.store.put(sessionId, sessionData);
+        
+        // Hash for on-chain reference
+        const dataHash = await this.sdk.hashData(sessionData);
+        
+        // Submit minimal proof ON-CHAIN
+        const success = await this.sdk.submitAppEvent(
+            AttendanceApp.APP_ID,
+            AttendanceApp.ACTIONS.SESSION_CREATE,
+            {
+                ref: sessionId,
+                dataHash: dataHash,
+                metadata: {
+                    title: options.title,
+                    startTime: sessionData.startTime
+                }
+            }
+        );
+        
+        if (!success) {
+            // Rollback off-chain data
+            await this.store.delete(sessionId);
+            throw new Error('Failed to submit session to blockchain');
+        }
+        
+        console.log(`✅ Session created: ${sessionId}`);
+        return sessionId;
+    }
+    
+    /**
+     * End an attendance session
+     * @param {string} sessionId - Session ID
+     * @returns {Promise<boolean>}
+     */
+    async endSession(sessionId) {
+        const session = await this.store.get(sessionId);
+        if (!session) {
+            throw new Error('Session not found');
+        }
+        
+        if (session.createdBy !== this.sdk.nodeId) {
+            throw new Error('Only session creator can end it');
+        }
+        
+        // Update off-chain data
+        session.status = 'ENDED';
+        session.endTime = Date.now();
+        await this.store.put(sessionId, session);
+        
+        // Submit on-chain
+        return await this.sdk.submitAppEvent(
+            AttendanceApp.APP_ID,
+            AttendanceApp.ACTIONS.SESSION_END,
+            {
+                ref: sessionId,
+                metadata: {
+                    endTime: session.endTime,
+                    attendeeCount: session.attendeeCount
+                }
+            }
+        );
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ATTENDANCE MARKING (Students)
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    /**
+     * Mark attendance for a session
+     * 
+     * @param {string} sessionId - Session ID
+     * @param {Object} [options] - Attendance options
+     * @param {Object} [options.location] - Current location
+     * @param {number} options.location.lat - Latitude
+     * @param {number} options.location.lng - Longitude
+     * @returns {Promise<string>} Attendance record ID
+     * 
+     * @example
+     * // With geolocation
+     * navigator.geolocation.getCurrentPosition(async (pos) => {
+     *     await app.markAttendance(sessionId, {
+     *         location: { lat: pos.coords.latitude, lng: pos.coords.longitude }
+     *     });
+     * });
+     */
+    async markAttendance(sessionId, options = {}) {
+        const session = await this.store.get(sessionId);
+        if (!session) {
+            throw new Error('Session not found');
+        }
+        
+        // Check if session is still active
+        if (session.status === 'ENDED') {
+            throw new Error('Session has ended');
+        }
+        
+        if (session.endTime && Date.now() > session.endTime) {
+            throw new Error('Session time has passed');
+        }
+        
+        // Check if already marked
+        const recordId = `${sessionId}_${this.sdk.nodeId}`;
+        const existing = await this.store.get(recordId);
+        if (existing) {
+            throw new Error('Attendance already marked for this session');
+        }
+        
+        // Validate geofence if required
+        let distanceFromVenue = null;
+        if (session.geofence && options.location) {
+            distanceFromVenue = this._calculateDistance(options.location, session.geofence);
+            
+            if (distanceFromVenue > session.geofence.radius) {
+                throw new Error(
+                    `You are ${Math.round(distanceFromVenue)}m away from the venue. ` +
+                    `Must be within ${session.geofence.radius}m to mark attendance.`
+                );
+            }
+        }
+        
+        // Full attendance data (OFF-CHAIN)
+        const attendanceData = {
+            id: recordId,
+            type: 'attendance',
+            sessionId: sessionId,
+            studentId: this.sdk.nodeId,
+            timestamp: Date.now(),
+            location: options.location || null,
+            distanceFromVenue: distanceFromVenue,
+            status: AttendanceApp.STATUS.PENDING,
+            owner: this.sdk.nodeId
+        };
+        
+        // Store off-chain
+        await this.store.put(recordId, attendanceData);
+        
+        // Update session attendee count
+        session.attendeeCount = (session.attendeeCount || 0) + 1;
+        await this.store.put(sessionId, session);
+        
+        // Hash for verification
+        const dataHash = await this.sdk.hashData(attendanceData);
+        
+        // Submit proof ON-CHAIN
+        const success = await this.sdk.submitAppEvent(
+            AttendanceApp.APP_ID,
+            AttendanceApp.ACTIONS.MARK_PRESENT,
+            {
+                ref: sessionId,
+                target: this.sdk.nodeId,
+                dataHash: dataHash
+            }
+        );
+        
+        if (!success) {
+            // Rollback
+            await this.store.delete(recordId);
+            session.attendeeCount--;
+            await this.store.put(sessionId, session);
+            throw new Error('Failed to submit attendance to blockchain');
+        }
+        
+        console.log(`✅ Attendance marked: ${recordId}`);
+        return recordId;
+    }
+    
+    /**
+     * Calculate distance between two coordinates (Haversine formula)
+     * @private
+     */
+    _calculateDistance(point1, point2) {
+        const R = 6371000; // Earth's radius in meters
+        const lat1 = point1.lat * Math.PI / 180;
+        const lat2 = point2.lat * Math.PI / 180;
+        const dLat = (point2.lat - point1.lat) * Math.PI / 180;
+        const dLng = (point2.lng - point1.lng) * Math.PI / 180;
+        
+        const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                  Math.cos(lat1) * Math.cos(lat2) *
+                  Math.sin(dLng/2) * Math.sin(dLng/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        
+        return R * c;
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════════════
+    // VERIFICATION (Institution only)
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    /**
+     * Verify a student's attendance
+     * 
+     * @param {string} sessionId - Session ID
+     * @param {string} studentId - Student's node ID
+     * @param {boolean} [approved=true] - Approve or reject
+     * @param {string} [reason] - Reason for rejection
+     * @returns {Promise<boolean>}
+     */
+    async verifyAttendance(sessionId, studentId, approved = true, reason = null) {
+        const session = await this.store.get(sessionId);
+        if (!session) {
+            throw new Error('Session not found');
+        }
+        
+        if (session.createdBy !== this.sdk.nodeId) {
+            throw new Error('Only session creator can verify attendance');
+        }
+        
+        const recordId = `${sessionId}_${studentId}`;
+        const record = await this.store.get(recordId);
+        if (!record) {
+            throw new Error('Attendance record not found');
+        }
+        
+        // Update off-chain record
+        record.status = approved ? AttendanceApp.STATUS.VERIFIED : AttendanceApp.STATUS.REJECTED;
+        record.verifiedBy = this.sdk.nodeId;
+        record.verifiedAt = Date.now();
+        record.rejectionReason = approved ? null : reason;
+        await this.store.put(recordId, record);
+        
+        // Submit verification ON-CHAIN
+        return await this.sdk.submitAppEvent(
+            AttendanceApp.APP_ID,
+            AttendanceApp.ACTIONS.VERIFY,
+            {
+                ref: sessionId,
+                target: studentId,
+                metadata: { verified: approved }
+            }
+        );
+    }
+    
+    /**
+     * Bulk verify all pending attendance for a session
+     * @param {string} sessionId - Session ID
+     * @returns {Promise<Array>} Results
+     */
+    async bulkVerifyAll(sessionId) {
+        const attendees = await this.getSessionAttendees(sessionId);
+        const pending = attendees.filter(a => a.status === AttendanceApp.STATUS.PENDING);
+        
+        const results = [];
+        for (const attendee of pending) {
+            try {
+                await this.verifyAttendance(sessionId, attendee.studentId, true);
+                results.push({ studentId: attendee.studentId, success: true });
+            } catch (error) {
+                results.push({ studentId: attendee.studentId, success: false, error: error.message });
+            }
+        }
+        
+        return results;
+    }
+    
+    /**
+     * Issue attendance certificate (soulbound token)
+     * Uses the blockchain's native SOULBOUND_MINT event
+     * 
+     * @param {string} sessionId - Session ID
+     * @param {string} studentId - Student's node ID
+     * @param {Object} [options] - Certificate options
+     * @returns {Promise<boolean>}
+     */
+    async issueCertificate(sessionId, studentId, options = {}) {
+        if (!this.sdk.isInstitution() && !this.sdk.isRoot()) {
+            throw new Error('Only institutions can issue certificates');
+        }
+        
+        const session = await this.store.get(sessionId);
+        if (!session) {
+            throw new Error('Session not found');
+        }
+        
+        const recordId = `${sessionId}_${studentId}`;
+        const record = await this.store.get(recordId);
+        if (!record || record.status !== AttendanceApp.STATUS.VERIFIED) {
+            throw new Error('Student attendance not verified');
+        }
+        
+        // Create soulbound mint event through blockchain directly
+        // This uses the core blockchain's SOULBOUND_MINT, not an app event
+        const event = window.SrishtiEvent.createSoulboundMint({
+            issuerId: this.sdk.nodeId,
+            recipientId: studentId,
+            achievementId: `ATTENDANCE_${sessionId}`,
+            title: options.title || `Attendance: ${session.title}`,
+            description: options.description || `Certificate of attendance for ${session.title}`,
+            metadata: {
+                sessionId: sessionId,
+                sessionTitle: session.title,
+                attendedAt: record.timestamp,
+                verifiedAt: record.verifiedAt,
+                appType: 'ATTENDANCE',
+                appId: AttendanceApp.APP_ID
+            }
+        });
+        
+        // Submit as block
+        const latestBlock = this.sdk.chain.getLatestBlock();
+        const block = new window.SrishtiBlock({
+            index: this.sdk.chain.getLength(),
+            previousHash: latestBlock.hash,
+            data: event,
+            proposer: this.sdk.nodeId,
+            participationProof: { nodeId: this.sdk.nodeId, score: 0.5, timestamp: Date.now() }
+        });
+        
+        await block.computeHash();
+        return await this.sdk.network.proposeBlock(block);
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════════════
+    // QUERIES
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    /**
+     * Get sessions created by current user
+     * @returns {Promise<Array>}
+     */
+    async getMySessions() {
+        return await this.store.query('owner', this.sdk.nodeId);
+    }
+    
+    /**
+     * Get a specific session
+     * @param {string} sessionId - Session ID
+     * @returns {Promise<Object|null>}
+     */
+    async getSession(sessionId) {
+        return await this.store.get(sessionId);
+    }
+    
+    /**
+     * Get all active sessions (from on-chain events)
+     * Combines on-chain proofs with off-chain data
+     * @returns {Promise<Array>}
+     */
+    async getActiveSessions() {
+        const events = this.sdk.queryAppEvents(
+            AttendanceApp.APP_ID,
+            AttendanceApp.ACTIONS.SESSION_CREATE
+        );
+        
+        const sessions = [];
+        for (const event of events) {
+            const session = await this.store.get(event.payload.ref);
+            if (session && session.status === 'ACTIVE') {
+                sessions.push(session);
+            }
+        }
+        
+        return sessions;
+    }
+    
+    /**
+     * Get all sessions (from on-chain)
+     * @returns {Promise<Array>}
+     */
+    async getAllSessions() {
+        const events = this.sdk.queryAppEvents(
+            AttendanceApp.APP_ID,
+            AttendanceApp.ACTIONS.SESSION_CREATE
+        );
+        
+        const sessions = [];
+        for (const event of events) {
+            const session = await this.store.get(event.payload.ref);
+            if (session) {
+                sessions.push(session);
+            }
+        }
+        
+        return sessions;
+    }
+    
+    /**
+     * Get attendees for a session
+     * @param {string} sessionId - Session ID
+     * @returns {Promise<Array>}
+     */
+    async getSessionAttendees(sessionId) {
+        // Query on-chain attendance events for this session
+        const events = this.sdk.queryAppEvents(
+            AttendanceApp.APP_ID,
+            AttendanceApp.ACTIONS.MARK_PRESENT,
+            { ref: sessionId }
+        );
+        
+        const attendees = [];
+        for (const event of events) {
+            const recordId = `${sessionId}_${event.payload.target}`;
+            const record = await this.store.get(recordId);
+            if (record) {
+                // Get verification status
+                const verifyEvents = this.sdk.queryAppEvents(
+                    AttendanceApp.APP_ID,
+                    AttendanceApp.ACTIONS.VERIFY,
+                    { ref: sessionId, target: event.payload.target }
+                );
+                
+                if (verifyEvents.length > 0) {
+                    const latest = verifyEvents[verifyEvents.length - 1];
+                    record.status = latest.payload.metadata?.verified 
+                        ? AttendanceApp.STATUS.VERIFIED 
+                        : AttendanceApp.STATUS.REJECTED;
+                }
+                
+                attendees.push(record);
+            }
+        }
+        
+        return attendees;
+    }
+    
+    /**
+     * Get my attendance for a specific session
+     * @param {string} sessionId - Session ID
+     * @returns {Promise<Object|null>}
+     */
+    async getMyAttendance(sessionId) {
+        const recordId = `${sessionId}_${this.sdk.nodeId}`;
+        return await this.store.get(recordId);
+    }
+    
+    /**
+     * Get my attendance history (all sessions I attended)
+     * @returns {Promise<Array>}
+     */
+    async getMyAttendanceHistory() {
+        const events = this.sdk.queryAppEvents(
+            AttendanceApp.APP_ID,
+            AttendanceApp.ACTIONS.MARK_PRESENT,
+            { target: this.sdk.nodeId }
+        );
+        
+        const history = [];
+        for (const event of events) {
+            const recordId = `${event.payload.ref}_${this.sdk.nodeId}`;
+            const record = await this.store.get(recordId);
+            const session = await this.store.get(event.payload.ref);
+            
+            if (record) {
+                history.push({
+                    ...record,
+                    sessionTitle: session?.title || 'Unknown Session',
+                    sessionCreator: session?.createdBy || 'Unknown'
+                });
+            }
+        }
+        
+        return history;
+    }
+    
+    /**
+     * Get my attendance certificates
+     * @returns {Array}
+     */
+    getMyAttendanceCertificates() {
+        return this.sdk.chain.getSoulboundTokens(this.sdk.nodeId)
+            .filter(token => token.metadata?.appType === 'ATTENDANCE');
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════════════
+    // STATISTICS
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    /**
+     * Get attendance statistics for a session
+     * @param {string} sessionId - Session ID
+     * @returns {Promise<Object>}
+     */
+    async getSessionStats(sessionId) {
+        const attendees = await this.getSessionAttendees(sessionId);
+        
+        return {
+            total: attendees.length,
+            verified: attendees.filter(a => a.status === AttendanceApp.STATUS.VERIFIED).length,
+            pending: attendees.filter(a => a.status === AttendanceApp.STATUS.PENDING).length,
+            rejected: attendees.filter(a => a.status === AttendanceApp.STATUS.REJECTED).length
+        };
+    }
+    
+    /**
+     * Get my attendance statistics
+     * @returns {Promise<Object>}
+     */
+    async getMyStats() {
+        const history = await this.getMyAttendanceHistory();
+        
+        return {
+            total: history.length,
+            verified: history.filter(a => a.status === AttendanceApp.STATUS.VERIFIED).length,
+            pending: history.filter(a => a.status === AttendanceApp.STATUS.PENDING).length,
+            rejected: history.filter(a => a.status === AttendanceApp.STATUS.REJECTED).length,
+            certificates: this.getMyAttendanceCertificates().length
+        };
+    }
+}
+
+// Export
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = AttendanceApp;
+} else {
+    window.SrishtiAttendanceApp = AttendanceApp;
+}

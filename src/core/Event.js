@@ -38,7 +38,14 @@ class Event {
         // KARMA token system
         KARMA_EARN: 'KARMA_EARN',           // Earn KARMA from activities
         KARMA_TRANSFER: 'KARMA_TRANSFER',   // Transfer KARMA between nodes
-        KARMA_UBI: 'KARMA_UBI'              // Universal Basic Income distribution
+        KARMA_UBI: 'KARMA_UBI',             // Universal Basic Income distribution
+        
+        // ═══════════════════════════════════════════════════════════════════
+        // GENERIC dApp EVENT - Enables third-party app development
+        // Apps use this single event type with custom appId and actions
+        // Actual app data is stored off-chain; only proofs/hashes on-chain
+        // ═══════════════════════════════════════════════════════════════════
+        APP_EVENT: 'APP_EVENT'              // Generic dApp event
     };
     
     /**
@@ -435,6 +442,48 @@ class Event {
     }
     
     /**
+     * ═══════════════════════════════════════════════════════════════════════
+     * Create an APP_EVENT (Generic dApp Event)
+     * 
+     * This is the foundation for all third-party apps built on Srishti.
+     * Apps define their own appId and action types - blockchain just stores proofs.
+     * 
+     * @param {Object} options
+     * @param {string} options.appId - Unique app identifier (e.g., "attendance.v1")
+     * @param {string} options.action - App-specific action (e.g., "SESSION_CREATE")
+     * @param {string} options.sender - Node ID of the sender
+     * @param {string} [options.ref] - Reference ID (session ID, record ID, etc.)
+     * @param {string} [options.target] - Target node ID (if applicable)
+     * @param {string} [options.dataHash] - Hash of off-chain data (IPFS/SHA256)
+     * @param {Object} [options.metadata] - Small indexed metadata (keep minimal!)
+     * @returns {Object} APP_EVENT
+     * ═══════════════════════════════════════════════════════════════════════
+     */
+    static createAppEvent(options) {
+        if (!options.appId || !options.action) {
+            throw new Error('APP_EVENT requires appId and action');
+        }
+        
+        return {
+            type: this.TYPES.APP_EVENT,
+            timestamp: Date.now(),
+            sender: options.sender || null,
+            
+            // App identification
+            appId: options.appId,
+            action: options.action,
+            
+            // Minimal on-chain payload
+            payload: {
+                ref: options.ref || null,           // Reference ID
+                target: options.target || null,      // Target node (optional)
+                dataHash: options.dataHash || null,  // Hash of off-chain data
+                metadata: options.metadata || {}     // Keep this SMALL!
+            }
+        };
+    }
+    
+    /**
      * Validate an event structure
      * @param {Object} event
      * @returns {boolean}
@@ -477,6 +526,8 @@ class Event {
                 return !!(event.sender && event.recipient && event.payload?.amount && event.payload?.amount > 0);
             case this.TYPES.KARMA_UBI:
                 return !!(event.recipient && event.payload?.amount && event.payload?.amount > 0);
+            case this.TYPES.APP_EVENT:
+                return !!(event.appId && event.action && event.timestamp);
             default:
                 // Allow unknown types for forward compatibility
                 return !!event.timestamp;
@@ -510,7 +561,8 @@ class Event {
             [this.ROLES.USER]: [
                 this.TYPES.INSTITUTION_REGISTER,
                 this.TYPES.VOTE_CAST,
-                this.TYPES.SOCIAL_RECOVERY_UPDATE
+                this.TYPES.SOCIAL_RECOVERY_UPDATE,
+                this.TYPES.APP_EVENT  // All users can submit app events
             ]
         };
         

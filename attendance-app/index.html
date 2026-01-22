@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Srishti Attendance - Decentralized Attendance Management</title>
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        header {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+        
+        .status {
+            padding: 10px;
+            border-radius: 8px;
+            margin: 10px 0;
+            font-weight: 500;
+        }
+        
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .status.loading {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .tab {
+            background: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px 8px 0 0;
+            cursor: pointer;
+            font-weight: 500;
+            color: #666;
+            transition: all 0.3s;
+        }
+        
+        .tab.active {
+            background: white;
+            color: #667eea;
+            border-bottom: 3px solid #667eea;
+        }
+        
+        .tab-content {
+            display: none;
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 500;
+        }
+        
+        input, textarea, select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+        
+        input:focus, textarea:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        
+        button:hover {
+            background: #5568d3;
+        }
+        
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .btn-secondary {
+            background: #6c757d;
+        }
+        
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+        
+        .btn-danger {
+            background: #dc3545;
+        }
+        
+        .btn-danger:hover {
+            background: #c82333;
+        }
+        
+        .card {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+        
+        .card h3 {
+            color: #333;
+            margin-bottom: 8px;
+        }
+        
+        .card p {
+            color: #666;
+            margin-bottom: 4px;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+            margin-left: 8px;
+        }
+        
+        .badge.active {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .badge.ended {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .badge.pending {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .badge.verified {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+        }
+        
+        .success {
+            background: #d4edda;
+            color: #155724;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+        }
+        
+        .location-input {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .location-input input {
+            flex: 1;
+        }
+        
+        .actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 12px;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #999;
+        }
+        
+        .empty-state svg {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📋 Srishti Attendance</h1>
+            <p>Decentralized attendance management on the blockchain</p>
+            <div id="status" class="status loading">Connecting to blockchain...</div>
+            <div id="userInfo" style="margin-top: 10px; color: #666;"></div>
+        </header>
+        
+        <div class="tabs">
+            <button class="tab active" onclick="showTab('sessions')">My Sessions</button>
+            <button class="tab" onclick="showTab('create')">Create Session</button>
+            <button class="tab" onclick="showTab('attend')">Mark Attendance</button>
+            <button class="tab" onclick="showTab('history')">My History</button>
+            <button class="tab" onclick="showTab('certificates')">Certificates</button>
+        </div>
+        
+        <!-- My Sessions Tab -->
+        <div id="sessions" class="tab-content active">
+            <h2>My Sessions</h2>
+            <div id="sessionsList" class="loading">Loading sessions...</div>
+        </div>
+        
+        <!-- Create Session Tab -->
+        <div id="create" class="tab-content">
+            <h2>Create Attendance Session</h2>
+            <div id="createError"></div>
+            <form id="createForm">
+                <div class="form-group">
+                    <label>Session Title *</label>
+                    <input type="text" id="sessionTitle" required placeholder="e.g., Blockchain 101 - Lecture 5">
+                </div>
+                <div class="form-group">
+                    <label>Description</label>
+                    <textarea id="sessionDescription" rows="3" placeholder="Optional description"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Location</label>
+                    <input type="text" id="sessionLocation" placeholder="e.g., Room 301, CS Building">
+                </div>
+                <div class="form-group">
+                    <label>Geofence (Optional - for location verification)</label>
+                    <div class="location-input">
+                        <input type="number" id="geofenceLat" step="any" placeholder="Latitude">
+                        <input type="number" id="geofenceLng" step="any" placeholder="Longitude">
+                        <input type="number" id="geofenceRadius" placeholder="Radius (m)" value="100">
+                    </div>
+                    <small style="color: #666; margin-top: 4px; display: block;">
+                        Students must be within this radius to mark attendance
+                    </small>
+                </div>
+                <div class="form-group">
+                    <label>End Time (Optional)</label>
+                    <input type="datetime-local" id="sessionEndTime">
+                </div>
+                <button type="submit">Create Session</button>
+            </form>
+        </div>
+        
+        <!-- Mark Attendance Tab -->
+        <div id="attend" class="tab-content">
+            <h2>Mark Attendance</h2>
+            <div id="attendError"></div>
+            <div id="activeSessionsList" class="loading">Loading active sessions...</div>
+        </div>
+        
+        <!-- My History Tab -->
+        <div id="history" class="tab-content">
+            <h2>My Attendance History</h2>
+            <div id="historyList" class="loading">Loading history...</div>
+        </div>
+        
+        <!-- Certificates Tab -->
+        <div id="certificates" class="tab-content">
+            <h2>My Attendance Certificates</h2>
+            <div id="certificatesList" class="loading">Loading certificates...</div>
+        </div>
+    </div>
+    
+    <!-- Load blockchain from parent directory or CDN -->
+    <!-- Option 1: Load from parent directory (if hosting together) -->
+    <!-- Option 2: Load from your GitHub Pages deployment -->
+    <script>
+        // ═══════════════════════════════════════════════════════════════════
+        // CONFIGURATION: Set your Srishti blockchain URL
+        // ═══════════════════════════════════════════════════════════════════
+        
+        // Option A: Load from parent directory (if hosting together)
+        //const SRISHTI_BLOCKCHAIN_URL = '../';
+        
+        // Option B: Load from GitHub Pages deployment (uncomment and set your URL)
+        const SRISHTI_BLOCKCHAIN_URL = 'https://kala0606.github.io/Srishti-Blockchain/';
+        window.SRISHTI_BLOCKCHAIN_URL = SRISHTI_BLOCKCHAIN_URL; // Make available globally
+        
+        // Option C: Load from CDN (if you publish blockchain to a CDN)
+        // const SRISHTI_BLOCKCHAIN_URL = 'https://cdn.example.com/srishti-blockchain/';
+        
+        // ═══════════════════════════════════════════════════════════════════
+        // Load blockchain core scripts
+        // ═══════════════════════════════════════════════════════════════════
+        
+        const scripts = [
+            'src/core/Hasher.js',
+            'src/core/Event.js',
+            'src/core/MerkleTree.js',
+            'src/core/BlockHeader.js',
+            'src/core/BlockBody.js',
+            'src/core/Block.js',
+            'src/core/Chain.js',
+            'src/core/KarmaManager.js',
+            'src/core/LightClient.js',
+            'src/crypto/Keys.js',
+            'src/crypto/BIP39.js',
+            'src/crypto/Recovery.js',
+            'src/storage/IndexedDBStore.js',
+            'src/consensus/ProofOfParticipation.js',
+            'src/p2p/Protocol.js',
+            'src/p2p/WebSocketClient.js',
+            'src/p2p/Network.js',
+            'src/ui/BlockchainAdapter.js',  // Required for SrishtiApp.init()
+            'config.js'
+        ];
+        
+        function loadScript(src) {
+            return new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = SRISHTI_BLOCKCHAIN_URL + src;
+                script.onload = resolve;
+                script.onerror = () => reject(new Error(`Failed to load ${src}`));
+                document.head.appendChild(script);
+            });
+        }
+        
+        // Load all scripts sequentially
+        async function loadBlockchain() {
+            try {
+                console.log('📦 Loading blockchain from:', SRISHTI_BLOCKCHAIN_URL);
+                
+                for (const src of scripts) {
+                    await loadScript(src);
+                }
+                
+                // Load SDK files (local to attendance-app folder) first
+                const sdkScripts = [
+                    'sdk/SrishtiSDK.js',
+                    'sdk/AppDataStore.js',
+                    'sdk/apps/attendance/AttendanceApp.js'
+                ];
+                
+                for (const src of sdkScripts) {
+                    const script = document.createElement('script');
+                    script.src = src; // Load from current directory
+                    document.head.appendChild(script);
+                    await new Promise(resolve => {
+                        script.onload = resolve;
+                        script.onerror = resolve; // Continue even if fails
+                    });
+                }
+                
+                // Load main app.js (creates SrishtiApp instance)
+                await loadScript('app.js');
+                
+                // Wait for SrishtiApp instance to be created and initialized
+                let retries = 0;
+                while ((!window.SrishtiApp || !window.SrishtiApp.initialized) && retries < 50) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    retries++;
+                }
+                
+                if (!window.SrishtiApp) {
+                    throw new Error('SrishtiApp instance not found. Check if app.js loaded correctly.');
+                }
+                
+                // Use the existing instance (main app.js creates it)
+                window.srishtiAppInstance = window.SrishtiApp;
+                
+                // Ensure it's initialized
+                if (!window.srishtiAppInstance.initialized) {
+                    console.log('⚠️ SrishtiApp not initialized, waiting...');
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                }
+                
+                console.log('✅ Blockchain loaded and initialized');
+            } catch (error) {
+                console.error('❌ Failed to load blockchain:', error);
+                document.getElementById('status').className = 'status disconnected';
+                document.getElementById('status').textContent = `Failed to connect: ${error.message}`;
+            }
+        }
+        
+        loadBlockchain();
+    </script>
+    
+    <!-- Attendance App UI (loaded after blockchain is ready) -->
+    <script src="app.js"></script>
+</body>
+</html>

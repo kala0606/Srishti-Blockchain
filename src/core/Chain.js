@@ -32,7 +32,10 @@ class Chain {
             pendingParentRequests: {}, // parentId -> Map of pending requests from children
             
             // KARMA token balances
-            karmaBalances: {} // nodeId -> balance (number)
+            karmaBalances: {}, // nodeId -> balance (number)
+            
+            // dApp events index (for efficient querying)
+            appEvents: {} // appId -> [{ action, ref, sender, target, timestamp, blockIndex }]
         };
         
         // Only add genesis block if explicitly provided
@@ -58,7 +61,8 @@ class Chain {
             pendingInstitutions: {},
             nodeRoles: {},
             pendingParentRequests: {},
-            karmaBalances: {}
+            karmaBalances: {},
+            appEvents: {}
         };
         
         // Clear from storage if available
@@ -270,6 +274,10 @@ class Chain {
                     
                 case 'KARMA_UBI':
                     await this.handleKarmaUbi(tx);
+                    break;
+                    
+                case 'APP_EVENT':
+                    await this.handleAppEvent(tx);
                     break;
                     
                 default:
@@ -989,6 +997,70 @@ class Chain {
     }
     
     /**
+     * ═══════════════════════════════════════════════════════════════════════
+     * Handle APP_EVENT transaction (Generic dApp Event)
+     * 
+     * This is intentionally minimal - apps interpret their own events.
+     * The blockchain just stores them; SDK reads and processes them.
+     * 
+     * @param {Object} tx - Transaction object with appId, action, payload
+     * ═══════════════════════════════════════════════════════════════════════
+     */
+    async handleAppEvent(tx) {
+        if (!tx.appId || !tx.action) {
+            console.warn('Invalid APP_EVENT: missing appId or action');
+            return;
+        }
+        
+        // Initialize app events storage if needed
+        if (!this.state.appEvents) {
+            this.state.appEvents = {};
+        }
+        
+        // Index by appId for efficient querying
+        if (!this.state.appEvents[tx.appId]) {
+            this.state.appEvents[tx.appId] = [];
+        }
+        
+        // Store minimal index data (full event is in the block)
+        this.state.appEvents[tx.appId].push({
+            action: tx.action,
+            ref: tx.payload?.ref || null,
+            sender: tx.sender,
+            target: tx.payload?.target || null,
+            timestamp: tx.timestamp,
+            blockIndex: this.blocks.length - 1
+        });
+        
+        // Persist to storage (lightweight index only)
+        if (this.storage) {
+            await this.storage.saveMetadata(`app_index_${tx.appId}`, this.state.appEvents[tx.appId]);
+        }
+        
+        console.log(`📱 App event: ${tx.appId}/${tx.action} (ref: ${tx.payload?.ref || 'none'})`);
+    }
+    
+    /**
+     * Query app events by appId and optional filters
+     * @param {string} appId - App identifier
+     * @param {Object} filters - Optional filters (action, sender, ref, target)
+     * @returns {Array} Matching app events from blockchain
+     */
+    queryAppEvents(appId, filters = {}) {
+        const events = this.getEvents('APP_EVENT').filter(e => e.appId === appId);
+        
+        if (Object.keys(filters).length === 0) return events;
+        
+        return events.filter(event => {
+            if (filters.action && event.action !== filters.action) return false;
+            if (filters.sender && event.sender !== filters.sender) return false;
+            if (filters.ref && event.payload?.ref !== filters.ref) return false;
+            if (filters.target && event.payload?.target !== filters.target) return false;
+            return true;
+        });
+    }
+    
+    /**
      * Get KARMA balance for a node
      * @param {string} nodeId - Node ID
      * @returns {number} KARMA balance
@@ -1559,7 +1631,8 @@ class Chain {
             pendingInstitutions: {},
             nodeRoles: {},
             pendingParentRequests: {},
-            karmaBalances: {}
+            karmaBalances: {},
+            appEvents: {}
         };
         
         // Rebuild state by reprocessing all transactions
