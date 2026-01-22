@@ -30,14 +30,16 @@ class WalletManager {
         const nodeId = localStorage.getItem('srishti_node_id');
         const privateKey = localStorage.getItem('srishti_private_key');
         const publicKey = localStorage.getItem('srishti_public_key');
+        const nodeName = localStorage.getItem('srishti_node_name');
 
-        // User is authenticated if they have all credentials
-        this.isAuthenticated = !!(nodeId && privateKey && publicKey);
+        // User is authenticated if they have nodeId and publicKey (privateKey is optional for read-only mode)
+        // This allows users to be logged in even if their private key was lost
+        this.isAuthenticated = !!(nodeId && publicKey && nodeName);
 
         if (this.isAuthenticated && this.app) {
             this.currentUser = {
                 nodeId: nodeId,
-                name: localStorage.getItem('srishti_node_name') || 'Unknown',
+                name: nodeName || 'Unknown',
                 hasPrivateKey: !!privateKey
             };
         }

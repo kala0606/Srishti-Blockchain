@@ -6351,15 +6351,18 @@
             
             // Check authentication state using WalletManager (after app is initialized)
             // Note: WalletManager checks localStorage directly, so it works even if app hasn't fully loaded credentials yet
+            // IMPORTANT: Users are considered logged in if they have nodeId, publicKey, and nodeName
+            // Private key is optional (read-only mode is still considered "logged in")
             let requiresLogin = false;
             if (window.walletManager) {
                 requiresLogin = window.walletManager.requiresLogin();
             } else {
                 // Fallback: check localStorage directly
+                // User is logged in if they have nodeId, publicKey, and nodeName (privateKey is optional)
                 const nodeId = localStorage.getItem('srishti_node_id');
-                const privateKey = localStorage.getItem('srishti_private_key');
                 const publicKey = localStorage.getItem('srishti_public_key');
-                requiresLogin = !(nodeId && privateKey && publicKey);
+                const nodeName = localStorage.getItem('srishti_node_name');
+                requiresLogin = !(nodeId && publicKey && nodeName);
             }
             
             if (requiresLogin) {
@@ -6436,6 +6439,16 @@
                 currentUser = { id: savedNodeId, name: savedNodeName };
                 console.log(`✅ Returning user set: ${savedNodeName} (${savedNodeId})`);
                 
+                // Ensure guest indicator is hidden for authenticated users (even in read-only mode)
+                const guestIndicator = document.getElementById('guest-indicator');
+                if (guestIndicator) {
+                    if (guestIndicator._resizeHandler) {
+                        window.removeEventListener('resize', guestIndicator._resizeHandler);
+                    }
+                    guestIndicator.remove();
+                    console.log('✅ Removed guest indicator for authenticated user');
+                }
+                
                 // If app doesn't have the nodeId but we have it in localStorage, set it in app
                 // This handles cases where private key is missing (recovery scenario)
                 if (window.SrishtiApp && !window.SrishtiApp.nodeId && savedNodeId) {
@@ -6446,6 +6459,12 @@
                         window.SrishtiApp.publicKeyBase64 = savedPublicKey;
                     }
                     console.log(`✅ Set nodeId in app from localStorage: ${savedNodeId} (read-only mode: no private key)`);
+                }
+                
+                // Ensure app is not in guest mode if user is authenticated
+                if (window.SrishtiApp && window.SrishtiApp.isGuest) {
+                    console.log('🔄 User is authenticated - disabling guest mode');
+                    window.SrishtiApp.isGuest = false;
                 }
                 
                 // Check if there's a pending dApp login redirect
@@ -6599,10 +6618,13 @@
                     // Only if we have keys (keyPair)
                     console.log('🔄 Initializing network for returning user...');
                     await window.SrishtiApp.initNetwork(false); // false = not guest mode
-                } else if (window.SrishtiApp && !window.SrishtiApp.network && window.SrishtiApp.nodeId && !window.SrishtiApp.keyPair) {
-                    // Node ID exists but no key pair (recovery scenario)
-                    // Initialize network in guest mode so they can still sync blockchain
-                    console.log(`ℹ️ Node ID exists (${window.SrishtiApp.nodeId}) but no private key - initializing network in guest mode for sync`);
+                } else if (window.SrishtiApp && !window.SrishtiApp.network && window.SrishtiApp.nodeId && !window.SrishtiApp.keyPair?.privateKey) {
+                    // Node ID exists but no private key (read-only mode)
+                    // User is authenticated but in read-only mode - don't mark as guest
+                    // Initialize network in guest mode for sync, but don't show guest UI
+                    console.log(`ℹ️ Node ID exists (${window.SrishtiApp.nodeId}) but no private key - initializing network in guest mode for sync (read-only mode)`);
+                    // Ensure isGuest is false since user is authenticated
+                    window.SrishtiApp.isGuest = false;
                     try {
                         await window.SrishtiApp.initNetwork(true); // true = guest mode for sync
                         console.log('✅ Guest mode network initialized for returning user (read-only)');
