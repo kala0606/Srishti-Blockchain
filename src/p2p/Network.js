@@ -577,8 +577,15 @@ class Network {
      * Handle HEARTBEAT
      */
     handleHeartbeat(message, peerId) {
+        // Only update presence for peers we already know (compatible peers)
+        const existingInfo = this.peerInfo.get(peerId);
+        if (!existingInfo) {
+            // Unknown peer - might be incompatible, ignore heartbeat
+            return;
+        }
+        
         this.peerInfo.set(peerId, {
-            ...this.peerInfo.get(peerId),
+            ...existingInfo,
             lastSeen: message.timestamp,
             isOnline: message.isOnline
         });
@@ -590,16 +597,8 @@ class Network {
             });
         }
         
-        // Gossip about known online nodes
-        if (message.knownOnline && Array.isArray(message.knownOnline)) {
-            for (const nodeId of message.knownOnline) {
-                if (nodeId !== this.nodeId && !this.peerInfo.has(nodeId)) {
-                    if (this.onPresenceUpdate) {
-                        this.onPresenceUpdate(nodeId, { isOnline: true, lastSeen: Date.now() });
-                    }
-                }
-            }
-        }
+        // Note: Don't propagate gossip about unknown nodes - they might be incompatible
+        // Only track nodes we've verified through HELLO exchange
     }
     
     /**

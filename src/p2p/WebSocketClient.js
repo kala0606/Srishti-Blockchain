@@ -138,19 +138,32 @@ class WebSocketClient {
                 break;
             
             case 'registered':
-                console.log(`✅ Registered with relay server. ${data.peers?.length || 0} peers online.`);
+                console.log(`✅ Registered with relay server. ${data.peers?.length || 0} total peers online.`);
                 this.registered = true;
                 
-                // Update peer list
+                // Update peer list - filter by epoch compatibility
                 if (data.peers && Array.isArray(data.peers)) {
                     this.peers.clear();
+                    let compatibleCount = 0;
+                    let incompatibleCount = 0;
+                    
                     for (const peer of data.peers) {
-                        this.peers.set(peer.nodeId, {
-                            chainLength: peer.chainLength || 0,
-                            chainEpoch: peer.chainEpoch || 1,
-                            lastSeen: Date.now()
-                        });
+                        const peerEpoch = peer.chainEpoch || 1;
+                        
+                        // Only add peers with matching epoch
+                        if (peerEpoch === this.chainEpoch) {
+                            this.peers.set(peer.nodeId, {
+                                chainLength: peer.chainLength || 0,
+                                chainEpoch: peerEpoch,
+                                lastSeen: Date.now()
+                            });
+                            compatibleCount++;
+                        } else {
+                            incompatibleCount++;
+                        }
                     }
+                    
+                    console.log(`📊 Epoch ${this.chainEpoch}: ${compatibleCount} compatible, ${incompatibleCount} incompatible peers`);
                 }
                 
                 this.onConnected(Array.from(this.peers.keys()));
@@ -158,20 +171,25 @@ class WebSocketClient {
                 break;
             
             case 'peer_joined':
-                console.log(`🆕 Peer joined: ${data.nodeId}`);
                 // Default chainEpoch to 1 for old peers that don't provide it
-                const peerEpoch = data.chainEpoch || 1;
-                this.peers.set(data.nodeId, {
-                    chainLength: data.chainLength || 0,
-                    chainEpoch: peerEpoch,
-                    lastSeen: Date.now()
-                });
-                // Pass the defaulted value to callback for consistent filtering
-                this.onPeerJoined(data.nodeId, {
-                    chainLength: data.chainLength || 0,
-                    chainEpoch: peerEpoch
-                });
-                this.onPeersUpdated(this.getPeerList());
+                const joinedPeerEpoch = data.chainEpoch || 1;
+                
+                // Only track peers with matching epoch
+                if (joinedPeerEpoch === this.chainEpoch) {
+                    console.log(`🆕 Peer joined (epoch ${joinedPeerEpoch}): ${data.nodeId}`);
+                    this.peers.set(data.nodeId, {
+                        chainLength: data.chainLength || 0,
+                        chainEpoch: joinedPeerEpoch,
+                        lastSeen: Date.now()
+                    });
+                    this.onPeerJoined(data.nodeId, {
+                        chainLength: data.chainLength || 0,
+                        chainEpoch: joinedPeerEpoch
+                    });
+                    this.onPeersUpdated(this.getPeerList());
+                } else {
+                    console.log(`⏭️ Ignoring peer ${data.nodeId} (epoch ${joinedPeerEpoch} vs ours ${this.chainEpoch})`);
+                }
                 break;
             
             case 'peer_left':
@@ -182,15 +200,19 @@ class WebSocketClient {
                 break;
             
             case 'peers':
-                // Response to get_peers request
+                // Response to get_peers request - filter by epoch
                 if (data.peers && Array.isArray(data.peers)) {
                     this.peers.clear();
                     for (const peer of data.peers) {
-                        this.peers.set(peer.nodeId, {
-                            chainLength: peer.chainLength || 0,
-                            chainEpoch: peer.chainEpoch || 1,
-                            lastSeen: Date.now()
-                        });
+                        const peerEpochValue = peer.chainEpoch || 1;
+                        // Only add peers with matching epoch
+                        if (peerEpochValue === this.chainEpoch) {
+                            this.peers.set(peer.nodeId, {
+                                chainLength: peer.chainLength || 0,
+                                chainEpoch: peerEpochValue,
+                                lastSeen: Date.now()
+                            });
+                        }
                     }
                     this.onPeersUpdated(this.getPeerList());
                 }
@@ -202,20 +224,15 @@ class WebSocketClient {
                 const payload = data.payload;
                 
                 if (fromNodeId && payload) {
-                    // Update peer's last seen
+                    // Update peer's last seen if we know them
                     const peer = this.peers.get(fromNodeId);
                     if (peer) {
                         peer.lastSeen = Date.now();
-                    } else {
-                        // New peer we didn't know about
-                        this.peers.set(fromNodeId, {
-                            chainLength: 0,
-                            chainEpoch: this.chainEpoch,
-                            lastSeen: Date.now()
-                        });
                     }
+                    // Note: Don't add unknown peers here - wait for proper HELLO exchange
+                    // This prevents adding incompatible peers that just send us messages
                     
-                    // Forward to message handler
+                    // Forward to message handler (let Network layer handle epoch validation)
                     this.onMessage(payload, fromNodeId);
                 }
                 break;
