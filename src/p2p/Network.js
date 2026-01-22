@@ -52,11 +52,16 @@ class Network {
         this.protocolVersion = window.SrishtiConfig?.PROTOCOL_VERSION || 2;
         
         // Chain epoch for network reset compatibility
-        this.chainEpoch = window.SrishtiConfig?.CHAIN_EPOCH || 1;
+        // NOTE: This will be updated to match actual chain epoch after chain is loaded
+        this.configEpoch = window.SrishtiConfig?.CHAIN_EPOCH || 1;
+        this.chainEpoch = this.configEpoch; // Will be overwritten by actual chain epoch
         
         // Stats
         this.compatiblePeerCount = 0;
         this.rejectedPeerCount = 0;
+        
+        // Track peers that have sent incompatible chains (to avoid repeated sync attempts)
+        this.incompatiblePeers = new Set();
     }
     
     /**
@@ -73,10 +78,36 @@ class Network {
             
             const chain = window.SrishtiChain.fromJSON(blocks);
             this.chain.blocks = chain.blocks;
+            
+            // ═══════════════════════════════════════════════════════════════════
+            // CRITICAL: Derive chain epoch from actual genesis block, not config!
+            // This prevents old nodes from advertising new config epoch while having old chain
+            // ═══════════════════════════════════════════════════════════════════
+            const genesis = this.chain.blocks[0];
+            const actualChainEpoch = genesis?.data?.chainEpoch || 1;
+            
+            if (actualChainEpoch !== this.configEpoch) {
+                console.warn(`⚠️ CHAIN EPOCH MISMATCH!`);
+                console.warn(`   Your chain has epoch ${actualChainEpoch}, but config requires epoch ${this.configEpoch}`);
+                console.warn(`   Your chain is incompatible with the current network.`);
+                console.warn(`   To join the new network, you must clear your local storage.`);
+                
+                // Use the ACTUAL chain epoch, not config - this ensures we don't lie in HELLO messages
+                this.chainEpoch = actualChainEpoch;
+            } else {
+                this.chainEpoch = actualChainEpoch;
+            }
+            
+            console.log(`📜 Loaded chain with epoch ${this.chainEpoch} (config: ${this.configEpoch})`);
         } else {
-            // Create genesis block if no chain exists
+            // Create genesis block if no chain exists - uses config epoch
             await this.chain.createGenesisBlock();
             await this.saveChain();
+            
+            // New chain uses config epoch
+            const genesis = this.chain.blocks[0];
+            this.chainEpoch = genesis?.data?.chainEpoch || this.configEpoch;
+            console.log(`🌱 Created new chain with epoch ${this.chainEpoch}`);
         }
         
         // Initialize WebSocket client
@@ -115,9 +146,13 @@ class Network {
                 onPeerJoined: (nodeId, info) => {
                     console.log(`🟢 Peer joined: ${nodeId}`);
                     
-                    // Check epoch compatibility
-                    if (info.chainEpoch && info.chainEpoch !== this.chainEpoch) {
-                        console.warn(`⚠️ Peer ${nodeId} has different epoch (${info.chainEpoch} vs ${this.chainEpoch}), ignoring`);
+                    // Check epoch compatibility - default to epoch 1 for peers that don't provide one
+                    const peerEpoch = (info.chainEpoch !== undefined && info.chainEpoch !== null) 
+                        ? info.chainEpoch 
+                        : 1;
+                    
+                    if (peerEpoch !== this.chainEpoch) {
+                        console.warn(`⚠️ Peer ${nodeId} has different epoch (${peerEpoch} vs ${this.chainEpoch}), ignoring`);
                         this.rejectedPeerCount++;
                         return;
                     }
@@ -125,7 +160,7 @@ class Network {
                     this.compatiblePeerCount++;
                     this.peerInfo.set(nodeId, {
                         chainLength: info.chainLength || 0,
-                        chainEpoch: info.chainEpoch || this.chainEpoch,
+                        chainEpoch: peerEpoch,
                         isOnline: true,
                         lastSeen: Date.now()
                     });
@@ -154,13 +189,18 @@ class Network {
                 onPeersUpdated: (peers) => {
                     // Update presence for all peers
                     for (const peer of peers) {
-                        if (peer.chainEpoch && peer.chainEpoch !== this.chainEpoch) {
+                        // Default to epoch 1 for peers that don't provide one
+                        const peerEpoch = (peer.chainEpoch !== undefined && peer.chainEpoch !== null) 
+                            ? peer.chainEpoch 
+                            : 1;
+                        
+                        if (peerEpoch !== this.chainEpoch) {
                             continue; // Skip incompatible peers
                         }
                         
                         this.peerInfo.set(peer.nodeId, {
                             chainLength: peer.chainLength || 0,
-                            chainEpoch: peer.chainEpoch || this.chainEpoch,
+                            chainEpoch: peerEpoch,
                             isOnline: true,
                             lastSeen: Date.now()
                         });
@@ -174,14 +214,29 @@ class Network {
                 // Connected to relay server
                 onConnected: (peerIds) => {
                     console.log(`✅ Connected to relay. ${peerIds.length} peers online.`);
+                    console.log(`📊 Our chain epoch: ${this.chainEpoch}`);
                     
                     // Send HELLO to all peers
                     for (const peerId of peerIds) {
                         this.sendHello(peerId);
                     }
                     
-                    // Request sync from peers with longer chains
-                    setTimeout(() => this.syncWithBestPeer(), 1000);
+                    // Request sync from peers with longer chains after a delay
+                    // (gives time for HELLO responses to populate peerInfo with epoch data)
+                    setTimeout(() => {
+                        // Now count compatible peers after HELLO exchange
+                        const compatibleCount = Array.from(this.peerInfo.values())
+                            .filter(info => info.chainEpoch === this.chainEpoch && info.isOnline).length;
+                        const totalPeers = this.peerInfo.size;
+                        
+                        console.log(`📊 Compatible peers after HELLO: ${compatibleCount}/${totalPeers} (epoch ${this.chainEpoch})`);
+                        
+                        if (compatibleCount === 0 && totalPeers > 0) {
+                            console.warn(`⚠️ No compatible peers! ${this.rejectedPeerCount} peers rejected for epoch mismatch.`);
+                        }
+                        
+                        this.syncWithBestPeer();
+                    }, 1000);
                 },
                 
                 // Disconnected from relay server
@@ -370,7 +425,17 @@ class Network {
                 const theirChainEpoch = theirGenesis?.data?.chainEpoch || 1;
                 
                 if (theirChainEpoch !== this.chainEpoch) {
-                    console.warn(`🚫 Rejecting chain: epoch mismatch (${theirChainEpoch} vs ${this.chainEpoch})`);
+                    console.warn(`🚫 Rejecting chain from ${peerId}: epoch mismatch (theirs: ${theirChainEpoch} vs ours: ${this.chainEpoch})`);
+                    
+                    // Mark peer as incompatible to avoid repeated sync attempts
+                    this.incompatiblePeers.add(peerId);
+                    
+                    // Update peer info with correct epoch (they lied in HELLO)
+                    const info = this.peerInfo.get(peerId);
+                    if (info) {
+                        info.chainEpoch = theirChainEpoch;
+                        console.warn(`   Corrected peer ${peerId} epoch: ${theirChainEpoch}`);
+                    }
                     return;
                 }
             }
@@ -607,6 +672,11 @@ class Network {
         let bestLength = this.chain.getLength();
         
         for (const [nodeId, info] of this.peerInfo.entries()) {
+            // Skip incompatible peers (those who sent wrong epoch chains before)
+            if (this.incompatiblePeers.has(nodeId)) {
+                continue;
+            }
+            
             if (info.isOnline && info.chainLength > bestLength && info.chainEpoch === this.chainEpoch) {
                 bestPeer = nodeId;
                 bestLength = info.chainLength;
@@ -614,8 +684,15 @@ class Network {
         }
         
         if (bestPeer) {
-            console.log(`🔄 Syncing with ${bestPeer} (${bestLength} blocks)`);
+            console.log(`🔄 Syncing with ${bestPeer} (${bestLength} blocks, epoch ${this.chainEpoch})`);
             await this.requestSync(bestPeer);
+        } else {
+            // Log why we couldn't find a peer
+            const totalPeers = this.peerInfo.size;
+            const incompatibleCount = this.incompatiblePeers.size;
+            if (totalPeers > 0) {
+                console.log(`📭 No compatible peers with longer chain (total: ${totalPeers}, incompatible: ${incompatibleCount})`);
+            }
         }
     }
     

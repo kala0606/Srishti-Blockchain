@@ -159,14 +159,17 @@ class WebSocketClient {
             
             case 'peer_joined':
                 console.log(`🆕 Peer joined: ${data.nodeId}`);
+                // Default chainEpoch to 1 for old peers that don't provide it
+                const peerEpoch = data.chainEpoch || 1;
                 this.peers.set(data.nodeId, {
                     chainLength: data.chainLength || 0,
-                    chainEpoch: data.chainEpoch || 1,
+                    chainEpoch: peerEpoch,
                     lastSeen: Date.now()
                 });
+                // Pass the defaulted value to callback for consistent filtering
                 this.onPeerJoined(data.nodeId, {
-                    chainLength: data.chainLength,
-                    chainEpoch: data.chainEpoch
+                    chainLength: data.chainLength || 0,
+                    chainEpoch: peerEpoch
                 });
                 this.onPeersUpdated(this.getPeerList());
                 break;
