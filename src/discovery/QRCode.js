@@ -2,7 +2,7 @@
  * Srishti Blockchain - QR Code Discovery
  * 
  * Generates QR codes with connection information for peer discovery.
- * QR codes contain WebRTC offer and node information.
+ * QR codes contain node ID and public key for peer identification.
  */
 
 class QRCodeDiscovery {

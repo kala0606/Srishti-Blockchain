@@ -1,8 +1,15 @@
 /**
- * Srishti Blockchain - WebRTC Signaling Server
+ * Srishti Blockchain - WebSocket Relay Server
  * 
- * WebSocket server for exchanging WebRTC connection offers/answers
- * between peers. Deployed on Fly.io for P2P blockchain networking.
+ * Full P2P message relay server. All peer communication flows through
+ * this server (no WebRTC). Simpler, more reliable than WebRTC for
+ * small-to-medium scale networks.
+ * 
+ * Message Types:
+ * - register: Node joins the network
+ * - relay: Forward message to specific peer(s)
+ * - broadcast: Forward message to all peers
+ * - ping/pong: Keep-alive
  */
 
 const http = require('http');
@@ -14,303 +21,335 @@ const PORT = process.env.PORT || 8080;
 const stats = {
     startTime: Date.now(),
     totalConnections: 0,
-    messagesForwarded: 0
+    messagesRelayed: 0,
+    messagesBroadcast: 0
 };
 
 // Create HTTP server with health check endpoint
 const server = http.createServer((req, res) => {
-    // Health check endpoint (used by Fly.io to keep server warm)
     if (req.url === '/' && req.method === 'GET') {
         const uptime = Math.floor((Date.now() - stats.startTime) / 1000);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
             status: 'ok',
+            version: '2.0.0',
+            transport: 'websocket-relay',
             uptime: uptime,
             connections: nodes.size,
             totalConnections: stats.totalConnections,
-            messagesForwarded: stats.messagesForwarded
+            messagesRelayed: stats.messagesRelayed,
+            messagesBroadcast: stats.messagesBroadcast
         }));
         return;
     }
     
-    // Reject non-WebSocket requests
     res.writeHead(426, { 'Upgrade': 'websocket' });
     res.end('Upgrade required');
 });
 
-// Create WebSocket server attached to HTTP server
+// Create WebSocket server
 const wss = new WebSocket.Server({ server });
 
-console.log(`🚀 Srishti Signaling Server started on port ${PORT}`);
+console.log(`🚀 Srishti Relay Server v2.0 (WebSocket-only P2P)`);
 
-// Store connected nodes
-const nodes = new Map(); // nodeId -> ws connection
-const pendingOffers = new Map(); // nodeId -> [{ fromNodeId, offer, timestamp }]
-const nodeLastSeen = new Map(); // nodeId -> timestamp (for cleanup)
+// Connected nodes
+const nodes = new Map(); // nodeId -> { ws, lastSeen, chainLength, chainEpoch }
+
+/**
+ * Send message to a specific node
+ */
+function sendToNode(nodeId, message) {
+    const node = nodes.get(nodeId);
+    if (node && node.ws.readyState === WebSocket.OPEN) {
+        try {
+            node.ws.send(JSON.stringify(message));
+            return true;
+        } catch (e) {
+            console.error(`Failed to send to ${nodeId}:`, e.message);
+            return false;
+        }
+    }
+    return false;
+}
+
+/**
+ * Broadcast message to all nodes except sender
+ */
+function broadcast(message, excludeNodeId = null) {
+    let count = 0;
+    for (const [nodeId, node] of nodes.entries()) {
+        if (nodeId !== excludeNodeId && node.ws.readyState === WebSocket.OPEN) {
+            try {
+                node.ws.send(JSON.stringify(message));
+                count++;
+            } catch (e) {
+                console.error(`Failed to broadcast to ${nodeId}:`, e.message);
+            }
+        }
+    }
+    return count;
+}
+
+/**
+ * Get list of online peers (excluding a specific node)
+ */
+function getOnlinePeers(excludeNodeId = null) {
+    const peers = [];
+    for (const [nodeId, node] of nodes.entries()) {
+        if (nodeId !== excludeNodeId && node.ws.readyState === WebSocket.OPEN) {
+            peers.push({
+                nodeId: nodeId,
+                chainLength: node.chainLength || 0,
+                chainEpoch: node.chainEpoch || 1
+            });
+        }
+    }
+    return peers;
+}
 
 wss.on('connection', (ws, req) => {
     let nodeId = null;
     
     stats.totalConnections++;
-    console.log(`📡 New connection from ${req.socket.remoteAddress} (total: ${stats.totalConnections})`);
+    console.log(`📡 New connection from ${req.socket.remoteAddress}`);
     
-    ws.on('message', (message) => {
+    ws.on('message', (rawMessage) => {
         try {
-            const data = JSON.parse(message.toString());
+            const data = JSON.parse(rawMessage.toString());
             
             switch (data.type) {
+                // ═══════════════════════════════════════════════════════════════
+                // REGISTRATION - Node joins the relay network
+                // ═══════════════════════════════════════════════════════════════
                 case 'register':
-                    // Node registers with the server
                     nodeId = data.nodeId;
                     
                     if (!nodeId) {
-                        ws.send(JSON.stringify({
-                            type: 'error',
-                            message: 'nodeId required'
-                        }));
+                        ws.send(JSON.stringify({ type: 'error', message: 'nodeId required' }));
                         return;
                     }
                     
-                    nodes.set(nodeId, ws);
-                    nodeLastSeen.set(nodeId, Date.now());
-                    console.log(`✅ Node registered: ${nodeId} (${nodes.size} total)`);
+                    // Store node info
+                    nodes.set(nodeId, {
+                        ws: ws,
+                        lastSeen: Date.now(),
+                        chainLength: data.chainLength || 0,
+                        chainEpoch: data.chainEpoch || 1
+                    });
                     
-                    // Send any pending offers for this node
-                    if (pendingOffers.has(nodeId)) {
-                        const offers = pendingOffers.get(nodeId);
-                        for (const offerData of offers) {
-                            ws.send(JSON.stringify({
-                                type: 'offer',
-                                fromNodeId: offerData.fromNodeId,
-                                offer: offerData.offer
-                            }));
-                        }
-                        pendingOffers.delete(nodeId);
-                    }
+                    console.log(`✅ Node registered: ${nodeId} (epoch: ${data.chainEpoch || 1}, ${nodes.size} total)`);
                     
-                    // Send list of other nodes to the new peer
-                    const otherNodes = Array.from(nodes.keys()).filter(id => id !== nodeId);
+                    // Send confirmation with peer list
+                    const peers = getOnlinePeers(nodeId);
                     ws.send(JSON.stringify({
                         type: 'registered',
                         nodeId: nodeId,
-                        peers: otherNodes
+                        peers: peers,
+                        serverTime: Date.now()
                     }));
                     
-                    // Notify ALL existing peers that a new peer has joined
-                    for (const [existingNodeId, existingWs] of nodes.entries()) {
-                        if (existingNodeId !== nodeId && existingWs.readyState === WebSocket.OPEN) {
-                            existingWs.send(JSON.stringify({
-                                type: 'peer_joined',
-                                nodeId: nodeId
-                            }));
-                            console.log(`📢 Notified ${existingNodeId} about new peer ${nodeId}`);
-                        }
-                    }
+                    // Notify all other peers about new node
+                    broadcast({
+                        type: 'peer_joined',
+                        nodeId: nodeId,
+                        chainLength: data.chainLength || 0,
+                        chainEpoch: data.chainEpoch || 1
+                    }, nodeId);
                     break;
+                
+                // ═══════════════════════════════════════════════════════════════
+                // RELAY - Forward message to specific peer(s)
+                // ═══════════════════════════════════════════════════════════════
+                case 'relay':
+                    if (!nodeId) {
+                        ws.send(JSON.stringify({ type: 'error', message: 'Not registered' }));
+                        return;
+                    }
                     
-                case 'offer':
-                    // WebRTC offer - forward to target node
                     const targetNodeId = data.targetNodeId;
-                    const targetWs = nodes.get(targetNodeId);
+                    const payload = data.payload;
                     
-                    if (!targetNodeId) {
-                        ws.send(JSON.stringify({
-                            type: 'error',
-                            message: 'targetNodeId required'
-                        }));
+                    if (!targetNodeId || !payload) {
+                        ws.send(JSON.stringify({ type: 'error', message: 'targetNodeId and payload required' }));
                         return;
                     }
                     
-                    if (targetWs && targetWs.readyState === WebSocket.OPEN) {
-                        targetWs.send(JSON.stringify({
-                            type: 'offer',
-                            fromNodeId: nodeId,
-                            offer: data.offer
-                        }));
-                        stats.messagesForwarded++;
-                        console.log(`📤 Forwarded offer from ${nodeId} to ${targetNodeId}`);
+                    // Forward the payload to target, adding sender info
+                    const relayMessage = {
+                        type: 'message',
+                        fromNodeId: nodeId,
+                        payload: payload
+                    };
+                    
+                    const sent = sendToNode(targetNodeId, relayMessage);
+                    if (sent) {
+                        stats.messagesRelayed++;
                     } else {
-                        // Store offer if target not connected yet (with timestamp for cleanup)
-                        if (!pendingOffers.has(targetNodeId)) {
-                            pendingOffers.set(targetNodeId, []);
-                        }
-                        pendingOffers.get(targetNodeId).push({
-                            fromNodeId: nodeId,
-                            offer: data.offer,
-                            timestamp: Date.now()
-                        });
-                        console.log(`💾 Stored offer from ${nodeId} to ${targetNodeId} (target offline)`);
+                        // Target not connected - notify sender
                         ws.send(JSON.stringify({
-                            type: 'pending',
-                            message: `Node ${targetNodeId} not connected, offer stored`
+                            type: 'peer_offline',
+                            nodeId: targetNodeId
                         }));
                     }
                     break;
-                    
-                case 'answer':
-                    // WebRTC answer - forward to target node
-                    const answerTargetNodeId = data.targetNodeId;
-                    const answerTargetWs = nodes.get(answerTargetNodeId);
-                    
-                    if (!answerTargetNodeId) {
-                        ws.send(JSON.stringify({
-                            type: 'error',
-                            message: 'targetNodeId required'
-                        }));
+                
+                // ═══════════════════════════════════════════════════════════════
+                // BROADCAST - Forward message to all peers
+                // ═══════════════════════════════════════════════════════════════
+                case 'broadcast':
+                    if (!nodeId) {
+                        ws.send(JSON.stringify({ type: 'error', message: 'Not registered' }));
                         return;
                     }
                     
-                    if (answerTargetWs && answerTargetWs.readyState === WebSocket.OPEN) {
-                        answerTargetWs.send(JSON.stringify({
-                            type: 'answer',
-                            fromNodeId: nodeId,
-                            answer: data.answer
-                        }));
-                        stats.messagesForwarded++;
-                        console.log(`📤 Forwarded answer from ${nodeId} to ${answerTargetNodeId}`);
-                    } else {
-                        ws.send(JSON.stringify({
-                            type: 'error',
-                            message: `Node ${answerTargetNodeId} not connected`
-                        }));
-                    }
-                    break;
-                    
-                case 'ice-candidate':
-                    // ICE candidate - forward to target node
-                    const candidateTargetNodeId = data.targetNodeId;
-                    const candidateTargetWs = nodes.get(candidateTargetNodeId);
-                    
-                    if (!candidateTargetNodeId) {
-                        ws.send(JSON.stringify({
-                            type: 'error',
-                            message: 'targetNodeId required'
-                        }));
+                    const broadcastPayload = data.payload;
+                    if (!broadcastPayload) {
+                        ws.send(JSON.stringify({ type: 'error', message: 'payload required' }));
                         return;
                     }
                     
-                    if (candidateTargetWs && candidateTargetWs.readyState === WebSocket.OPEN) {
-                        candidateTargetWs.send(JSON.stringify({
-                            type: 'ice-candidate',
-                            fromNodeId: nodeId,
-                            candidate: data.candidate
-                        }));
-                        stats.messagesForwarded++;
+                    // Broadcast to all peers
+                    const broadcastMessage = {
+                        type: 'message',
+                        fromNodeId: nodeId,
+                        payload: broadcastPayload
+                    };
+                    
+                    const count = broadcast(broadcastMessage, nodeId);
+                    stats.messagesBroadcast += count;
+                    break;
+                
+                // ═══════════════════════════════════════════════════════════════
+                // UPDATE - Node updates its state (chain length, etc)
+                // ═══════════════════════════════════════════════════════════════
+                case 'update':
+                    if (!nodeId) return;
+                    
+                    const node = nodes.get(nodeId);
+                    if (node) {
+                        node.lastSeen = Date.now();
+                        if (data.chainLength !== undefined) node.chainLength = data.chainLength;
+                        if (data.chainEpoch !== undefined) node.chainEpoch = data.chainEpoch;
                     }
                     break;
+                
+                // ═══════════════════════════════════════════════════════════════
+                // GET_PEERS - Request current peer list
+                // ═══════════════════════════════════════════════════════════════
+                case 'get_peers':
+                    if (!nodeId) {
+                        ws.send(JSON.stringify({ type: 'error', message: 'Not registered' }));
+                        return;
+                    }
                     
+                    ws.send(JSON.stringify({
+                        type: 'peers',
+                        peers: getOnlinePeers(nodeId)
+                    }));
+                    break;
+                
+                // ═══════════════════════════════════════════════════════════════
+                // PING - Keep-alive
+                // ═══════════════════════════════════════════════════════════════
                 case 'ping':
-                    // Heartbeat/ping - update last seen and respond
                     if (nodeId) {
-                        nodeLastSeen.set(nodeId, Date.now());
+                        const n = nodes.get(nodeId);
+                        if (n) n.lastSeen = Date.now();
                     }
                     ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
                     break;
-                    
+                
+                case 'pong':
+                    // Response to server ping
+                    if (nodeId) {
+                        const n = nodes.get(nodeId);
+                        if (n) n.lastSeen = Date.now();
+                    }
+                    break;
+                
                 default:
-                    console.warn(`Unknown message type: ${data.type}`);
+                    console.warn(`Unknown message type: ${data.type} from ${nodeId || 'unregistered'}`);
             }
         } catch (error) {
             console.error('Error handling message:', error);
-            ws.send(JSON.stringify({
-                type: 'error',
-                message: error.message
-            }));
+            ws.send(JSON.stringify({ type: 'error', message: error.message }));
         }
     });
     
     ws.on('close', () => {
         if (nodeId) {
             nodes.delete(nodeId);
-            nodeLastSeen.delete(nodeId);
             console.log(`❌ Node disconnected: ${nodeId} (${nodes.size} remaining)`);
+            
+            // Notify other peers
+            broadcast({
+                type: 'peer_left',
+                nodeId: nodeId
+            });
         }
     });
     
     ws.on('error', (error) => {
-        console.error('WebSocket error:', error);
+        console.error(`WebSocket error for ${nodeId || 'unknown'}:`, error.message);
     });
     
-    // Send welcome message
+    // Welcome message
     ws.send(JSON.stringify({
         type: 'welcome',
-        message: 'Connected to Srishti Signaling Server'
+        message: 'Connected to Srishti Relay Server v2.0',
+        serverTime: Date.now()
     }));
 });
 
-// Handle server errors
-wss.on('error', (error) => {
-    console.error('Server error:', error);
-});
-
-// Start HTTP server
+// Start server
 server.listen(PORT, () => {
-    console.log(`✅ HTTP server listening on port ${PORT}`);
-    console.log(`✅ WebSocket server ready. Connect to ws://localhost:${PORT}`);
+    console.log(`✅ Relay server listening on port ${PORT}`);
+    console.log(`   WebSocket: ws://localhost:${PORT}`);
 });
 
 // =============================================================================
-// Maintenance Intervals (keep server warm and clean up stale data)
+// Maintenance
 // =============================================================================
 
-// Clean up stale pending offers every 5 minutes
-// Offers older than 2 minutes are removed (connection likely failed)
-setInterval(() => {
-    const twoMinutesAgo = Date.now() - 2 * 60 * 1000;
-    let cleanedCount = 0;
-    
-    for (const [targetNodeId, offers] of pendingOffers.entries()) {
-        const validOffers = offers.filter(o => o.timestamp > twoMinutesAgo);
-        const removed = offers.length - validOffers.length;
-        
-        if (removed > 0) {
-            cleanedCount += removed;
-            if (validOffers.length === 0) {
-                pendingOffers.delete(targetNodeId);
-            } else {
-                pendingOffers.set(targetNodeId, validOffers);
-            }
-        }
-    }
-    
-    if (cleanedCount > 0) {
-        console.log(`🧹 Cleaned up ${cleanedCount} stale pending offers`);
-    }
-}, 5 * 60 * 1000); // Every 5 minutes
-
-// Server-side ping to all connected clients every 30 seconds
-// This keeps connections alive and helps detect disconnected clients
+// Ping all clients every 30 seconds
 setInterval(() => {
     const now = Date.now();
-    let pinged = 0;
-    
-    for (const [nodeId, ws] of nodes.entries()) {
-        if (ws.readyState === WebSocket.OPEN) {
+    for (const [nodeId, node] of nodes.entries()) {
+        if (node.ws.readyState === WebSocket.OPEN) {
             try {
-                ws.send(JSON.stringify({ type: 'server_ping', timestamp: now }));
-                pinged++;
-            } catch (error) {
-                console.error(`Failed to ping ${nodeId}:`, error);
+                node.ws.send(JSON.stringify({ type: 'server_ping', timestamp: now }));
+            } catch (e) {
+                console.error(`Failed to ping ${nodeId}`);
             }
         }
     }
-    
-    if (pinged > 0) {
-        console.log(`🏓 Pinged ${pinged} clients`);
-    }
-}, 30 * 1000); // Every 30 seconds
+}, 30 * 1000);
 
-// Log stats every minute for monitoring
+// Clean up stale connections every minute
+setInterval(() => {
+    const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+    for (const [nodeId, node] of nodes.entries()) {
+        if (node.lastSeen < fiveMinutesAgo) {
+            console.log(`🧹 Cleaning stale node: ${nodeId}`);
+            node.ws.close();
+            nodes.delete(nodeId);
+        }
+    }
+}, 60 * 1000);
+
+// Log stats every minute
 setInterval(() => {
     const uptime = Math.floor((Date.now() - stats.startTime) / 1000);
-    console.log(`📊 Stats: ${nodes.size} connections, ${stats.messagesForwarded} messages forwarded, uptime: ${uptime}s`);
-}, 60 * 1000); // Every minute
-
-// =============================================================================
+    console.log(`📊 ${nodes.size} nodes | ${stats.messagesRelayed} relayed | ${stats.messagesBroadcast} broadcast | uptime: ${uptime}s`);
+}, 60 * 1000);
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
     console.log('SIGTERM received, closing server...');
+    
+    // Notify all clients
+    broadcast({ type: 'server_shutdown' });
+    
     wss.close(() => {
         server.close(() => {
             console.log('Server closed');

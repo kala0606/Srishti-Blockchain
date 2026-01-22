@@ -34,8 +34,7 @@
     <script src="src/storage/IndexedDBStore.js"></script>
     <script src="src/consensus/ProofOfParticipation.js"></script>
     <script src="src/p2p/Protocol.js"></script>
-    <script src="src/p2p/SignalingClient.js"></script>
-    <script src="src/p2p/PeerConnection.js"></script>
+    <script src="src/p2p/WebSocketClient.js"></script>
     <script src="src/p2p/Network.js"></script>
     <script src="src/discovery/QRCode.js"></script>
     <script src="src/ui/BlockchainAdapter.js"></script>
@@ -54,7 +53,10 @@
     <script>
         // Always use Fly.io signaling server for WebSocket connections
         // This ensures P2P networking works on both localhost and GitHub Pages
-        window.SRISHTI_SIGNALING_URL = 'wss://srishti-signaling.fly.dev';
+        // WebSocket Relay Server URL (all P2P messages flow through this server)
+        window.SRISHTI_RELAY_URL = 'wss://srishti-signaling.fly.dev';
+        // Backward compatibility
+        window.SRISHTI_SIGNALING_URL = window.SRISHTI_RELAY_URL;
     </script>
     
     <style>

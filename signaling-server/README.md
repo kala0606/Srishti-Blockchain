@@ -1,62 +1,89 @@
-# Srishti Signaling Server
+# Srishti Blockchain - WebSocket Relay Server
 
-WebRTC signaling server for Srishti Blockchain P2P networking.
+P2P message relay server for the Srishti Blockchain network. 
 
-## Deployment to Fly.io
+## Architecture
 
-### Prerequisites
+All peer communication flows through this server (no WebRTC):
 
-1. Install Fly CLI:
-   ```bash
-   curl -L https://fly.io/install.sh | sh
-   ```
+```
+Node A ←→ Relay Server ←→ Node B
+```
 
-2. Login to Fly.io:
-   ```bash
-   fly auth login
-   ```
+**Why WebSocket relay instead of WebRTC?**
+- **Simpler**: No STUN/TURN servers, no ICE negotiation, no NAT traversal issues
+- **More reliable**: Works through all firewalls and corporate networks
+- **Easier debugging**: Standard WebSocket is well-understood
+- **Good enough for scale**: Handles thousands of nodes easily
 
-### Deploy
+## Message Types
 
-1. Navigate to this directory:
-   ```bash
-   cd signaling-server
-   ```
+| Type | Direction | Description |
+|------|-----------|-------------|
+| `register` | Client → Server | Node joins network |
+| `relay` | Client → Server → Client | Send message to specific peer |
+| `broadcast` | Client → Server → All | Send message to all peers |
+| `get_peers` | Client → Server | Request current peer list |
+| `ping/pong` | Bidirectional | Keep-alive |
 
-2. Create the app (first time only):
-   ```bash
-   fly apps create srishti-signaling
-   ```
+## Server Events
 
-3. Deploy:
-   ```bash
-   fly deploy
-   ```
+| Event | Description |
+|-------|-------------|
+| `registered` | Node successfully registered, includes peer list |
+| `peer_joined` | New peer joined the network |
+| `peer_left` | Peer disconnected |
+| `message` | Relayed P2P message from another peer |
 
-4. Get the URL:
-   ```bash
-   fly status
-   ```
+## Deployment
 
-You'll get a URL like: `wss://srishti-signaling.fly.dev`
-
-## Usage
-
-The signaling server accepts WebSocket connections and forwards WebRTC offers/answers between nodes.
-
-### Message Types
-
-- `register` - Register a node with the server
-- `offer` - Forward WebRTC offer to target node
-- `answer` - Forward WebRTC answer to target node
-- `ice-candidate` - Forward ICE candidate to target node
-- `ping` - Heartbeat/ping
-
-## Local Development
+### Local Development
 
 ```bash
+cd signaling-server
 npm install
 npm start
 ```
 
 Server runs on `ws://localhost:8080`
+
+### Production (Fly.io)
+
+```bash
+cd signaling-server
+fly deploy
+```
+
+Production URL: `wss://srishti-signaling.fly.dev`
+
+## Health Check
+
+```bash
+curl https://srishti-signaling.fly.dev/
+```
+
+Returns:
+```json
+{
+  "status": "ok",
+  "version": "2.0.0",
+  "transport": "websocket-relay",
+  "uptime": 12345,
+  "connections": 5,
+  "messagesRelayed": 1234,
+  "messagesBroadcast": 567
+}
+```
+
+## Configuration
+
+| Environment Variable | Default | Description |
+|---------------------|---------|-------------|
+| `PORT` | `8080` | Server port |
+
+## Monitoring
+
+Server logs stats every minute:
+```
+📊 5 nodes | 1234 relayed | 567 broadcast | uptime: 3600s
+```

@@ -1,12 +1,13 @@
 /**
- * Srishti Blockchain - P2P Network
+ * Srishti Blockchain - P2P Network (WebSocket Relay)
  * 
  * Manages peer connections, chain synchronization, and block propagation.
- * This is the central coordinator that ties everything together.
+ * Uses WebSocket relay server instead of WebRTC for simpler, more reliable P2P.
+ * 
+ * Architecture:
+ *   Node A ←→ Relay Server ←→ Node B
+ *   (All messages flow through server)
  */
-
-// Set to true for verbose debugging (ICE candidates, heartbeats, etc.)
-const NETWORK_DEBUG = false;
 
 class Network {
     /**
@@ -16,44 +17,44 @@ class Network {
      * @param {CryptoKey} options.publicKey - This node's public key
      * @param {Chain} options.chain - Chain instance
      * @param {IndexedDBStore} options.storage - Storage instance
+     * @param {string} options.relayServerUrl - Relay server WebSocket URL
      * @param {Function} options.onChainUpdate - Callback when chain updates
+     * @param {Function} options.onPresenceUpdate - Callback for presence changes
+     * @param {Function} options.onSyncProgress - Callback for sync progress
      */
     constructor(options) {
         this.nodeId = options.nodeId;
         this.publicKey = options.publicKey;
         this.chain = options.chain;
         this.storage = options.storage;
+        this.relayServerUrl = options.relayServerUrl || options.signalingServerUrl; // Backward compat
+        
+        // Callbacks
         this.onChainUpdate = options.onChainUpdate || (() => {});
         this.onPresenceUpdate = options.onPresenceUpdate || null;
         this.onSyncProgress = options.onSyncProgress || null;
-        this.signalingServerUrl = options.signalingServerUrl || null;
+        this.onParentRequest = options.onParentRequest || null;
+        this.onParentResponse = options.onParentResponse || null;
         
-        // Legacy peer management (maintained for backward compatibility)
-        this.peers = new Map(); // Map<nodeId, PeerConnection>
-        this.peerInfo = new Map(); // Map<nodeId, {publicKey, chainLength, latestHash}>
-        this.pendingConnections = new Map(); // Map<nodeId, {publicKey, timestamp}> - Nodes we want to connect to
-        this.pendingOffers = new Map(); // Map<nodeId, PeerConnection> - Connections waiting for answer
-        this.pendingAnswers = new Map(); // Map<nodeId, {answer, connection}> - Answers waiting to be sent
+        // WebSocket client (replaces WebRTC)
+        this.wsClient = null;
         
-        // New scalable components
-        this.dht = null; // DHT for peer discovery
-        this.connectionManager = null; // Connection pool manager
+        // Peer info (presence, chain state)
+        this.peerInfo = new Map(); // nodeId -> {chainLength, chainEpoch, isOnline, lastSeen}
         
-        // Queue for ICE candidates that arrive before connection is established
-        this.pendingIceCandidates = new Map(); // Map<nodeId, Array<candidate>>
-        
-        this.signaling = null;
+        // State
         this.syncing = false;
+        this.merging = false;
         this.heartbeatInterval = null;
         this.syncInterval = null;
         
         // Protocol version for compatibility
-        this.protocolVersion = window.SrishtiConfig?.PROTOCOL_VERSION || 1;
+        this.protocolVersion = window.SrishtiConfig?.PROTOCOL_VERSION || 2;
         
         // Chain epoch for network reset compatibility
         this.chainEpoch = window.SrishtiConfig?.CHAIN_EPOCH || 1;
         
-        // Track compatible peers (passed epoch validation)
+        // Stats
         this.compatiblePeerCount = 0;
         this.rejectedPeerCount = 0;
     }
@@ -71,7 +72,6 @@ class Network {
             }
             
             const chain = window.SrishtiChain.fromJSON(blocks);
-            // Replace current chain
             this.chain.blocks = chain.blocks;
         } else {
             // Create genesis block if no chain exists
@@ -79,19 +79,9 @@ class Network {
             await this.saveChain();
         }
         
-        // Initialize DHT if available (new scalable peer discovery)
-        if (window.SrishtiDHT) {
-            await this.initDHT();
-        }
-        
-        // Initialize ConnectionManager if available (new connection pool management)
-        if (window.SrishtiConnectionManager) {
-            await this.initConnectionManager();
-        }
-        
-        // Initialize signaling client if URL provided (backward compatibility)
-        if (this.signalingServerUrl) {
-            await this.initSignaling();
+        // Initialize WebSocket client
+        if (this.relayServerUrl && window.SrishtiWebSocketClient) {
+            await this.initWebSocket();
         }
         
         // Start heartbeat
@@ -100,562 +90,143 @@ class Network {
         // Start periodic sync
         this.startSync();
         
-        // Attempt pending connections (nodes we want to connect to)
-        this.attemptPendingConnections();
-        
         console.log(`🌐 Network initialized (Chain Epoch: ${this.chainEpoch})`);
+        console.log(`   Transport: WebSocket Relay`);
         console.log(`   Peers with different epochs will be automatically rejected.`);
     }
     
     /**
-     * Initialize DHT for distributed peer discovery
+     * Initialize WebSocket connection to relay server
      */
-    async initDHT() {
+    async initWebSocket() {
         try {
-            this.dht = new window.SrishtiDHT({
+            this.wsClient = new window.SrishtiWebSocketClient({
+                serverUrl: this.relayServerUrl,
                 nodeId: this.nodeId,
-                onPeerFound: (nodeId, info) => {
-                    // Add peer to connection manager as candidate
-                    if (this.connectionManager) {
-                        const priority = this.connectionManager.calculatePriority(nodeId, {
-                            dhtDistance: info.distance,
-                            lastSeen: info.lastSeen,
-                            publicKey: info.publicKey
-                        });
-                        this.connectionManager.addCandidate(nodeId, priority, 'DHT discovery');
-                    } else {
-                        // Fallback: add to pending connections
-                        this.addPendingConnection(nodeId, info.publicKey);
-                    }
+                chainLength: this.chain.getLength(),
+                chainEpoch: this.chainEpoch,
+                
+                // Handle incoming P2P messages
+                onMessage: (payload, fromNodeId) => {
+                    this.handleMessage(payload, fromNodeId);
                 },
-                onPeerLost: (nodeId) => {
-                    // Remove from connection manager
-                    if (this.connectionManager) {
-                        this.connectionManager.removeCandidate(nodeId);
-                    }
-                }
-            });
-            
-            await this.dht.init();
-            console.log('✅ DHT initialized');
-        } catch (error) {
-            console.warn('⚠️ Failed to initialize DHT:', error);
-            this.dht = null;
-        }
-    }
-    
-    /**
-     * Initialize ConnectionManager for connection pool management
-     */
-    async initConnectionManager() {
-        try {
-            this.connectionManager = new window.SrishtiConnectionManager({
-                onConnectionNeeded: async (nodeId, priority, reason) => {
-                    // Request connection to this node
-                    const peerInfo = this.peerInfo.get(nodeId);
-                    const publicKey = peerInfo?.publicKey || null;
+                
+                // Peer joined the network
+                onPeerJoined: (nodeId, info) => {
+                    console.log(`🟢 Peer joined: ${nodeId}`);
                     
-                    if (this.signaling && this.signaling.isConnected()) {
-                        await this.attemptConnection(nodeId, publicKey);
-                    } else if (this.dht) {
-                        // Try to find peer via DHT
-                        const closest = await this.dht.lookup(nodeId);
-                        if (closest.length > 0) {
-                            // Use DHT-discovered peer info
-                            const dhtInfo = this.dht.getPeerInfo(nodeId);
-                            if (dhtInfo) {
-                                await this.attemptConnection(nodeId, dhtInfo.publicKey);
-                            }
-                        }
+                    // Check epoch compatibility
+                    if (info.chainEpoch && info.chainEpoch !== this.chainEpoch) {
+                        console.warn(`⚠️ Peer ${nodeId} has different epoch (${info.chainEpoch} vs ${this.chainEpoch}), ignoring`);
+                        this.rejectedPeerCount++;
+                        return;
+                    }
+                    
+                    this.compatiblePeerCount++;
+                    this.peerInfo.set(nodeId, {
+                        chainLength: info.chainLength || 0,
+                        chainEpoch: info.chainEpoch || this.chainEpoch,
+                        isOnline: true,
+                        lastSeen: Date.now()
+                    });
+                    
+                    if (this.onPresenceUpdate) {
+                        this.onPresenceUpdate(nodeId, { isOnline: true, lastSeen: Date.now() });
+                    }
+                    
+                    // Send HELLO to new peer
+                    this.sendHello(nodeId);
+                },
+                
+                // Peer left the network
+                onPeerLeft: (nodeId) => {
+                    console.log(`🔴 Peer left: ${nodeId}`);
+                    const info = this.peerInfo.get(nodeId);
+                    if (info) {
+                        this.peerInfo.set(nodeId, { ...info, isOnline: false, lastSeen: Date.now() });
+                    }
+                    if (this.onPresenceUpdate) {
+                        this.onPresenceUpdate(nodeId, { isOnline: false, lastSeen: Date.now() });
                     }
                 },
-                onConnectionClose: (nodeId, connection) => {
-                    // Connection manager wants to close this connection
-                    this.disconnectPeer(nodeId);
-                }
-            });
-            
-            await this.connectionManager.init();
-            console.log('✅ ConnectionManager initialized');
-        } catch (error) {
-            console.warn('⚠️ Failed to initialize ConnectionManager:', error);
-            this.connectionManager = null;
-        }
-    }
-    
-    /**
-     * Initialize signaling client
-     */
-    async initSignaling() {
-        if (!window.SrishtiSignalingClient) {
-            console.warn('SignalingClient not loaded, P2P connections will not work');
-            return;
-        }
-        
-        try {
-            this.signaling = new window.SrishtiSignalingClient({
-                serverUrl: this.signalingServerUrl,
-                nodeId: this.nodeId,
-                onOffer: (data) => this.handleSignalingOffer(data),
-                onAnswer: (data) => this.handleSignalingAnswer(data),
-                onIceCandidate: (data) => this.handleSignalingIceCandidate(data),
-                onPeerConnected: (peers) => {
-                    if (peers.length > 0) console.log(`📡 Found ${peers.length} peer(s)`);
-                    // When we get the peer list, try to connect to available peers
-                    // But only initiate if our nodeId is "lower" to avoid glare (both sides offering)
-                    for (const peerId of peers) {
-                        if (!this.peers.has(peerId) && !this.pendingOffers.has(peerId)) {
-                            // Only initiate connection if our nodeId is lower (to avoid both sides offering)
-                            if (this.nodeId < peerId) {
-                                console.log(`🔌 Initiating connection to peer: ${peerId} (we have lower ID)`);
-                                this.attemptConnection(peerId, null);
-                            } // else: wait for peer to initiate (they have lower ID)
+                
+                // Initial peer list received
+                onPeersUpdated: (peers) => {
+                    // Update presence for all peers
+                    for (const peer of peers) {
+                        if (peer.chainEpoch && peer.chainEpoch !== this.chainEpoch) {
+                            continue; // Skip incompatible peers
                         }
-                    }
-                }
-            });
-            
-            await this.signaling.connect();
-            console.log('✅ Signaling client connected');
-        } catch (error) {
-            console.warn('⚠️ Failed to connect to signaling server:', error);
-            this.signaling = null;
-        }
-    }
-    
-    /**
-     * Handle signaling offer
-     */
-    async handleSignalingOffer(data) {
-        const { fromNodeId, offer } = data;
-        
-        console.log(`📥 Received WebRTC offer from ${fromNodeId}`);
-        
-        if (this.peers.has(fromNodeId)) {
-            console.log(`⏭️ Already connected to ${fromNodeId}`);
-            return;
-        }
-        
-        // Handle glare: if we also sent an offer to this peer, the peer with higher ID should back off
-        if (this.pendingOffers.has(fromNodeId)) {
-            if (this.nodeId > fromNodeId) {
-                // We have higher ID, so we back off - close our pending offer and accept theirs
-                console.log(`🔄 Glare detected with ${fromNodeId} - we back off (higher ID)`);
-                const ourConnection = this.pendingOffers.get(fromNodeId);
-                if (ourConnection) {
-                    ourConnection.close();
-                }
-                this.pendingOffers.delete(fromNodeId);
-            } else {
-                // We have lower ID, so we win - ignore their offer
-                console.log(`🔄 Glare detected with ${fromNodeId} - they should back off (we have lower ID)`);
-                return;
-            }
-        }
-        
-        try {
-            console.log(`📝 Creating answer for ${fromNodeId}...`);
-            
-            const connection = new window.SrishtiPeerConnection({
-                nodeId: this.nodeId,
-                onMessage: (message, peerId) => this.handleMessage(message, peerId),
-                onConnectionStateChange: (state) => {
-                    if (state === 'data_channel_open') {
-                        console.log(`🎉 Data channel open with ${fromNodeId}! Sending HELLO...`);
-                        // Mark as online immediately
-                        const info = this.peerInfo.get(fromNodeId) || {};
-                        this.peerInfo.set(fromNodeId, {
-                            ...info,
+                        
+                        this.peerInfo.set(peer.nodeId, {
+                            chainLength: peer.chainLength || 0,
+                            chainEpoch: peer.chainEpoch || this.chainEpoch,
                             isOnline: true,
                             lastSeen: Date.now()
                         });
+                        
                         if (this.onPresenceUpdate) {
-                            this.onPresenceUpdate(fromNodeId, {
-                                isOnline: true,
-                                lastSeen: Date.now()
-                            });
+                            this.onPresenceUpdate(peer.nodeId, { isOnline: true, lastSeen: Date.now() });
                         }
-                        
-                        // CRITICAL: Send HELLO message (this was missing for incoming connections!)
-                        const hello = window.SrishtiProtocol.createHello({
-                            nodeId: this.nodeId,
-                            publicKey: null,
-                            chainLength: this.chain.getLength(),
-                            latestHash: this.chain.getLatestBlock()?.hash || null,
-                            protocolVersion: this.protocolVersion,
-                            chainEpoch: this.chainEpoch
-                        });
-                        const conn = this.peers.get(fromNodeId);
-                        if (conn && conn.isConnected()) {
-                            console.log(`📤 Sending HELLO to ${fromNodeId} (incoming connection)`);
-                            conn.send(hello);
-                        }
-                        
-                        // Send immediate heartbeat
-                        this.sendHeartbeat();
-                        
-                        // Send rapid heartbeats for first 10 seconds to ensure presence is synced
-                        let rapidHeartbeatCount = 0;
-                        const rapidHeartbeat = setInterval(() => {
-                            if (!this.peers.has(fromNodeId)) {
-                                clearInterval(rapidHeartbeat);
-                                return;
-                            }
-                            this.sendHeartbeat();
-                            rapidHeartbeatCount++;
-                            if (rapidHeartbeatCount >= 10) {
-                                clearInterval(rapidHeartbeat);
-                            }
-                        }, 1000); // Every 1 second for first 10 seconds
-                        
-                        // Request sync after HELLO
-                        this.requestSync(fromNodeId);
-                    } else if (state === 'data_channel_closed' || state === 'data_channel_error' || 
-                               state === 'disconnected' || state === 'failed') {
-                        // Retry if the connection failed before data channel opened
-                        const shouldRetry = state === 'failed';
-                        console.log(`🔌 Connection ${state} for ${fromNodeId}, retry=${shouldRetry}`);
-                        this.disconnectPeer(fromNodeId, shouldRetry);
                     }
                 },
-                onIceCandidate: (candidate) => {
-                    if (this.signaling && candidate) {
-                        if (NETWORK_DEBUG) console.log(`🧊 Sending ICE candidate to ${fromNodeId}`);
-                        this.signaling.sendIceCandidate(fromNodeId, candidate);
-                    }
-                }
-            });
-            
-            // Set remote node ID
-            connection.remoteNodeId = fromNodeId;
-            
-            const answer = await connection.initAsAnswerer(offer);
-            this.peers.set(fromNodeId, connection);
-            this.pendingConnections.delete(fromNodeId);
-            
-            // Apply any ICE candidates that arrived before the connection was ready
-            await this.applyQueuedIceCandidates(fromNodeId, connection);
-            
-            // Send answer via signaling
-            if (this.signaling) {
-                console.log(`📤 Sending answer to ${fromNodeId}...`);
-                this.signaling.sendAnswer(fromNodeId, answer);
-            }
-            
-            // WebRTC handshake complete, waiting for data channel
-        } catch (error) {
-            console.error(`❌ Failed to handle offer from ${fromNodeId}:`, error);
-        }
-    }
-    
-    /**
-     * Handle signaling answer
-     */
-    async handleSignalingAnswer(data) {
-        const { fromNodeId, answer } = data;
-        
-        const connection = this.pendingOffers.get(fromNodeId);
-        if (!connection) {
-            console.warn(`⚠️ No pending offer for ${fromNodeId}`);
-            return;
-        }
-        
-        try {
-            await connection.setRemoteAnswer(answer);
-            this.pendingOffers.delete(fromNodeId);
-            this.pendingConnections.delete(fromNodeId);
-            
-            if (!this.peers.has(fromNodeId)) {
-                this.peers.set(fromNodeId, connection);
-            }
-            
-            await this.applyQueuedIceCandidates(fromNodeId, connection);
-            // WebRTC handshake complete, waiting for data channel
-        } catch (error) {
-            console.error(`❌ Failed to handle answer from ${fromNodeId}:`, error);
-            this.pendingOffers.delete(fromNodeId);
-        }
-    }
-    
-    /**
-     * Handle signaling ICE candidate
-     */
-    async handleSignalingIceCandidate(data) {
-        const { fromNodeId, candidate } = data;
-        
-        // Check if we have a connection (either in peers or pendingOffers)
-        let connection = this.peers.get(fromNodeId) || this.pendingOffers.get(fromNodeId);
-        
-        if (connection) {
-            try {
-                await connection.addIceCandidate(candidate);
-            } catch (err) {
-                // If adding fails (e.g., remote description not set yet), queue it
-                if (err.message?.includes('remote description') || !connection.pc?.remoteDescription) {
-                    this.queueIceCandidate(fromNodeId, candidate);
-                } else {
-                    console.warn(`⚠️ Failed to add ICE candidate from ${fromNodeId}:`, err.message);
-                }
-            }
-        } else {
-            // Queue the ICE candidate for when the connection is established
-            this.queueIceCandidate(fromNodeId, candidate);
-        }
-    }
-    
-    /**
-     * Queue an ICE candidate for later processing
-     * @param {string} nodeId - Peer node ID
-     * @param {RTCIceCandidateInit} candidate - ICE candidate
-     */
-    queueIceCandidate(nodeId, candidate) {
-        if (!this.pendingIceCandidates.has(nodeId)) {
-            this.pendingIceCandidates.set(nodeId, []);
-        }
-        this.pendingIceCandidates.get(nodeId).push(candidate);
-    }
-    
-    /**
-     * Apply queued ICE candidates to a connection
-     * @param {string} nodeId - Peer node ID
-     * @param {PeerConnection} connection - The peer connection
-     */
-    async applyQueuedIceCandidates(nodeId, connection) {
-        const queued = this.pendingIceCandidates.get(nodeId);
-        if (!queued || queued.length === 0) return;
-        
-        if (NETWORK_DEBUG) console.log(`🧊 Applying ${queued.length} queued ICE candidates to ${nodeId}`);
-        
-        for (const candidate of queued) {
-            try {
-                await connection.addIceCandidate(candidate);
-            } catch (err) {
-                // Silently ignore candidate errors during queue application
-            }
-        }
-        
-        this.pendingIceCandidates.delete(nodeId);
-    }
-    
-    /**
-     * Connect to a peer (initiate connection)
-     * @param {Object} peerInfo - Peer connection info
-     * @param {string} peerInfo.nodeId - Peer's node ID
-     * @param {string} peerInfo.offer - WebRTC offer SDP
-     * @returns {Promise<boolean>} - Success status
-     */
-    async connectToPeer(peerInfo) {
-        if (this.peers.has(peerInfo.nodeId)) {
-            console.log(`Already connected to ${peerInfo.nodeId}`);
-            return true;
-        }
-        
-        if (!window.SrishtiPeerConnection || !window.SrishtiProtocol) {
-            throw new Error('Required dependencies not loaded');
-        }
-        
-        try {
-            const connection = new window.SrishtiPeerConnection({
-                nodeId: this.nodeId,
-                onMessage: (message, peerId) => this.handleMessage(message, peerId),
-                onConnectionStateChange: (state) => {
-                    if (state === 'disconnected' || state === 'failed') {
-                        const shouldRetry = state === 'failed';
-                        this.disconnectPeer(peerInfo.nodeId, shouldRetry);
-                    }
-                }
-            });
-            
-            // Initialize as answerer (we received an offer)
-            if (peerInfo.offer) {
-                const answer = await connection.initAsAnswerer(peerInfo.offer);
-                this.peers.set(peerInfo.nodeId, connection);
                 
-                // Send answer back (this would go through signaling/QR)
-                return { answer, connection };
-            } else {
-                // Initialize as offerer
-                const offer = await connection.initAsOfferer();
-                this.peers.set(peerInfo.nodeId, connection);
+                // Connected to relay server
+                onConnected: (peerIds) => {
+                    console.log(`✅ Connected to relay. ${peerIds.length} peers online.`);
+                    
+                    // Send HELLO to all peers
+                    for (const peerId of peerIds) {
+                        this.sendHello(peerId);
+                    }
+                    
+                    // Request sync from peers with longer chains
+                    setTimeout(() => this.syncWithBestPeer(), 1000);
+                },
                 
-                // Send offer (this would go through signaling/QR)
-                return { offer, connection };
-            }
+                // Disconnected from relay server
+                onDisconnected: () => {
+                    console.log('⚠️ Disconnected from relay server');
+                    // Mark all peers as potentially offline
+                    for (const [nodeId, info] of this.peerInfo.entries()) {
+                        if (info.isOnline) {
+                            this.peerInfo.set(nodeId, { ...info, isOnline: false });
+                            if (this.onPresenceUpdate) {
+                                this.onPresenceUpdate(nodeId, { isOnline: false, lastSeen: info.lastSeen });
+                            }
+                        }
+                    }
+                }
+            });
+            
+            await this.wsClient.connect();
+            console.log('✅ WebSocket relay client connected');
         } catch (error) {
-            console.error(`Failed to connect to peer ${peerInfo.nodeId}:`, error);
-            return false;
+            console.warn('⚠️ Failed to connect to relay server:', error);
+            this.wsClient = null;
         }
     }
     
     /**
-     * Add a peer connection (peer connected to us)
-     * @param {string} nodeId - Peer's node ID
-     * @param {PeerConnection} connection - Peer connection instance
+     * Send HELLO message to a peer
      */
-    addPeer(nodeId, connection) {
-        this.peers.set(nodeId, connection);
+    sendHello(peerId) {
+        if (!this.wsClient || !window.SrishtiProtocol) return;
         
-        // Check if there are any queued parent requests for this peer
-        if (this.queuedParentRequests && this.queuedParentRequests.length > 0) {
-            const requests = this.queuedParentRequests.filter(req => req.parentId === nodeId);
-            if (requests.length > 0) {
-                console.log(`📤 Delivering ${requests.length} queued parent request(s) to newly connected ${nodeId}`);
-                // Deliver with a small delay to allow connection to stabilize
-                setTimeout(async () => {
-                    for (const req of requests) {
-                        await this.sendParentRequest(req.parentId, req.options);
-                    }
-                }, 1000);
-            }
-        }
-        
-        // Register with connection manager if available
-        if (this.connectionManager) {
-            const peerInfo = this.peerInfo.get(nodeId) || {};
-            const priority = this.connectionManager.calculatePriority(nodeId, {
-                chainLength: peerInfo.chainLength,
-                lastSeen: Date.now(),
-                publicKey: peerInfo.publicKey
-            });
-            this.connectionManager.registerConnection(nodeId, connection, priority);
-        }
-        
-        // Add to DHT if available
-        if (this.dht) {
-            const peerInfo = this.peerInfo.get(nodeId) || {};
-            this.dht.addPeer(nodeId, {
-                publicKey: peerInfo.publicKey,
-                lastSeen: Date.now()
-            });
-        }
-        
-        // Send HELLO message
         const hello = window.SrishtiProtocol.createHello({
             nodeId: this.nodeId,
-            publicKey: null, // TODO: encode public key
+            publicKey: null,
             chainLength: this.chain.getLength(),
             latestHash: this.chain.getLatestBlock()?.hash || null,
-            protocolVersion: this.protocolVersion, // Include protocol version
-            chainEpoch: this.chainEpoch // Include chain epoch for network reset compatibility
+            protocolVersion: this.protocolVersion,
+            chainEpoch: this.chainEpoch
         });
         
-        connection.send(hello);
-        
-        // When a peer connects, always check if we need to sync chains
-        // This ensures we get new blocks (like INSTITUTION_REGISTER) even if chains have same length
-        const ourChainLength = this.chain.getLength();
-        const ourLatestHash = this.chain.getLatestBlock()?.hash || null;
-        
-        // Wait a bit for HELLO exchange, then always sync to ensure we have all nodes
-        // This is important because nodes might have been added concurrently
-        setTimeout(async () => {
-            if (!this.peers.has(nodeId)) {
-                return; // Peer disconnected
-            }
-            
-            const peerInfo = this.peerInfo.get(nodeId);
-            if (!peerInfo) {
-                // If we don't have peer info yet, request sync anyway - it will help discover new nodes
-                console.log(`🔄 Requesting sync from ${nodeId} (peer info not yet available)...`);
-                await this.requestSync(nodeId);
-                return;
-            }
-            
-            const theirChainLength = peerInfo.chainLength || 0;
-            const theirLatestHash = peerInfo.latestHash || null;
-            
-            // Always sync when peer connects to ensure we discover all nodes
-            // The sync response handler will merge unique nodes even if chains have same length
-            console.log(`🔄 Auto-requesting sync from ${nodeId} (ours: ${ourChainLength}/${ourLatestHash?.substring(0, 8)}, theirs: ${theirChainLength}/${theirLatestHash?.substring(0, 8)})`);
-            await this.requestSync(nodeId);
-        }, 500); // Reduced from 1000ms for faster sync
+        this.wsClient.sendToPeer(peerId, hello);
     }
     
     /**
-     * Disconnect from a peer
-     * @param {string} nodeId - Peer's node ID
-     * @param {boolean} shouldRetry - Whether to attempt reconnection
-     */
-    disconnectPeer(nodeId, shouldRetry = false) {
-        const connection = this.peers.get(nodeId);
-        if (connection) {
-            connection.close();
-            this.peers.delete(nodeId);
-            
-            // Clean up any pending ICE candidates
-            this.pendingIceCandidates.delete(nodeId);
-            
-            // Mark as offline before deleting
-            const info = this.peerInfo.get(nodeId);
-            if (info) {
-                this.peerInfo.set(nodeId, {
-                    ...info,
-                    isOnline: false,
-                    lastSeen: Date.now()
-                });
-                // Notify UI that peer went offline
-                if (this.onPresenceUpdate) {
-                    this.onPresenceUpdate(nodeId, {
-                        isOnline: false,
-                        lastSeen: Date.now()
-                    });
-                }
-            }
-            
-            this.peerInfo.delete(nodeId);
-            
-            // Unregister from connection manager
-            if (this.connectionManager) {
-                this.connectionManager.unregisterConnection(nodeId);
-            }
-            
-            // Remove from DHT
-            if (this.dht) {
-                this.dht.removePeer(nodeId);
-            }
-            
-            // Schedule reconnection attempt if we should retry
-            if (shouldRetry && this.signaling?.connected) {
-                this.scheduleReconnect(nodeId);
-            }
-        }
-    }
-    
-    /**
-     * Schedule a reconnection attempt to a peer
-     * @param {string} nodeId - Peer's node ID
-     */
-    scheduleReconnect(nodeId) {
-        // Track retry count
-        this.reconnectAttempts = this.reconnectAttempts || {};
-        this.reconnectAttempts[nodeId] = (this.reconnectAttempts[nodeId] || 0) + 1;
-        
-        const attempts = this.reconnectAttempts[nodeId];
-        const maxAttempts = 3;
-        
-        if (attempts > maxAttempts) {
-            delete this.reconnectAttempts[nodeId];
-            return;
-        }
-        
-        // Exponential backoff: 2s, 4s, 8s
-        const delay = Math.pow(2, attempts) * 1000;
-        
-        setTimeout(() => {
-            if (!this.peers.has(nodeId) && this.signaling?.connected) {
-                if (this.signaling.availablePeers?.includes(nodeId) && this.nodeId < nodeId) {
-                    this.attemptConnection(nodeId, null);
-                }
-            } else if (this.peers.has(nodeId)) {
-                delete this.reconnectAttempts[nodeId];
-            }
-        }, delay);
-    }
-    
-    /**
-     * Handle incoming message from peer
-     * @param {Object} message - Message object
-     * @param {string} peerId - Peer's node ID
+     * Handle incoming P2P message
      */
     async handleMessage(message, peerId) {
         if (!window.SrishtiProtocol) return;
@@ -669,18 +240,6 @@ class Network {
                 break;
             case window.SrishtiProtocol.MESSAGE_TYPES.SYNC_RESPONSE:
                 await this.handleSyncResponse(message, peerId);
-                break;
-            case window.SrishtiProtocol.MESSAGE_TYPES.HEADER_SYNC_REQUEST:
-                await this.handleHeaderSyncRequest(message, peerId);
-                break;
-            case window.SrishtiProtocol.MESSAGE_TYPES.HEADER_SYNC_RESPONSE:
-                await this.handleHeaderSyncResponse(message, peerId);
-                break;
-            case window.SrishtiProtocol.MESSAGE_TYPES.MERKLE_PROOF_REQUEST:
-                await this.handleMerkleProofRequest(message, peerId);
-                break;
-            case window.SrishtiProtocol.MESSAGE_TYPES.MERKLE_PROOF_RESPONSE:
-                await this.handleMerkleProofResponse(message, peerId);
                 break;
             case window.SrishtiProtocol.MESSAGE_TYPES.NEW_BLOCK:
                 await this.handleNewBlock(message, peerId);
@@ -703,84 +262,41 @@ class Network {
      * Handle HELLO message
      */
     async handleHello(message, peerId) {
-        // ═══════════════════════════════════════════════════════════════════
-        // CRITICAL: Check chain epoch compatibility FIRST
-        // Peers with different epochs are from old/reset networks
-        // ═══════════════════════════════════════════════════════════════════
+        // Check epoch compatibility
         const theirEpoch = message.chainEpoch || 1;
         if (theirEpoch !== this.chainEpoch) {
-            console.warn(`🚫 REJECTING peer ${peerId}: Chain epoch mismatch (ours: ${this.chainEpoch}, theirs: ${theirEpoch})`);
-            console.warn(`   This peer is from an old/different network. Disconnecting...`);
+            console.warn(`🚫 Rejecting peer ${peerId}: Chain epoch mismatch (ours: ${this.chainEpoch}, theirs: ${theirEpoch})`);
             this.rejectedPeerCount++;
-            this.disconnectPeer(peerId, false); // Don't retry - epoch mismatch is permanent
             return;
         }
         
-        // Peer passed epoch check - they're compatible!
         this.compatiblePeerCount++;
         
-        // Update activity in connection manager
-        if (this.connectionManager) {
-            this.connectionManager.updateActivity(peerId);
-        }
-        
-        // Update DHT
-        if (this.dht) {
-            this.dht.updatePeerSeen(peerId);
-        }
-        
-        // Mark peer as online immediately when we receive HELLO
+        // Update peer info
         this.peerInfo.set(peerId, {
             publicKey: message.publicKey,
             chainLength: message.chainLength,
             latestHash: message.latestHash,
             protocolVersion: message.protocolVersion || 1,
-            nodeType: message.nodeType || 'LIGHT',
             chainEpoch: theirEpoch,
             isOnline: true,
             lastSeen: Date.now()
         });
         
-        // Notify UI immediately that this peer is online
         if (this.onPresenceUpdate) {
-            this.onPresenceUpdate(peerId, {
-                isOnline: true,
-                lastSeen: Date.now()
-            });
+            this.onPresenceUpdate(peerId, { isOnline: true, lastSeen: Date.now() });
         }
         
-        // Send immediate heartbeat so peer knows we're online too
-        this.sendHeartbeat();
-        
-        // Add to connection manager as candidate if not already connected
-        if (this.connectionManager && !this.peers.has(peerId)) {
-            const priority = this.connectionManager.calculatePriority(peerId, {
-                chainLength: message.chainLength,
-                lastSeen: Date.now(),
-                publicKey: message.publicKey,
-                nodeType: message.nodeType
-            });
-            this.connectionManager.addCandidate(peerId, priority, 'HELLO message');
-        }
-        
-        // Request sync if peer has longer chain, different latest hash (divergent chains), 
-        // OR if we only have genesis (1 block) and they have more
+        // Check if we should sync
         const ourChainLength = this.chain.getLength();
-        const ourLatestHash = this.chain.getLatestBlock()?.hash || null;
-        const theirLatestHash = message.latestHash || null;
-        const onlyHasGenesis = ourChainLength <= 1;
-        
         const shouldSync = message.chainLength > ourChainLength || 
-                          (message.chainLength === ourChainLength && theirLatestHash && ourLatestHash && theirLatestHash !== ourLatestHash) ||
-                          (onlyHasGenesis && message.chainLength > 1);
+                          (ourChainLength <= 1 && message.chainLength > 1);
         
         if (shouldSync) {
-            console.log(`📥 Requesting sync: our chain=${ourChainLength}/${ourLatestHash?.substring(0, 8)}, their chain=${message.chainLength}/${theirLatestHash?.substring(0, 8)}`);
+            console.log(`📥 Peer ${peerId} has longer chain (${message.chainLength} vs ${ourChainLength}), syncing...`);
             await this.requestSync(peerId);
         } else {
-            // Even if chains appear in sync, always do a sync request to ensure we have all nodes
-            // This is important because nodes might have been added concurrently and we need to merge unique nodes
-            console.log(`🔍 Chains appear in sync with ${peerId} (${ourChainLength} blocks), but verifying all nodes are present...`);
+            // Even if same length, sync to merge unique nodes
             await this.requestSync(peerId);
         }
     }
@@ -789,70 +305,56 @@ class Network {
      * Handle SYNC_REQUEST
      */
     async handleSyncRequest(message, peerId) {
-        console.log(`📥 Received SYNC_REQUEST from ${peerId}:`, message);
-        
-        const connection = this.peers.get(peerId);
-        if (!connection) {
-            console.log(`❌ No connection for ${peerId} to send response`);
-            return;
-        }
+        console.log(`📥 SYNC_REQUEST from ${peerId}`);
         
         const fromIndex = message.fromIndex || 0;
-        const totalBlocks = this.chain.getLength();
         const blocks = this.chain.blocks.slice(fromIndex);
-        
-        console.log(`📊 Our chain has ${totalBlocks} blocks, sending ${blocks.length} (from index ${fromIndex})`);
-        console.log(`📤 Sending SYNC_RESPONSE to ${peerId}: ${blocks.length} blocks`);
         
         const response = window.SrishtiProtocol.createSyncResponse({
             blocks: blocks.map(b => b.toJSON()),
-            chainLength: totalBlocks
+            chainLength: this.chain.getLength()
         });
         
-        const sent = connection.send(response);
-        console.log(`📤 SYNC_RESPONSE sent: ${sent}`);
+        this.wsClient.sendToPeer(peerId, response);
+        console.log(`📤 Sent ${blocks.length} blocks to ${peerId}`);
     }
     
     /**
      * Handle SYNC_RESPONSE
      */
     async handleSyncResponse(message, peerId) {
-        console.log(`📥 Received SYNC_RESPONSE from ${peerId}: ${message.blocks?.length || 0} blocks`);
+        console.log(`📥 SYNC_RESPONSE from ${peerId}: ${message.blocks?.length || 0} blocks`);
         
         if (this.syncing) {
-            console.log(`⏳ Already syncing, ignoring response`);
+            console.log('⏳ Already syncing, ignoring');
             return;
         }
         
-        // Add timeout protection to prevent stuck syncing flag
+        // Timeout protection
         const syncTimeout = setTimeout(() => {
             if (this.syncing) {
-                console.warn('⚠️ Sync timeout after 30s - resetting flag');
+                console.warn('⚠️ Sync timeout - resetting');
                 this.syncing = false;
                 if (this.onSyncProgress) {
                     this.onSyncProgress({ status: 'idle', message: 'Sync timeout' });
                 }
             }
-        }, 30000); // 30 second max sync time
+        }, 30000);
         
         try {
             this.syncing = true;
             
             const receivedBlocks = message.blocks;
             if (!receivedBlocks || receivedBlocks.length === 0) {
-                console.log(`📭 No blocks received`);
-                if (this.onSyncProgress) {
-                    this.onSyncProgress({ status: 'idle' });
-                }
+                console.log('📭 No blocks received');
+                if (this.onSyncProgress) this.onSyncProgress({ status: 'idle' });
                 return;
             }
             
             const ourLength = this.chain.getLength();
             const theirLength = receivedBlocks.length;
             
-            console.log(`📊 Chain comparison: ours=${ourLength}, theirs=${theirLength}`);
-            
-            // Emit sync start event
+            // Progress callback
             if (this.onSyncProgress) {
                 this.onSyncProgress({
                     status: 'syncing',
@@ -862,332 +364,83 @@ class Network {
                 });
             }
             
-            // ═══════════════════════════════════════════════════════════════════
-            // CRITICAL: Validate CHAIN EPOCH first - this is the primary filter!
-            // ═══════════════════════════════════════════════════════════════════
+            // Validate chain epoch
             if (theirLength > 0) {
                 const theirGenesis = receivedBlocks[0];
                 const theirChainEpoch = theirGenesis?.data?.chainEpoch || 1;
                 
                 if (theirChainEpoch !== this.chainEpoch) {
-                    console.warn(`🚫 REJECTING chain from ${peerId}: Chain epoch mismatch!`);
-                    console.warn(`   Our epoch: ${this.chainEpoch}, Their epoch: ${theirChainEpoch}`);
-                    console.warn(`   This chain is from an old/different network reset.`);
-                    return; // Don't sync old epoch chain
-                }
-            }
-            
-            // Validate genesis signature to prevent syncing old chains after reset
-            // Only validate if both chains have at least one block (genesis)
-            if (ourLength > 0 && theirLength > 0) {
-                const ourGenesis = this.chain.blocks[0];
-                const theirGenesis = receivedBlocks[0];
-                
-                // If we have different genesis blocks, check if theirs is from an old chain
-                // Genesis blocks with different hashes indicate different chains (after reset)
-                if (ourGenesis && theirGenesis) {
-                    // Extract uniqueId from genesis event if available
-                    const ourUniqueId = ourGenesis.data?.uniqueId || null;
-                    const theirUniqueId = theirGenesis.data?.uniqueId || null;
-                    
-                    // If genesis hashes are different, they're from different chains
-                    if (ourGenesis.hash !== theirGenesis.hash) {
-                        // If both have uniqueIds and they're different, reject old chain
-                        if (ourUniqueId && theirUniqueId && ourUniqueId !== theirUniqueId) {
-                            console.warn(`⚠️ Rejecting chain from ${peerId}: Different genesis signature (ours: ${ourUniqueId?.substring(0, 8)}, theirs: ${theirUniqueId?.substring(0, 8)})`);
-                            return; // Don't sync old chain
-                        }
-                        
-                        // If we have a uniqueId but they don't, prefer ours (newer chain with signature)
-                        if (ourUniqueId && !theirUniqueId) {
-                            console.warn(`⚠️ Rejecting chain from ${peerId}: Our chain has unique signature, theirs doesn't (likely old chain)`);
-                            return; // Don't sync old chain
-                        }
-                        
-                        // If neither has uniqueId but hashes differ, be more cautious
-                        // Only sync if their chain is significantly longer (might be legitimate fork)
-                        if (!ourUniqueId && !theirUniqueId && theirLength <= ourLength) {
-                            console.warn(`⚠️ Rejecting chain from ${peerId}: Different genesis hash but no unique signatures (likely old chain after reset)`);
-                            return; // Don't sync old chain
-                        }
-                    }
-                }
-            }
-            
-            // If their chain is longer, replace ours
-            if (theirLength > ourLength) {
-                console.log(`📥 Their chain is longer, replacing ours...`);
-                
-                // Update progress: starting replacement
-                if (this.onSyncProgress) {
-                    this.onSyncProgress({
-                        status: 'syncing',
-                        current: ourLength,
-                        total: theirLength,
-                        message: `Replacing chain with ${theirLength} blocks...`,
-                        progress: Math.min((ourLength / theirLength) * 100, 50)
-                    });
-                }
-                
-                // IMPORTANT: Save our current nodes BEFORE replacing chain
-                // We might have unique nodes they don't have
-                const ourOldBlocks = this.chain.toJSON();
-                
-                // Update progress: replacing chain
-                if (this.onSyncProgress) {
-                    this.onSyncProgress({
-                        status: 'syncing',
-                        current: ourLength,
-                        total: theirLength,
-                        message: `Processing blocks...`,
-                        progress: 60
-                    });
-                }
-                
-                await this.chain.replaceChain(receivedBlocks);
-                
-                // Update progress: merging nodes
-                if (this.onSyncProgress) {
-                    this.onSyncProgress({
-                        status: 'syncing',
-                        current: this.chain.getLength(),
-                        total: theirLength,
-                        message: `Merging unique nodes...`,
-                        progress: 80
-                    });
-                }
-                
-                // Ensure our local node is in the chain (for returning users)
-                await this.ensureLocalNodeInChain();
-                
-                // Merge back any unique nodes we had
-                await this.mergeUniqueNodes(ourOldBlocks, 'self');
-                
-                await this.saveChain();
-                this.onChainUpdate(this.chain);
-                console.log(`✅ Chain replaced with ${this.chain.getLength()} blocks from ${peerId}`);
-                
-                // Update progress: complete
-                if (this.onSyncProgress) {
-                    this.onSyncProgress({
-                        status: 'complete',
-                        current: this.chain.getLength(),
-                        total: this.chain.getLength(),
-                        message: `Synced ${this.chain.getLength()} blocks`,
-                        progress: 100
-                    });
-                }
-            } 
-            // If same length, use deterministic tie-breaker (earlier genesis timestamp wins)
-            else if (theirLength === ourLength && theirLength > 1) {
-                // Get genesis blocks for comparison
-                const ourGenesis = this.chain.blocks[0];
-                const theirGenesis = receivedBlocks[0];
-                
-                if (!ourGenesis || !theirGenesis) {
-                    console.warn(`⚠️ Cannot compare chains: missing genesis blocks`);
+                    console.warn(`🚫 Rejecting chain: epoch mismatch (${theirChainEpoch} vs ${this.chainEpoch})`);
                     return;
                 }
+            }
+            
+            // Their chain is longer - replace ours
+            if (theirLength > ourLength) {
+                console.log(`📥 Replacing chain (${ourLength} → ${theirLength})`);
                 
-                // If genesis hashes are different, don't sync (different chains after reset)
-                if (ourGenesis.hash !== theirGenesis.hash) {
-                    const ourUniqueId = ourGenesis.data?.uniqueId || null;
-                    const theirUniqueId = theirGenesis.data?.uniqueId || null;
-                    
-                    if (ourUniqueId && theirUniqueId && ourUniqueId !== theirUniqueId) {
-                        console.warn(`⚠️ Rejecting chain from ${peerId}: Different genesis signature (same length but different chains)`);
-                        return; // Don't sync old chain
-                    }
+                const ourOldBlocks = this.chain.toJSON();
+                await this.chain.replaceChain(receivedBlocks);
+                await this.ensureLocalNodeInChain();
+                await this.mergeUniqueNodes(ourOldBlocks, 'self');
+                await this.saveChain();
+                this.onChainUpdate(this.chain);
+                
+                // Update server with new chain length
+                if (this.wsClient) {
+                    this.wsClient.updateState({ chainLength: this.chain.getLength() });
                 }
                 
-                // Compare genesis timestamps (earlier wins) or hash as tie-breaker
+                console.log(`✅ Chain replaced: ${this.chain.getLength()} blocks`);
+            }
+            // Same length - merge unique nodes
+            else if (theirLength === ourLength && theirLength > 1) {
+                const ourGenesis = this.chain.blocks[0];
+                const theirGenesis = receivedBlocks[0];
+                
+                // Earlier genesis wins tie
                 if (theirGenesis.timestamp < ourGenesis.timestamp ||
-                    (theirGenesis.timestamp === ourGenesis.timestamp && 
-                     theirGenesis.hash < ourGenesis.hash)) {
-                    console.log(`📥 Their chain has earlier genesis, replacing ours...`);
-                    
-                    // IMPORTANT: Save our current nodes BEFORE replacing chain
-                    // We'll need to merge them back after adopting their chain
+                    (theirGenesis.timestamp === ourGenesis.timestamp && theirGenesis.hash < ourGenesis.hash)) {
                     const ourOldBlocks = this.chain.toJSON();
-                    
                     await this.chain.replaceChain(receivedBlocks);
-                    
-                    // Check if our node's join block is in the new chain
                     await this.ensureLocalNodeInChain();
-                    
-                    // Now merge back any nodes we had that they didn't have
                     await this.mergeUniqueNodes(ourOldBlocks, 'self');
-                    
                     await this.saveChain();
                     this.onChainUpdate(this.chain);
-                    console.log(`✅ Chain replaced (earlier genesis) with ${this.chain.getLength()} blocks from ${peerId}`);
-                    
-                    // Update progress: complete
-                    if (this.onSyncProgress) {
-                        this.onSyncProgress({
-                            status: 'complete',
-                            current: this.chain.getLength(),
-                            total: this.chain.getLength(),
-                            message: `Synced ${this.chain.getLength()} blocks`,
-                            progress: 100
-                        });
-                    }
                 } else {
-                    console.log(`📭 Our chain wins tie-breaker, keeping ours`);
-                    
-                    // Merge unique NODE_JOIN events from their chain that we don't have
                     await this.mergeUniqueNodes(receivedBlocks, peerId);
                 }
             } else {
-                console.log(`📭 Our chain is longer or equal, keeping ours`);
-                
-                // Even though our chain is longer, check if they have unique nodes we're missing
-                // This handles the case where chains diverged and we need to include all valid nodes
+                // Our chain is longer - just merge unique nodes
                 await this.mergeUniqueNodes(receivedBlocks, peerId);
             }
-        } catch (error) {
-            console.error(`Sync failed from ${peerId}:`, error);
+            
             if (this.onSyncProgress) {
                 this.onSyncProgress({
-                    status: 'error',
-                    message: `Sync failed: ${error.message}`,
-                    progress: 0
+                    status: 'complete',
+                    current: this.chain.getLength(),
+                    total: this.chain.getLength(),
+                    message: `Synced ${this.chain.getLength()} blocks`
                 });
+            }
+            
+        } catch (error) {
+            console.error(`Sync failed:`, error);
+            if (this.onSyncProgress) {
+                this.onSyncProgress({ status: 'error', message: error.message });
             }
         } finally {
             clearTimeout(syncTimeout);
             this.syncing = false;
-            // Hide progress bar after a delay if no new sync starts
+            
             if (this.onSyncProgress) {
                 setTimeout(() => {
-                    if (!this.syncing) {
-                        this.onSyncProgress({ status: 'idle' });
-                    }
+                    if (!this.syncing) this.onSyncProgress({ status: 'idle' });
                 }, 2000);
             }
         }
     }
     
-    /**
-     * Handle HEADER_SYNC_REQUEST (light client requesting headers)
-     */
-    async handleHeaderSyncRequest(message, peerId) {
-        console.log(`📥 Received HEADER_SYNC_REQUEST from ${peerId}:`, message);
-
-        const connection = this.peers.get(peerId);
-        if (!connection) {
-            console.log(`❌ No connection for ${peerId} to send header response`);
-            return;
-        }
-
-        if (!window.SrishtiBlockHeader) {
-            console.error('SrishtiBlockHeader not loaded');
-            return;
-        }
-
-        const fromIndex = message.fromIndex || 0;
-        const count = message.count || 100;
-        const totalBlocks = this.chain.getLength();
-        const toIndex = Math.min(fromIndex + count, totalBlocks);
-
-        // Extract headers from blocks
-        const headers = [];
-        for (let i = fromIndex; i < toIndex; i++) {
-            const block = this.chain.getBlock(i);
-            if (block) {
-                // Ensure block has header computed
-                if (!block.header) {
-                    await block.computeHash();
-                }
-                const header = block.getHeader();
-                if (header) {
-                    headers.push(header.toJSON());
-                }
-            }
-        }
-
-        console.log(`📤 Sending ${headers.length} headers to ${peerId} (from index ${fromIndex})`);
-
-        const response = window.SrishtiProtocol.createHeaderSyncResponse({
-            headers: headers,
-            chainLength: totalBlocks
-        });
-
-        connection.send(response);
-    }
-
-    /**
-     * Handle HEADER_SYNC_RESPONSE (light client receiving headers)
-     */
-    async handleHeaderSyncResponse(message, peerId) {
-        console.log(`📥 Received HEADER_SYNC_RESPONSE from ${peerId}: ${message.headers?.length || 0} headers`);
-
-        // This is typically handled by LightClient, but we can log it here
-        if (this.lightClient) {
-            try {
-                const synced = await this.lightClient.syncHeaders(
-                    async (fromIndex) => message.headers,
-                    message.headers.length > 0 ? 0 : null
-                );
-                console.log(`✅ Synced ${synced} headers from ${peerId}`);
-            } catch (error) {
-                console.error(`Failed to sync headers from ${peerId}:`, error);
-            }
-        }
-    }
-
-    /**
-     * Handle MERKLE_PROOF_REQUEST (light client requesting Merkle proof)
-     */
-    async handleMerkleProofRequest(message, peerId) {
-        console.log(`📥 Received MERKLE_PROOF_REQUEST from ${peerId}:`, message);
-
-        const connection = this.peers.get(peerId);
-        if (!connection) {
-            console.log(`❌ No connection for ${peerId} to send proof response`);
-            return;
-        }
-
-        try {
-            let proof = null;
-
-            if (message.blockIndex !== null && message.blockIndex !== undefined) {
-                // Specific block requested
-                proof = await this.chain.generateMerkleProof(message.blockIndex, message.transactionId);
-            } else {
-                // Search all blocks
-                proof = await this.chain.findTransactionAndGenerateProof(message.transactionId);
-            }
-
-            const response = window.SrishtiProtocol.createMerkleProofResponse({
-                proof: proof,
-                found: proof !== null
-            });
-
-            connection.send(response);
-            console.log(`📤 Sent Merkle proof to ${peerId}: ${proof ? 'found' : 'not found'}`);
-        } catch (error) {
-            console.error(`Failed to generate Merkle proof for ${peerId}:`, error);
-            const response = window.SrishtiProtocol.createMerkleProofResponse({
-                proof: null,
-                found: false
-            });
-            connection.send(response);
-        }
-    }
-
-    /**
-     * Handle MERKLE_PROOF_RESPONSE (light client receiving proof)
-     */
-    async handleMerkleProofResponse(message, peerId) {
-        console.log(`📥 Received MERKLE_PROOF_RESPONSE from ${peerId}: ${message.found ? 'proof found' : 'not found'}`);
-
-        // This is typically handled by LightClient, but we can log it here
-        if (this.onMerkleProofReceived) {
-            this.onMerkleProofReceived(message.proof, peerId);
-        }
-    }
-
     /**
      * Handle NEW_BLOCK
      */
@@ -1198,72 +451,59 @@ class Network {
             const block = window.SrishtiBlock.fromJSON(message.block);
             const expectedIndex = this.chain.getLength();
             
-            // Validate block structure
             if (!block.isValid()) {
-                console.warn(`Invalid block structure from ${peerId}`);
+                console.warn(`Invalid block from ${peerId}`);
                 return;
             }
             
-            // Check block index
+            // Block is behind or ahead
             if (block.index < expectedIndex) {
-                // Block is behind our chain - this is stale, ignore it
-                // The sync mechanism will handle any missing nodes properly
-                console.log(`📦 Block ${block.index} from ${peerId} is behind our chain (we have ${expectedIndex}), ignoring stale block`);
-                
-                // Don't call mergeUniqueNodes here - it causes duplicate issues
-                // If we're missing a node, the regular sync will find it
-                return;
+                return; // Stale block
             }
             
             if (block.index > expectedIndex) {
-                // Block is ahead - we're missing blocks, request sync
-                console.log(`📦 Block ${block.index} from ${peerId} is ahead of our chain (we have ${expectedIndex}), syncing...`);
                 await this.requestSync(peerId);
                 return;
             }
             
-            // Block index matches - verify previous hash
+            // Check previous hash
             const latestBlock = this.chain.getLatestBlock();
             if (latestBlock && block.previousHash !== latestBlock.hash) {
-                console.warn(`Block ${block.index} has wrong previousHash, requesting sync`);
                 await this.requestSync(peerId);
                 return;
             }
             
-            // ═══════════════════════════════════════════════════════════════════
-            // CRITICAL: Check if this NODE_JOIN would create a duplicate
-            // ═══════════════════════════════════════════════════════════════════
-            if (block.data && block.data.type === 'NODE_JOIN') {
+            // Prevent duplicate NODE_JOIN
+            if (block.data?.type === 'NODE_JOIN') {
                 const nodeId = block.data.nodeId;
-                const existingInState = this.chain.state?.nodeRoles?.[nodeId];
                 const nodeMap = this.chain.buildNodeMap();
-                
-                if (existingInState || nodeMap[nodeId]) {
-                    console.log(`🚫 Ignoring duplicate NODE_JOIN block for ${nodeId} from ${peerId}`);
+                if (nodeMap[nodeId] || this.chain.state?.nodeRoles?.[nodeId]) {
+                    console.log(`🚫 Ignoring duplicate NODE_JOIN for ${nodeId}`);
                     return;
                 }
             }
             
-            // Add to chain (Chain.addBlock has additional duplicate protection)
             const added = await this.chain.addBlock(block);
             if (!added) {
-                console.log(`⏭️ Block rejected by chain (likely duplicate NODE_JOIN)`);
+                console.log('⏭️ Block rejected');
                 return;
             }
             
-            // Save to storage
             await this.saveChain();
             
-            // Broadcast to other peers
+            // Broadcast to other peers (relay will handle this)
             this.broadcast(message, peerId);
             
-            // Notify listeners
-            this.onChainUpdate(this.chain);
+            // Update server state
+            if (this.wsClient) {
+                this.wsClient.updateState({ chainLength: this.chain.getLength() });
+            }
             
-            console.log(`✅ New block ${block.index} received from ${peerId}`);
+            this.onChainUpdate(this.chain);
+            console.log(`✅ New block ${block.index} from ${peerId}`);
+            
         } catch (error) {
-            console.error(`Failed to add block from ${peerId}:`, error);
-            // On any error, try to sync with this peer
+            console.error(`Failed to process block:`, error);
             await this.requestSync(peerId);
         }
     }
@@ -1272,14 +512,12 @@ class Network {
      * Handle HEARTBEAT
      */
     handleHeartbeat(message, peerId) {
-        // Update peer info (for presence tracking)
         this.peerInfo.set(peerId, {
             ...this.peerInfo.get(peerId),
             lastSeen: message.timestamp,
             isOnline: message.isOnline
         });
         
-        // Notify the UI about this peer's online status
         if (this.onPresenceUpdate) {
             this.onPresenceUpdate(peerId, {
                 isOnline: message.isOnline,
@@ -1287,16 +525,12 @@ class Network {
             });
         }
         
-        // If the heartbeat includes info about other nodes, update them too
+        // Gossip about known online nodes
         if (message.knownOnline && Array.isArray(message.knownOnline)) {
             for (const nodeId of message.knownOnline) {
                 if (nodeId !== this.nodeId && !this.peerInfo.has(nodeId)) {
-                    // We learned about another online node through gossip
                     if (this.onPresenceUpdate) {
-                        this.onPresenceUpdate(nodeId, {
-                            isOnline: true,
-                            lastSeen: Date.now()
-                        });
+                        this.onPresenceUpdate(nodeId, { isOnline: true, lastSeen: Date.now() });
                     }
                 }
             }
@@ -1304,21 +538,13 @@ class Network {
     }
     
     /**
-     * Handle PARENT_REQUEST message
-     * @param {Object} message - Parent request message
-     * @param {string} peerId - Peer's node ID (the node requesting to be child)
+     * Handle PARENT_REQUEST
      */
     async handleParentRequest(message, peerId) {
-        console.log(`📥 Received PARENT_REQUEST from ${peerId} to become child of ${message.parentId}`);
+        console.log(`📥 PARENT_REQUEST from ${peerId}`);
         
-        // Check if the request is for us to be the parent
-        if (message.parentId !== this.nodeId) {
-            console.log(`⏭️ Parent request not for us (requested: ${message.parentId}, we are: ${this.nodeId})`);
-            return;
-        }
+        if (message.parentId !== this.nodeId) return;
         
-        // This is a callback - the actual approval happens in the UI/app layer
-        // We'll just notify that a request was received
         if (this.onParentRequest) {
             this.onParentRequest({
                 nodeId: message.nodeId || peerId,
@@ -1326,292 +552,118 @@ class Network {
                 reason: message.reason,
                 metadata: message.metadata
             });
-        } else {
-            console.log(`ℹ️ Parent request received from ${peerId}, but no handler registered`);
         }
     }
     
     /**
-     * Handle PARENT_RESPONSE message
-     * @param {Object} message - Parent response message
-     * @param {string} peerId - Peer's node ID (the parent who responded)
+     * Handle PARENT_RESPONSE
      */
     async handleParentResponse(message, peerId) {
-        console.log(`📥 Received PARENT_RESPONSE from ${peerId}: ${message.approved ? 'approved' : 'rejected'}`);
+        console.log(`📥 PARENT_RESPONSE from ${peerId}: ${message.approved ? 'approved' : 'rejected'}`);
         
-        // Check if the response is for our request
-        if (message.requestNodeId !== this.nodeId) {
-            console.log(`⏭️ Parent response not for us (requested: ${message.requestNodeId}, we are: ${this.nodeId})`);
-            return;
-        }
+        if (message.requestNodeId !== this.nodeId) return;
         
-        // Notify the app layer
         if (this.onParentResponse) {
             this.onParentResponse({
                 parentId: message.parentId,
                 approved: message.approved,
                 reason: message.reason
             });
-        } else {
-            console.log(`ℹ️ Parent response received from ${peerId}, but no handler registered`);
         }
     }
     
     /**
-     * Send parent request to a node with retry logic
-     * @param {string} parentId - Node ID of the parent we want to connect to
-     * @param {Object} options - Request options
-     * @param {number} retryCount - Current retry attempt (internal)
-     * @returns {Promise<boolean>} - Success status
-     */
-    async sendParentRequest(parentId, options = {}, retryCount = 0) {
-        const maxRetries = 5;
-        console.log(`📤 Sending PARENT_REQUEST to ${parentId}... (attempt ${retryCount + 1}/${maxRetries + 1})`);
-        
-        const connection = this.peers.get(parentId);
-        if (!connection || !connection.isConnected()) {
-            console.warn(`❌ Cannot send parent request: not connected to ${parentId}`);
-            
-            // Try to connect first
-            const nodeMap = this.chain.buildNodeMap();
-            const parentNode = nodeMap[parentId];
-            if (parentNode && parentNode.publicKey) {
-                await this.addPendingConnection(parentId, parentNode.publicKey);
-                await this.attemptConnection(parentId, parentNode.publicKey);
-                // Wait longer for connection to establish
-                await new Promise(resolve => setTimeout(resolve, 3000));
-                
-                // Retry after connection
-                if (this.peers.has(parentId) && this.peers.get(parentId).isConnected()) {
-                    return await this.sendParentRequest(parentId, options, retryCount);
-                }
-            }
-            
-            // If still not connected and we have retries left, queue for later
-            if (retryCount < maxRetries) {
-                console.log(`🔄 Connection not established, retrying in 3s (${retryCount + 1}/${maxRetries})`);
-                await new Promise(r => setTimeout(r, 3000));
-                return this.sendParentRequest(parentId, options, retryCount + 1);
-            }
-            
-            // Max retries reached - queue request for delivery when peer connects
-            console.warn(`⚠️ Max retries reached. Queuing parent request for ${parentId}`);
-            this.queuedParentRequests = this.queuedParentRequests || [];
-            this.queuedParentRequests.push({ 
-                parentId, 
-                options, 
-                timestamp: Date.now(),
-                nodeId: this.nodeId 
-            });
-            
-            // Set up a listener to send when peer connects
-            this.setupQueuedRequestDelivery(parentId);
-            
-            return false;
-        }
-        
-        const request = window.SrishtiProtocol.createParentRequest({
-            nodeId: this.nodeId,
-            parentId: parentId,
-            reason: options.reason || null,
-            metadata: options.metadata || {}
-        });
-        
-        const sent = connection.send(request);
-        if (sent) {
-            console.log(`✅ Parent request sent to ${parentId}`);
-            // Remove from queue if it was queued
-            if (this.queuedParentRequests) {
-                this.queuedParentRequests = this.queuedParentRequests.filter(
-                    req => req.parentId !== parentId || req.nodeId !== this.nodeId
-                );
-            }
-        } else {
-            console.error(`❌ Failed to send parent request to ${parentId}`);
-            // Queue for retry if send failed
-            if (retryCount < maxRetries) {
-                await new Promise(r => setTimeout(r, 2000));
-                return this.sendParentRequest(parentId, options, retryCount + 1);
-            }
-        }
-        
-        return sent;
-    }
-    
-    /**
-     * Set up delivery of queued requests when peer connects
-     * @param {string} parentId - Parent node ID to watch for
-     */
-    setupQueuedRequestDelivery(parentId) {
-        // Check periodically if peer connected and deliver queued requests
-        const deliveryCheck = setInterval(async () => {
-            if (!this.queuedParentRequests || this.queuedParentRequests.length === 0) {
-                clearInterval(deliveryCheck);
-                return;
-            }
-            
-            const connection = this.peers.get(parentId);
-            if (connection && connection.isConnected()) {
-                // Find and send queued requests for this parent
-                const requests = this.queuedParentRequests.filter(req => req.parentId === parentId);
-                for (const req of requests) {
-                    console.log(`📤 Delivering queued parent request to ${parentId}`);
-                    const sent = await this.sendParentRequest(req.parentId, req.options);
-                    if (sent) {
-                        // Remove from queue
-                        this.queuedParentRequests = this.queuedParentRequests.filter(
-                            r => r !== req
-                        );
-                    }
-                }
-                clearInterval(deliveryCheck);
-            }
-            
-            // Remove old queued requests (older than 5 minutes)
-            const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
-            this.queuedParentRequests = this.queuedParentRequests.filter(
-                req => req.timestamp > fiveMinutesAgo
-            );
-            
-            if (this.queuedParentRequests.length === 0) {
-                clearInterval(deliveryCheck);
-            }
-        }, 5000); // Check every 5 seconds
-        
-        // Stop checking after 5 minutes
-        setTimeout(() => clearInterval(deliveryCheck), 5 * 60 * 1000);
-    }
-    
-    /**
-     * Send parent response (approve/reject) to a requesting node
-     * @param {string} requestNodeId - Node ID that requested to be child
-     * @param {boolean} approved - Whether to approve the request
-     * @param {string} reason - Optional reason
-     * @returns {Promise<boolean>} - Success status
-     */
-    async sendParentResponse(requestNodeId, approved, reason = null) {
-        console.log(`📤 Sending PARENT_RESPONSE to ${requestNodeId}: ${approved ? 'approved' : 'rejected'}`);
-        
-        const connection = this.peers.get(requestNodeId);
-        if (!connection || !connection.isConnected()) {
-            console.warn(`❌ Cannot send parent response: not connected to ${requestNodeId}`);
-            return false;
-        }
-        
-        const response = window.SrishtiProtocol.createParentResponse({
-            requestNodeId: requestNodeId,
-            parentId: this.nodeId,
-            approved: approved,
-            reason: reason
-        });
-        
-        const sent = connection.send(response);
-        if (sent) {
-            console.log(`✅ Parent response sent to ${requestNodeId}`);
-        } else {
-            console.error(`❌ Failed to send parent response to ${requestNodeId}`);
-        }
-        
-        return sent;
-    }
-    
-    /**
-     * Request chain sync from peer
-     * @param {string} peerId - Peer's node ID
+     * Request sync from a peer
      */
     async requestSync(peerId) {
-        console.log(`📤 requestSync called for ${peerId}`);
-        
-        const connection = this.peers.get(peerId);
-        if (!connection) {
-            console.log(`❌ No connection found for ${peerId} in peers map`);
-            console.log(`📊 Current peers:`, Array.from(this.peers.keys()));
+        if (!this.wsClient || !this.wsClient.isConnected()) {
             if (this.onSyncProgress) {
-                this.onSyncProgress({
-                    status: 'connecting',
-                    message: `Connecting to peers...`,
-                    progress: 10
-                });
+                this.onSyncProgress({ status: 'connecting', message: 'Connecting to peers...', progress: 10 });
             }
             return;
         }
         
-        if (!connection.isConnected()) {
-            console.log(`❌ Connection to ${peerId} is not open`);
-            if (this.onSyncProgress) {
-                this.onSyncProgress({
-                    status: 'connecting',
-                    message: `Establishing connection...`,
-                    progress: 20
-                });
-            }
-            return;
-        }
-        
-        // Emit progress: requesting sync
         if (this.onSyncProgress) {
-            this.onSyncProgress({
-                status: 'syncing',
-                message: `Requesting blockchain data...`,
-                progress: 30
-            });
+            this.onSyncProgress({ status: 'syncing', message: 'Requesting blockchain data...', progress: 30 });
         }
         
-        // Always request full chain to compare and merge
         const request = window.SrishtiProtocol.createSyncRequest({
-            fromIndex: 0,  // Request entire chain for comparison
+            fromIndex: 0,
             chainLength: this.chain.getLength(),
             latestHash: this.chain.getLatestBlock()?.hash || null
         });
         
-        console.log(`📤 Sending SYNC_REQUEST to ${peerId}:`, { ourChainLength: this.chain.getLength() });
-        const sent = connection.send(request);
-        console.log(`📤 SYNC_REQUEST sent: ${sent}`);
+        this.wsClient.sendToPeer(peerId, request);
+        console.log(`📤 SYNC_REQUEST sent to ${peerId}`);
     }
     
     /**
-     * Broadcast message to all peers (except sender)
-     * @param {Object} message - Message to broadcast
-     * @param {string} excludePeerId - Peer ID to exclude
+     * Sync with the peer that has the longest chain
      */
-    broadcast(message, excludePeerId = null) {
-        if (NETWORK_DEBUG) console.log(`📢 Broadcasting ${message.type} to ${this.peers.size} peers`);
+    async syncWithBestPeer() {
+        if (!this.wsClient) return;
         
-        let sentCount = 0;
-        for (const [peerId, connection] of this.peers.entries()) {
-            if (peerId !== excludePeerId && connection.isConnected()) {
-                if (connection.send(message)) sentCount++;
+        let bestPeer = null;
+        let bestLength = this.chain.getLength();
+        
+        for (const [nodeId, info] of this.peerInfo.entries()) {
+            if (info.isOnline && info.chainLength > bestLength && info.chainEpoch === this.chainEpoch) {
+                bestPeer = nodeId;
+                bestLength = info.chainLength;
             }
         }
-        if (NETWORK_DEBUG && sentCount > 0) console.log(`📤 Broadcast sent to ${sentCount} peers`);
+        
+        if (bestPeer) {
+            console.log(`🔄 Syncing with ${bestPeer} (${bestLength} blocks)`);
+            await this.requestSync(bestPeer);
+        }
+    }
+    
+    /**
+     * Broadcast message to all peers
+     */
+    broadcast(message, excludePeerId = null) {
+        if (!this.wsClient || !this.wsClient.isConnected()) return;
+        
+        // Use server-side broadcast (more efficient)
+        this.wsClient.broadcast(message);
+    }
+    
+    /**
+     * Send to specific peer
+     */
+    sendToPeer(peerId, message) {
+        if (!this.wsClient || !this.wsClient.isConnected()) return false;
+        return this.wsClient.sendToPeer(peerId, message);
     }
     
     /**
      * Propose a new block
-     * @param {Block} block - Block to propose
      */
     async proposeBlock(block) {
         try {
-            // Add to chain (returns false if duplicate NODE_JOIN is detected)
             const added = await this.chain.addBlock(block);
             
             if (!added) {
-                console.warn(`⚠️ Block rejected (likely duplicate NODE_JOIN): ${block.hash?.substring(0, 16)}...`);
+                console.warn('⚠️ Block rejected');
                 return false;
             }
             
-            // Save to storage
             await this.saveChain();
             
-            // Broadcast to peers
+            // Broadcast to network
             const message = window.SrishtiProtocol.createNewBlock(block.toJSON());
             this.broadcast(message);
             
-            // Notify listeners
-            this.onChainUpdate(this.chain);
+            // Update server state
+            if (this.wsClient) {
+                this.wsClient.updateState({ chainLength: this.chain.getLength() });
+            }
             
+            this.onChainUpdate(this.chain);
             console.log(`✅ Block proposed: ${block.hash.substring(0, 16)}...`);
             return true;
+            
         } catch (error) {
             console.error('Failed to propose block:', error);
             throw error;
@@ -1627,43 +679,29 @@ class Network {
     }
     
     /**
-     * Merge unique NODE_JOIN events from peer's chain that we don't have
-     * This handles the case where chains diverged and both have valid nodes
-     * @param {Array} receivedBlocks - Blocks from peer's chain
-     * @param {string} peerId - Peer's node ID
+     * Merge unique NODE_JOIN events from another chain
      */
     async mergeUniqueNodes(receivedBlocks, peerId) {
         if (!receivedBlocks || receivedBlocks.length === 0) return;
         
-        // ═══════════════════════════════════════════════════════════════════
-        // CRITICAL: Prevent concurrent merge operations (race condition fix)
-        // ═══════════════════════════════════════════════════════════════════
         if (this.merging) {
-            console.log(`⏳ Already merging nodes, skipping concurrent merge from ${peerId}`);
+            console.log('⏳ Already merging, skipping');
             return;
         }
         
         try {
             this.merging = true;
             
-            // Build map of nodes we already have
             const ourNodeMap = this.chain.buildNodeMap();
             const ourNodeIds = new Set(Object.keys(ourNodeMap));
-            
-            console.log(`🔀 Checking for unique nodes from ${peerId}. Our nodes:`, Array.from(ourNodeIds));
-            
-            // Find NODE_JOIN events in their chain that we don't have
-            // Use a Map to de-duplicate by nodeId (in case same node appears in multiple blocks)
             const missingJoinsMap = new Map();
             
             for (const blockData of receivedBlocks) {
                 const eventData = blockData.data;
                 
-                // Check if this is a NODE_JOIN event
-                if (eventData && eventData.type === 'NODE_JOIN') {
+                if (eventData?.type === 'NODE_JOIN') {
                     const nodeId = eventData.nodeId;
                     
-                    // If we don't have this node AND we haven't already added it to missing list
                     if (!ourNodeIds.has(nodeId) && !missingJoinsMap.has(nodeId)) {
                         console.log(`🆕 Found missing node: ${eventData.name} (${nodeId})`);
                         missingJoinsMap.set(nodeId, eventData);
@@ -1673,37 +711,25 @@ class Network {
             
             const missingJoins = Array.from(missingJoinsMap.values());
             
-            if (missingJoins.length === 0) {
-                console.log(`✅ No missing nodes to merge from ${peerId}`);
-                return;
-            }
+            if (missingJoins.length === 0) return;
             
             console.log(`🔀 Merging ${missingJoins.length} unique nodes from ${peerId}`);
             
             let addedCount = 0;
             
-            // Add each missing node as a new block
             for (const joinEvent of missingJoins) {
                 const nodeId = joinEvent.nodeId;
                 
-                // Triple-check the node doesn't exist (race condition protection)
-                // Check both nodeMap and state.nodeRoles to be absolutely sure
+                // Triple-check
                 const currentNodeMap = this.chain.buildNodeMap();
-                const existingInState = this.chain.state?.nodeRoles?.[nodeId];
-                
-                if (currentNodeMap[nodeId] || existingInState) {
-                    console.log(`⏭️ Node ${nodeId} already exists (map: ${!!currentNodeMap[nodeId]}, state: ${!!existingInState}), skipping merge`);
+                if (currentNodeMap[nodeId] || this.chain.state?.nodeRoles?.[nodeId]) {
                     continue;
                 }
                 
-                // Update timestamp to now (it's being added to our chain now)
                 const updatedJoinEvent = {
                     ...joinEvent,
                     timestamp: Date.now(),
-                    // Reset parentId if it points to a node we don't have
-                    parentId: joinEvent.parentId && ourNodeIds.has(joinEvent.parentId) 
-                        ? joinEvent.parentId 
-                        : null
+                    parentId: joinEvent.parentId && ourNodeIds.has(joinEvent.parentId) ? joinEvent.parentId : null
                 };
                 
                 const latestBlock = this.chain.getLatestBlock();
@@ -1717,78 +743,65 @@ class Network {
                 
                 await newBlock.computeHash();
                 
-                // addBlock now returns false if it rejects a duplicate NODE_JOIN
                 const added = await this.chain.addBlock(newBlock);
-                if (!added) {
-                    console.log(`⏭️ Block rejected for ${nodeId} (duplicate detected by Chain.addBlock)`);
-                    continue;
-                }
+                if (!added) continue;
                 
                 addedCount++;
-                
-                // Add to our known nodes for next iteration
                 ourNodeIds.add(nodeId);
                 
-                // Broadcast the new block to other peers (exclude the peer we got it from)
+                // Broadcast
                 const newBlockMessage = window.SrishtiProtocol.createNewBlock(newBlock.toJSON());
                 this.broadcast(newBlockMessage, peerId);
                 
-                console.log(`✅ Added missing node ${joinEvent.name} (${nodeId}) at index ${newBlock.index}`);
+                console.log(`✅ Added missing node ${joinEvent.name}`);
             }
             
             if (addedCount > 0) {
-                // Save updated chain
                 await this.saveChain();
                 
-                // Notify UI of chain update
-                this.onChainUpdate(this.chain);
+                if (this.wsClient) {
+                    this.wsClient.updateState({ chainLength: this.chain.getLength() });
+                }
                 
-                console.log(`✅ Merged ${addedCount} nodes from ${peerId}, chain now has ${this.chain.getLength()} blocks`);
+                this.onChainUpdate(this.chain);
+                console.log(`✅ Merged ${addedCount} nodes, chain now has ${this.chain.getLength()} blocks`);
             }
             
         } catch (error) {
-            console.error(`Failed to merge nodes from ${peerId}:`, error);
+            console.error('Failed to merge nodes:', error);
         } finally {
             this.merging = false;
         }
     }
     
     /**
-     * Ensure our local node is in the chain after a chain replacement
-     * If not, add our join block to the end
+     * Ensure our local node is in the chain
      */
     async ensureLocalNodeInChain() {
         if (!this.nodeId) return;
         
-        // Check if our node is in the chain (check both nodeMap and state.nodeRoles)
         const nodeMap = this.chain.buildNodeMap();
-        const existingInState = this.chain.state?.nodeRoles?.[this.nodeId];
-        
-        if (nodeMap[this.nodeId] || existingInState) {
-            console.log(`✅ Our node ${this.nodeId} is in the chain`);
+        if (nodeMap[this.nodeId] || this.chain.state?.nodeRoles?.[this.nodeId]) {
             return;
         }
         
-        console.log(`⚠️ Our node ${this.nodeId} not in chain, re-adding join block...`);
+        console.log(`⚠️ Our node not in chain, re-adding...`);
         
-        // Get our node info from localStorage
         const nodeName = localStorage.getItem('srishti_node_name');
         const publicKey = localStorage.getItem('srishti_public_key');
         
         if (!nodeName || !publicKey) {
-            console.error('Cannot re-add node: missing localStorage data');
+            console.error('Cannot re-add: missing localStorage data');
             return;
         }
         
-        // Create a new join event
         const joinEvent = window.SrishtiEvent.createNodeJoin({
             nodeId: this.nodeId,
             name: nodeName,
-            parentId: null, // Re-joining as root (could be improved)
+            parentId: null,
             publicKey: publicKey
         });
         
-        // Create and add the block
         const latestBlock = this.chain.getLatestBlock();
         const newBlock = new window.SrishtiBlock({
             index: this.chain.getLength(),
@@ -1800,43 +813,26 @@ class Network {
         
         await newBlock.computeHash();
         
-        // addBlock returns false if duplicate NODE_JOIN is detected
         const added = await this.chain.addBlock(newBlock);
-        if (!added) {
-            console.log(`⏭️ Re-add rejected (node might have been added by concurrent operation)`);
-            return;
-        }
+        if (!added) return;
         
-        // Broadcast our re-join to peers
         const message = window.SrishtiProtocol.createNewBlock(newBlock.toJSON());
         this.broadcast(message);
         
-        console.log(`✅ Re-added our node to chain at index ${newBlock.index}`);
+        console.log(`✅ Re-added our node at index ${newBlock.index}`);
     }
     
     /**
-     * Send heartbeat to all connected peers
+     * Send heartbeat to all peers
      */
     sendHeartbeat() {
-        // Collect list of nodes we know are online (including ourselves and connected peers)
+        if (!this.wsClient || !this.wsClient.isConnected()) return;
+        
+        // Collect online nodes
         const knownOnline = [this.nodeId];
-        for (const [peerId, connection] of this.peers.entries()) {
-            if (connection.isConnected()) {
-                knownOnline.push(peerId);
-                // Mark connected peers as online in peerInfo
-                const info = this.peerInfo.get(peerId) || {};
-                this.peerInfo.set(peerId, {
-                    ...info,
-                    isOnline: true,
-                    lastSeen: Date.now()
-                });
-                // Notify UI about this peer being online
-                if (this.onPresenceUpdate) {
-                    this.onPresenceUpdate(peerId, {
-                        isOnline: true,
-                        lastSeen: Date.now()
-                    });
-                }
+        for (const [nodeId, info] of this.peerInfo.entries()) {
+            if (info.isOnline) {
+                knownOnline.push(nodeId);
             }
         }
         
@@ -1850,261 +846,118 @@ class Network {
     }
     
     /**
-     * Start heartbeat (send periodic heartbeats to peers)
+     * Start heartbeat interval
      */
     startHeartbeat() {
-        if (this.heartbeatInterval) {
-            clearInterval(this.heartbeatInterval);
-        }
+        if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
         
-        // Send initial heartbeat immediately
         this.sendHeartbeat();
         
         this.heartbeatInterval = setInterval(() => {
             this.sendHeartbeat();
-        }, 5000); // Every 5 seconds (reduced from 30s for faster updates)
+        }, 5000); // Every 5 seconds
     }
     
     /**
-     * Start periodic chain sync
+     * Start periodic sync
      */
     startSync() {
-        if (this.syncInterval) {
-            clearInterval(this.syncInterval);
-        }
+        if (this.syncInterval) clearInterval(this.syncInterval);
         
         this.syncInterval = setInterval(async () => {
-            const ourChainLength = this.chain.getLength();
-            const onlyHasGenesis = ourChainLength <= 1;
-            
-            // Request sync from peers with longer chains, OR if we only have genesis and they have more
-            for (const [peerId, info] of this.peerInfo.entries()) {
-                if (info.chainLength > ourChainLength || (onlyHasGenesis && info.chainLength > 1)) {
-                    // Only request if we have a connection to this peer
-                    if (this.peers.has(peerId)) {
-                        await this.requestSync(peerId);
-                    }
-                }
-            }
-            
-            // Also attempt pending connections periodically
-            this.attemptPendingConnections();
-        }, 10000); // Every 10 seconds for responsive sync
+            await this.syncWithBestPeer();
+        }, 15000); // Every 15 seconds
     }
     
     /**
-     * Add a pending connection (a node we want to connect to)
-     * @param {string} nodeId - Node ID to connect to
-     * @param {string} publicKey - Node's public key (base64)
+     * Send parent request
      */
-    addPendingConnection(nodeId, publicKey) {
-        if (this.peers.has(nodeId)) {
-            console.log(`⏭️ Already connected to ${nodeId}`);
-            return;
+    async sendParentRequest(parentId, options = {}) {
+        if (!this.wsClient || !this.wsClient.isConnected()) {
+            console.warn('Cannot send parent request: not connected');
+            return false;
         }
         
-        this.pendingConnections.set(nodeId, {
-            publicKey: publicKey,
-            timestamp: Date.now()
+        const request = window.SrishtiProtocol.createParentRequest({
+            nodeId: this.nodeId,
+            parentId: parentId,
+            reason: options.reason || null,
+            metadata: options.metadata || {}
         });
-        console.log(`📝 Added pending connection to ${nodeId}`);
         
-        // Attempt connection immediately if signaling is ready
-        if (this.signaling && this.signaling.isConnected()) {
-            this.attemptConnection(nodeId, publicKey);
-        } else {
-            console.log(`⏳ Signaling not ready, will connect when available`);
-        }
+        return this.wsClient.sendToPeer(parentId, request);
     }
     
     /**
-     * Attempt all pending connections
+     * Send parent response
      */
-    async attemptPendingConnections() {
-        if (!this.signaling || !this.signaling.isConnected()) {
-            return; // Wait for signaling to be ready
+    async sendParentResponse(requestNodeId, approved, reason = null) {
+        if (!this.wsClient || !this.wsClient.isConnected()) {
+            return false;
         }
         
-        for (const [nodeId, info] of this.pendingConnections.entries()) {
-            if (!this.peers.has(nodeId) && !this.pendingOffers.has(nodeId)) {
-                await this.attemptConnection(nodeId, info.publicKey);
-            }
-        }
-    }
-    
-    /**
-     * Attempt to connect to a specific node
-     * @param {string} nodeId - Node ID to connect to
-     * @param {string} publicKey - Node's public key
-     */
-    async attemptConnection(nodeId, publicKey) {
-        console.log(`🔄 attemptConnection called for ${nodeId}`);
+        const response = window.SrishtiProtocol.createParentResponse({
+            requestNodeId: requestNodeId,
+            parentId: this.nodeId,
+            approved: approved,
+            reason: reason
+        });
         
-        if (this.peers.has(nodeId)) {
-            console.log(`⏭️ Already connected to ${nodeId}`);
-            return;
-        }
-        
-        if (this.pendingOffers.has(nodeId)) return;
-        if (!this.signaling || !this.signaling.isConnected()) return;
-        if (!window.SrishtiPeerConnection) return;
-        
-        try {
-            const connection = new window.SrishtiPeerConnection({
-                nodeId: this.nodeId,
-                onMessage: (message, peerId) => this.handleMessage(message, peerId),
-                onConnectionStateChange: (state) => {
-                    if (state === 'data_channel_open') {
-                        console.log(`✅ Connected to peer ${nodeId}! Sending HELLO...`);
-                        this.pendingOffers.delete(nodeId);
-                        this.pendingConnections.delete(nodeId);
-                        // Mark as online immediately
-                        const info = this.peerInfo.get(nodeId) || {};
-                        this.peerInfo.set(nodeId, {
-                            ...info,
-                            isOnline: true,
-                            lastSeen: Date.now()
-                        });
-                        if (this.onPresenceUpdate) {
-                            this.onPresenceUpdate(nodeId, {
-                                isOnline: true,
-                                lastSeen: Date.now()
-                            });
-                        }
-                        
-                        // CRITICAL: Send HELLO message immediately when data channel opens
-                        const hello = window.SrishtiProtocol.createHello({
-                            nodeId: this.nodeId,
-                            publicKey: null,
-                            chainLength: this.chain.getLength(),
-                            latestHash: this.chain.getLatestBlock()?.hash || null,
-                            protocolVersion: this.protocolVersion,
-                            chainEpoch: this.chainEpoch
-                        });
-                        const conn = this.peers.get(nodeId);
-                        if (conn && conn.isConnected()) {
-                            console.log(`📤 Sending HELLO to ${nodeId} (outgoing connection)`);
-                            conn.send(hello);
-                        }
-                        
-                        // Send immediate heartbeat
-                        this.sendHeartbeat();
-                        
-                        // Send rapid heartbeats for first 10 seconds to ensure presence is synced
-                        let rapidHeartbeatCount = 0;
-                        const rapidHeartbeat = setInterval(() => {
-                            if (!this.peers.has(nodeId)) {
-                                clearInterval(rapidHeartbeat);
-                                return;
-                            }
-                            this.sendHeartbeat();
-                            rapidHeartbeatCount++;
-                            if (rapidHeartbeatCount >= 10) {
-                                clearInterval(rapidHeartbeat);
-                            }
-                        }, 1000); // Every 1 second for first 10 seconds
-                        
-                        // Wait a moment for HELLO exchange before requesting sync
-                        // This ensures we have accurate chain info from the peer
-                        setTimeout(async () => {
-                            if (this.peers.has(nodeId) && this.peers.get(nodeId).isConnected()) {
-                                await this.requestSync(nodeId);
-                            }
-                        }, 500);
-                    } else if (state === 'data_channel_closed' || state === 'data_channel_error' ||
-                               state === 'disconnected' || state === 'failed') {
-                        this.pendingOffers.delete(nodeId);
-                        this.disconnectPeer(nodeId, state === 'failed');
-                    }
-                },
-                onIceCandidate: (candidate) => {
-                    if (this.signaling && candidate) {
-                        this.signaling.sendIceCandidate(nodeId, candidate);
-                    }
-                }
-            });
-            
-            connection.remoteNodeId = nodeId;
-            
-            const offer = await connection.initAsOfferer();
-            this.pendingOffers.set(nodeId, connection);
-            
-            this.signaling.sendOffer(nodeId, offer);
-            console.log(`📤 WebRTC offer sent to ${nodeId}`);
-        } catch (error) {
-            console.error(`Failed to connect to ${nodeId}:`, error);
-            this.pendingOffers.delete(nodeId);
-        }
+        return this.wsClient.sendToPeer(requestNodeId, response);
     }
     
     /**
      * Get connected peers
-     * @returns {Array<string>} - Array of peer IDs
      */
     getConnectedPeers() {
-        return Array.from(this.peers.keys());
+        if (!this.wsClient) return [];
+        return Array.from(this.wsClient.peers.keys());
     }
     
     /**
-     * Get peer count (all peers in map, may not all be fully connected)
-     * @returns {number}
+     * Get peer count
      */
     getPeerCount() {
-        return this.peers.size;
+        if (!this.wsClient) return 0;
+        return this.wsClient.getPeerCount();
     }
     
     /**
-     * Get count of actually connected peers (with open data channels)
-     * @returns {number}
-     */
-    getActuallyConnectedPeerCount() {
-        let count = 0;
-        for (const [peerId, connection] of this.peers.entries()) {
-            if (connection.isConnected()) {
-                count++;
-            }
-        }
-        return count;
-    }
-    
-    /**
-     * Disconnect from network (close all connections)
-     */
-    disconnect() {
-        this.close();
-    }
-    
-    /**
-     * Close all connections
+     * Close network
      */
     close() {
-        if (this.heartbeatInterval) {
-            clearInterval(this.heartbeatInterval);
-        }
-        if (this.syncInterval) {
-            clearInterval(this.syncInterval);
+        if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
+        if (this.syncInterval) clearInterval(this.syncInterval);
+        
+        if (this.wsClient) {
+            this.wsClient.disconnect();
+            this.wsClient = null;
         }
         
-        if (this.signaling) {
-            this.signaling.disconnect();
-        }
-        
-        if (this.dht) {
-            this.dht.close();
-        }
-        
-        if (this.connectionManager) {
-            this.connectionManager.close();
-        }
-        
-        for (const [peerId, connection] of this.peers.entries()) {
-            connection.close();
-        }
-        
-        this.peers.clear();
         this.peerInfo.clear();
-        this.pendingOffers.clear();
-        this.pendingIceCandidates.clear();
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════════════
+    // BACKWARD COMPATIBILITY (legacy API)
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    get peers() {
+        // Fake peers map for backward compat
+        const map = new Map();
+        if (this.wsClient) {
+            for (const nodeId of this.wsClient.peers.keys()) {
+                map.set(nodeId, { isConnected: () => true });
+            }
+        }
+        return map;
+    }
+    
+    get signaling() {
+        // Legacy signaling reference
+        return this.wsClient ? {
+            isConnected: () => this.wsClient.isConnected(),
+            connected: this.wsClient.connected
+        } : null;
     }
 }
 

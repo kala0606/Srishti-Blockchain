@@ -1,8 +1,11 @@
 /**
  * Srishti Blockchain - Connection Manager
  * 
- * Manages WebRTC connection pool with prioritization and rotation.
- * Ensures efficient use of limited browser connection resources.
+ * Manages peer connection pool with prioritization and rotation.
+ * Tracks active peers and manages connection health.
+ * 
+ * Note: With WebSocket relay, this is now primarily for peer tracking
+ * rather than direct connection management (all peers connect via relay).
  */
 
 class ConnectionManager {

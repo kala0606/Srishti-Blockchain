@@ -14,14 +14,17 @@ const Config = {
         PING_TIMEOUT: 5000            // Ping timeout (ms)
     },
     
-    // Connection Management
+    // Connection Management (WebSocket Relay)
     CONNECTION: {
-        MAX_CONNECTIONS: 50,          // Maximum WebRTC connections per node
-        MIN_CONNECTIONS: 5,            // Minimum connections to maintain
-        CONNECTION_TIMEOUT: 30000,     // Connection timeout (ms)
-        HEALTH_CHECK_INTERVAL: 60000, // Health check interval (ms)
-        ROTATION_INTERVAL: 300000      // Connection rotation interval (5 min)
+        MAX_PEERS: 100,                // Maximum tracked peers
+        RECONNECT_ATTEMPTS: 10,        // Max reconnection attempts
+        RECONNECT_DELAY: 3000,         // Base reconnect delay (ms)
+        PING_INTERVAL: 25000,          // Keep-alive ping interval (ms)
+        HEALTH_CHECK_INTERVAL: 60000   // Health check interval (ms)
     },
+    
+    // P2P Transport
+    TRANSPORT: 'websocket',            // 'websocket' (relay) - simpler, more reliable
     
     // Chain Pruning
     PRUNING: {
