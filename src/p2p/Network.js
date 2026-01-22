@@ -261,7 +261,7 @@ class Network {
                 onMessage: (message, peerId) => this.handleMessage(message, peerId),
                 onConnectionStateChange: (state) => {
                     if (state === 'data_channel_open') {
-                        console.log(`🎉 Data channel open with ${fromNodeId}! Syncing...`);
+                        console.log(`🎉 Data channel open with ${fromNodeId}! Sending HELLO...`);
                         // Mark as online immediately
                         const info = this.peerInfo.get(fromNodeId) || {};
                         this.peerInfo.set(fromNodeId, {
@@ -275,6 +275,22 @@ class Network {
                                 lastSeen: Date.now()
                             });
                         }
+                        
+                        // CRITICAL: Send HELLO message (this was missing for incoming connections!)
+                        const hello = window.SrishtiProtocol.createHello({
+                            nodeId: this.nodeId,
+                            publicKey: null,
+                            chainLength: this.chain.getLength(),
+                            latestHash: this.chain.getLatestBlock()?.hash || null,
+                            protocolVersion: this.protocolVersion,
+                            chainEpoch: this.chainEpoch
+                        });
+                        const conn = this.peers.get(fromNodeId);
+                        if (conn && conn.isConnected()) {
+                            console.log(`📤 Sending HELLO to ${fromNodeId} (incoming connection)`);
+                            conn.send(hello);
+                        }
+                        
                         // Send immediate heartbeat
                         this.sendHeartbeat();
                         
@@ -292,7 +308,7 @@ class Network {
                             }
                         }, 1000); // Every 1 second for first 10 seconds
                         
-                        // Request sync
+                        // Request sync after HELLO
                         this.requestSync(fromNodeId);
                     } else if (state === 'data_channel_closed' || state === 'data_channel_error' || 
                                state === 'disconnected' || state === 'failed') {
@@ -1939,7 +1955,7 @@ class Network {
                 onMessage: (message, peerId) => this.handleMessage(message, peerId),
                 onConnectionStateChange: (state) => {
                     if (state === 'data_channel_open') {
-                        console.log(`✅ Connected to peer ${nodeId}`);
+                        console.log(`✅ Connected to peer ${nodeId}! Sending HELLO...`);
                         this.pendingOffers.delete(nodeId);
                         this.pendingConnections.delete(nodeId);
                         // Mark as online immediately
@@ -1955,6 +1971,22 @@ class Network {
                                 lastSeen: Date.now()
                             });
                         }
+                        
+                        // CRITICAL: Send HELLO message immediately when data channel opens
+                        const hello = window.SrishtiProtocol.createHello({
+                            nodeId: this.nodeId,
+                            publicKey: null,
+                            chainLength: this.chain.getLength(),
+                            latestHash: this.chain.getLatestBlock()?.hash || null,
+                            protocolVersion: this.protocolVersion,
+                            chainEpoch: this.chainEpoch
+                        });
+                        const conn = this.peers.get(nodeId);
+                        if (conn && conn.isConnected()) {
+                            console.log(`📤 Sending HELLO to ${nodeId} (outgoing connection)`);
+                            conn.send(hello);
+                        }
+                        
                         // Send immediate heartbeat
                         this.sendHeartbeat();
                         
@@ -2014,11 +2046,32 @@ class Network {
     }
     
     /**
-     * Get peer count
+     * Get peer count (all peers in map, may not all be fully connected)
      * @returns {number}
      */
     getPeerCount() {
         return this.peers.size;
+    }
+    
+    /**
+     * Get count of actually connected peers (with open data channels)
+     * @returns {number}
+     */
+    getActuallyConnectedPeerCount() {
+        let count = 0;
+        for (const [peerId, connection] of this.peers.entries()) {
+            if (connection.isConnected()) {
+                count++;
+            }
+        }
+        return count;
+    }
+    
+    /**
+     * Disconnect from network (close all connections)
+     */
+    disconnect() {
+        this.close();
     }
     
     /**
