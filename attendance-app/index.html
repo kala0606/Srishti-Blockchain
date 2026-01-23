@@ -6,6 +6,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Srishti Attendance - Decentralized Attendance Management</title>
 
+    <!-- QR Code Libraries (same as main app) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+
     <style>
         * {
             margin: 0;
@@ -529,18 +533,18 @@
         loadBlockchain();
     </script>
 
-    <!-- QR Code Libraries -->
-    <!-- For generating QR codes (same as main app) -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-    <!-- For scanning QR codes (same as main app) -->
-    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     <script>
-        // Verify QRCode library loaded
+        // Verify QRCode library loaded (same as main app)
         window.addEventListener('load', () => {
             if (typeof QRCode !== 'undefined') {
                 console.log('✅ QRCode library loaded (qrcodejs)');
             } else {
                 console.warn('⚠️ QRCode library not loaded - QR codes will use fallback');
+            }
+            if (typeof Html5Qrcode !== 'undefined') {
+                console.log('✅ Html5Qrcode library loaded');
+            } else {
+                console.warn('⚠️ Html5Qrcode library not loaded - QR scanning will not work');
             }
         });
     </script>
