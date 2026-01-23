@@ -492,7 +492,7 @@
 
                 // Load attendance app specific files from local directory (only AttendanceQRCode.js)
                 // AttendanceApp.js is now loaded from main SDK above
-                await loadScript('sdk/apps/attendance/AttendanceQRCode.js', './'); // Load from local attendance-app directory
+                await loadScript('AttendanceQRCode.js', './'); // Load from attendance-app root directory
 
                 // Load main app.js (creates SrishtiApp instance)
                 await loadScript('app.js');
