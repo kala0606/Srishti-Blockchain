@@ -121,6 +121,19 @@ class GenerativeArtApp {
             }
         }
         
+        // Generate preview thumbnail if code is provided
+        let thumbnailUrl = null;
+        if (options.code) {
+            try {
+                thumbnailUrl = await this._executeCode(options.code, {
+                    seed: `preview_${projectId}`,
+                    ...options.parameters
+                });
+            } catch (error) {
+                console.warn('Failed to generate preview thumbnail:', error);
+            }
+        }
+        
         // Full project data (stored OFF-CHAIN)
         const projectData = {
             id: projectId,
@@ -135,7 +148,8 @@ class GenerativeArtApp {
             artistName: artistName,
             createdAt: Date.now(),
             pieceCount: 0,
-            status: 'ACTIVE'
+            status: 'ACTIVE',
+            thumbnailUrl: thumbnailUrl
         };
         
         // Store full data OFF-CHAIN
@@ -228,6 +242,19 @@ class GenerativeArtApp {
             parameters = this._generateParameters(project.parameters, seed);
         }
         
+        // Generate image if code is available
+        let imageUrl = options.imageUrl || null;
+        if (!imageUrl && project.code) {
+            try {
+                imageUrl = await this._executeCode(project.code, {
+                    seed: seed,
+                    ...parameters
+                });
+            } catch (error) {
+                console.warn('Failed to generate image for piece:', error);
+            }
+        }
+        
         // Full piece data (OFF-CHAIN)
         const pieceData = {
             id: pieceId,
@@ -241,7 +268,7 @@ class GenerativeArtApp {
             mintedAt: Date.now(),
             seed: seed,
             parameters: parameters,
-            imageUrl: options.imageUrl || null,
+            imageUrl: imageUrl,
             status: GenerativeArtApp.STATUS.MINTED,
             price: null, // Not listed for sale yet
             transferHistory: [{
@@ -710,6 +737,58 @@ class GenerativeArtApp {
     async getGallery() {
         const allPieces = await this.getAllPieces();
         return allPieces.filter(p => p.imageUrl || p.parameters); // Has visual representation
+    }
+    
+    /**
+     * Execute generative code and generate an image
+     * @private
+     */
+    async _executeCode(code, params) {
+        // Create a safe execution context
+        const generateFunction = new Function('params', `
+            ${code}
+            return typeof generate === 'function' ? generate(params) : null;
+        `);
+        
+        try {
+            const result = generateFunction(params);
+            
+            // If result is a data URL, return it
+            if (typeof result === 'string' && result.startsWith('data:image')) {
+                return result;
+            }
+            
+            // If result is a canvas, convert to data URL
+            if (result && result.nodeName === 'CANVAS') {
+                return result.toDataURL('image/png');
+            }
+            
+            // If no result, return null
+            return null;
+        } catch (error) {
+            console.error('Error executing generative code:', error);
+            throw new Error(`Code execution failed: ${error.message}`);
+        }
+    }
+    
+    /**
+     * Generate a preview/render for a project or piece
+     * @param {string} projectId - Project ID
+     * @param {string} [seed] - Optional seed for piece-specific render
+     * @returns {Promise<string>} Data URL of the image
+     */
+    async generatePreview(projectId, seed = null) {
+        const project = await this.store.get(projectId);
+        if (!project || !project.code) {
+            throw new Error('Project not found or has no code');
+        }
+        
+        const params = {
+            seed: seed || `preview_${projectId}_${Date.now()}`,
+            ...project.parameters
+        };
+        
+        return await this._executeCode(project.code, params);
     }
 }
 

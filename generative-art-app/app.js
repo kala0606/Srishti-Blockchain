@@ -366,6 +366,7 @@ class GenerativeArtAppUI {
                 ${piece.price ? `<div class="art-price">${piece.price} KARMA</div>` : ''}
                 ${piece.status === 'LISTED' ? '<span class="art-status listed">For Sale</span>' : ''}
                 ${showActions && piece.ownerId === this.srishtiApp.nodeId ? '<span class="art-status owned">Owned</span>' : ''}
+                ${imageUrl ? `<button class="btn" style="margin-top: 8px; width: 100%; font-size: 0.85em; padding: 6px;" onclick="event.stopPropagation(); artAppUI.viewFullRender('${piece.id}')">View Full</button>` : ''}
             </div>
         `;
 
@@ -380,9 +381,14 @@ class GenerativeArtAppUI {
         const card = document.createElement('div');
         card.className = 'art-card';
         
+        // Use thumbnail if available, otherwise show emoji
+        const thumbnail = project.thumbnailUrl ? 
+            `<img src="${project.thumbnailUrl}" alt="${project.title}" style="width: 100%; height: 100%; object-fit: cover;">` :
+            `<div>🎨</div>`;
+        
         card.innerHTML = `
             <div class="art-image">
-                <div>🎨</div>
+                ${thumbnail}
             </div>
             <div class="art-info">
                 <div class="art-title">${project.title}</div>
@@ -392,6 +398,7 @@ class GenerativeArtAppUI {
                     ${project.maxSupply ? ` / ${project.maxSupply} max` : ''}
                 </div>
                 ${project.mintPrice > 0 ? `<div style="font-size: 0.9em; color: var(--text-secondary); margin-top: 4px;">Mint: ${project.mintPrice} KARMA</div>` : ''}
+                <button class="btn" style="margin-top: 12px; width: 100%; font-size: 0.85em; padding: 8px;" onclick="event.stopPropagation(); artAppUI.viewProjectFull('${project.id}')">View Full Render</button>
             </div>
         `;
 
@@ -418,6 +425,9 @@ class GenerativeArtAppUI {
         
         const isOwner = piece.ownerId === this.srishtiApp.nodeId;
         const isListed = piece.status === 'LISTED';
+        
+        // Get project to check if code is available for rendering
+        const project = piece.projectId ? await this.artApp.getProject(piece.projectId) : null;
 
         modalBody.innerHTML = `
             <div style="margin-bottom: 24px;">
@@ -436,6 +446,8 @@ class GenerativeArtAppUI {
             </div>
             ${isListed ? `<div style="font-size: 1.5em; font-weight: 700; color: #10b981; margin-bottom: 16px;">${piece.price} KARMA</div>` : ''}
             <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                ${piece.imageUrl || (project && project.code) ? 
+                    `<button class="btn btn-primary" onclick="artAppUI.viewFullRender('${piece.id}')">View Full Render</button>` : ''}
                 ${showPurchase && isListed && !isOwner ? 
                     `<button class="btn btn-primary" onclick="artAppUI.purchasePiece('${piece.id}')">Purchase</button>` : ''}
                 ${showActions && isOwner && !isListed ? 
@@ -612,6 +624,112 @@ class GenerativeArtAppUI {
             console.error('Failed to mint:', error);
             alert(`Failed to mint: ${error.message}`);
         }
+    }
+    
+    async viewFullRender(pieceId) {
+        try {
+            const piece = await this.artApp.getPiece(pieceId);
+            if (!piece) {
+                throw new Error('Piece not found');
+            }
+            
+            // If piece has image, show it
+            if (piece.imageUrl) {
+                this.showFullRenderModal(piece.imageUrl, piece.projectTitle || 'Art Piece');
+                return;
+            }
+            
+            // Otherwise, generate from project code
+            const project = await this.artApp.getProject(piece.projectId);
+            if (!project || !project.code) {
+                throw new Error('Cannot generate render: project code not available');
+            }
+            
+            // Show loading
+            this.showFullRenderModal(null, piece.projectTitle || 'Art Piece', true);
+            
+            // Generate render
+            const imageUrl = await this.artApp.generatePreview(piece.projectId, piece.seed);
+            
+            if (imageUrl) {
+                // Update piece with generated image
+                piece.imageUrl = imageUrl;
+                await this.artApp.store.put(pieceId, piece);
+                
+                // Show the render
+                this.showFullRenderModal(imageUrl, piece.projectTitle || 'Art Piece');
+            } else {
+                throw new Error('Failed to generate render');
+            }
+        } catch (error) {
+            console.error('Failed to view render:', error);
+            alert(`Failed to generate render: ${error.message}`);
+            closeModal();
+        }
+    }
+    
+    async viewProjectFull(projectId) {
+        try {
+            const project = await this.artApp.getProject(projectId);
+            if (!project || !project.code) {
+                throw new Error('Project code not available');
+            }
+            
+            // Show loading
+            this.showFullRenderModal(null, project.title, true);
+            
+            // Generate fresh render
+            const imageUrl = await this.artApp.generatePreview(projectId);
+            
+            if (imageUrl) {
+                this.showFullRenderModal(imageUrl, project.title);
+            } else {
+                throw new Error('Failed to generate render');
+            }
+        } catch (error) {
+            console.error('Failed to view project render:', error);
+            alert(`Failed to generate render: ${error.message}`);
+            closeModal();
+        }
+    }
+    
+    showFullRenderModal(imageUrl, title, loading = false) {
+        const modal = document.getElementById('pieceModal');
+        const modalTitle = document.getElementById('modalTitle');
+        const modalBody = document.getElementById('modalBody');
+        
+        modalTitle.textContent = title;
+        
+        if (loading) {
+            modalBody.innerHTML = `
+                <div style="text-align: center; padding: 60px;">
+                    <div style="font-size: 2em; margin-bottom: 16px;">🎨</div>
+                    <div style="color: var(--text-secondary);">Generating render...</div>
+                </div>
+            `;
+        } else {
+            modalBody.innerHTML = `
+                <div style="margin-bottom: 24px;">
+                    <div style="width: 100%; max-width: 1000px; margin: 0 auto; border-radius: 16px; overflow: hidden; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);">
+                        <img src="${imageUrl}" alt="${title}" style="width: 100%; height: auto; display: block;">
+                    </div>
+                </div>
+                <div style="text-align: center;">
+                    <button class="btn" onclick="artAppUI.downloadImage('${imageUrl}', '${title.replace(/[^a-z0-9]/gi, '_')}')">Download Image</button>
+                </div>
+            `;
+        }
+        
+        modal.classList.add('active');
+    }
+    
+    downloadImage(imageUrl, filename) {
+        const link = document.createElement('a');
+        link.href = imageUrl;
+        link.download = `${filename || 'art_piece'}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
     }
 }
 
