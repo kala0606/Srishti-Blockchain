@@ -92,53 +92,119 @@ class SrishtiApp {
             const savedPublicKey = localStorage.getItem('srishti_public_key');
             const savedPrivateKey = localStorage.getItem('srishti_private_key');
 
-            if (savedNodeId && savedPublicKey && savedPrivateKey) {
-                // Load existing keys
+            if (savedNodeId) {
+                // Try to load from IndexedDB FIRST (more reliable than localStorage)
+                let loadedKeys = null;
                 try {
+                    const backupKeys = await this.storage.getKeys(savedNodeId);
+                    if (backupKeys && backupKeys.privateKey && backupKeys.publicKey) {
+                        console.log('🔄 Attempting to load keys from IndexedDB (primary source)...');
+                        try {
+                            const testPrivateKey = await window.SrishtiKeys.importPrivateKey(backupKeys.privateKey);
+                            const testPublicKey = await window.SrishtiKeys.importPublicKey(backupKeys.publicKey);
+                            
+                            // Verify keys match by test signing
+                            const testData = 'key_validation_' + Date.now();
+                            const testSig = await window.SrishtiKeys.sign(testPrivateKey, testData);
+                            const isValid = await window.SrishtiKeys.verify(testPublicKey, testData, testSig);
+                            
+                            if (isValid) {
+                                loadedKeys = {
+                                    privateKey: testPrivateKey,
+                                    publicKey: testPublicKey,
+                                    privateKeyBase64: backupKeys.privateKey,
+                                    publicKeyBase64: backupKeys.publicKey
+                                };
+                                console.log('✅ Keys loaded and validated from IndexedDB');
+                                
+                                // Update localStorage with IndexedDB keys (in case they differ)
+                                if (savedPrivateKey !== backupKeys.privateKey || savedPublicKey !== backupKeys.publicKey) {
+                                    console.log('🔄 Updating localStorage with IndexedDB keys...');
+                                    localStorage.setItem('srishti_private_key', backupKeys.privateKey);
+                                    localStorage.setItem('srishti_public_key', backupKeys.publicKey);
+                                }
+                            } else {
+                                console.warn('⚠️ IndexedDB keys do not match each other (corrupted)');
+                            }
+                        } catch (indexedDBError) {
+                            console.warn('⚠️ Failed to import keys from IndexedDB:', indexedDBError);
+                        }
+                    }
+                } catch (storageError) {
+                    console.warn('⚠️ Could not access IndexedDB:', storageError);
+                }
+                
+                // Fallback to localStorage if IndexedDB didn't work
+                if (!loadedKeys && savedPublicKey && savedPrivateKey) {
+                    console.log('🔄 Attempting to load keys from localStorage (fallback)...');
+                    try {
+                        const testPrivateKey = await window.SrishtiKeys.importPrivateKey(savedPrivateKey);
+                        const testPublicKey = await window.SrishtiKeys.importPublicKey(savedPublicKey);
+                        
+                        // Verify keys match by test signing
+                        const testData = 'key_validation_' + Date.now();
+                        const testSig = await window.SrishtiKeys.sign(testPrivateKey, testData);
+                        const isValid = await window.SrishtiKeys.verify(testPublicKey, testData, testSig);
+                        
+                        if (isValid) {
+                            loadedKeys = {
+                                privateKey: testPrivateKey,
+                                publicKey: testPublicKey,
+                                privateKeyBase64: savedPrivateKey,
+                                publicKeyBase64: savedPublicKey
+                            };
+                            console.log('✅ Keys loaded and validated from localStorage');
+                            
+                            // Update IndexedDB with localStorage keys (backup)
+                            try {
+                                await this.storage.saveKeys(savedNodeId, {
+                                    publicKey: savedPublicKey,
+                                    privateKey: savedPrivateKey
+                                });
+                                console.log('✅ Keys backed up to IndexedDB');
+                            } catch (backupError) {
+                                console.warn('⚠️ Failed to backup keys to IndexedDB:', backupError);
+                            }
+                        } else {
+                            console.error('❌ localStorage keys do not match each other (corrupted)');
+                        }
+                    } catch (localStorageError) {
+                        console.warn('⚠️ Failed to import keys from localStorage:', localStorageError);
+                    }
+                }
+                
+                // If we successfully loaded keys, use them
+                if (loadedKeys) {
                     this.nodeId = savedNodeId;
                     this.currentUser = { id: savedNodeId, name: savedNodeName || 'Unknown' };
-                    this.publicKeyBase64 = savedPublicKey;
+                    this.publicKeyBase64 = loadedKeys.publicKeyBase64;
                     this.keyPair = {
-                        publicKey: await window.SrishtiKeys.importPublicKey(savedPublicKey),
-                        privateKey: await window.SrishtiKeys.importPrivateKey(savedPrivateKey)
+                        publicKey: loadedKeys.publicKey,
+                        privateKey: loadedKeys.privateKey
                     };
                     console.log('✅ Existing node loaded:', savedNodeName);
-                    
-                    // Try to restore from IndexedDB backup if localStorage key seems corrupted
-                } catch (error) {
-                    // If key import fails (e.g., corrupted key), try IndexedDB backup
-                    console.warn('⚠️ Failed to import private key from localStorage, checking IndexedDB backup...', error);
-                    
+                } else {
+                    // Both IndexedDB and localStorage failed - go to read-only mode
+                    console.warn('⚠️ Could not load valid keys from either IndexedDB or localStorage');
                     try {
-                        // Try to load from IndexedDB backup
-                        const backupKeys = await this.storage.getKeys(savedNodeId);
-                        if (backupKeys && backupKeys.privateKey) {
-                            console.log('🔄 Found backup in IndexedDB, attempting restore...');
-                            try {
-                                const restoredKey = await window.SrishtiKeys.importPrivateKey(backupKeys.privateKey);
-                                if (restoredKey) {
-                                    // Restore from backup
-                                    localStorage.setItem('srishti_private_key', backupKeys.privateKey);
-                                    localStorage.setItem('srishti_public_key', backupKeys.publicKey || savedPublicKey);
-                                    console.log('✅ Private key restored from IndexedDB backup');
-                                    
-                                    this.nodeId = savedNodeId;
-                                    this.currentUser = { id: savedNodeId, name: savedNodeName || 'Unknown' };
-                                    this.publicKeyBase64 = backupKeys.publicKey || savedPublicKey;
-                                    this.keyPair = {
-                                        publicKey: await window.SrishtiKeys.importPublicKey(backupKeys.publicKey || savedPublicKey),
-                                        privateKey: restoredKey
-                                    };
-                                    console.log('✅ Node loaded from backup:', savedNodeName);
-                                    return; // Successfully restored
-                                }
-                            } catch (backupError) {
-                                console.warn('⚠️ Backup key also failed to import:', backupError);
-                            }
-                        }
-                    } catch (storageError) {
-                        console.warn('⚠️ Could not check IndexedDB backup:', storageError);
+                        this.nodeId = savedNodeId;
+                        this.currentUser = { id: savedNodeId, name: savedNodeName || 'Unknown' };
+                        this.publicKeyBase64 = savedPublicKey;
+                        this.keyPair = {
+                            publicKey: await window.SrishtiKeys.importPublicKey(savedPublicKey),
+                            privateKey: null // No private key = read-only mode
+                        };
+                        console.log('✅ Node loaded in read-only mode (private key unavailable):', savedNodeName);
+                        console.warn('⚠️ IMPORTANT: Your private key is missing or corrupted. You cannot sign transactions.');
+                        console.warn('⚠️ To restore full access, you may need to create a new account or use recovery options.');
+                    } catch (publicKeyError) {
+                        console.error('❌ Failed to import public key as well:', publicKeyError);
+                        // Still set nodeId so it can be verified on chain
+                        this.nodeId = savedNodeId;
+                        this.currentUser = { id: savedNodeId, name: savedNodeName || 'Unknown' };
+                        console.log('⚠️ Node ID set but keys unavailable - read-only mode');
                     }
+                }
                     
                     // If backup also fails, fall back to read-only mode
                     try {
@@ -163,6 +229,60 @@ class SrishtiApp {
             } else {
                 // Will create node during onboarding
                 console.log('📝 No existing node found');
+            }
+
+            // Validate that private key matches public key on chain (if we have both)
+            if (this.nodeId && this.keyPair && this.keyPair.privateKey && this.chain) {
+                try {
+                    const nodes = this.chain.buildNodeMap();
+                    const node = nodes[this.nodeId];
+                    
+                    if (node && node.publicKey) {
+                        // Import the public key from chain
+                        const chainPublicKey = await window.SrishtiKeys.importPublicKey(node.publicKey);
+                        
+                        // Test sign/verify to ensure private key matches public key
+                        const testData = 'key_validation_' + Date.now();
+                        const testSignature = await window.SrishtiKeys.sign(this.keyPair.privateKey, testData);
+                        const isValid = await window.SrishtiKeys.verify(chainPublicKey, testData, testSignature);
+                        
+                        if (!isValid) {
+                            console.error('❌ CRITICAL: Private key does not match public key on chain!', {
+                                nodeId: this.nodeId,
+                                nodeName: this.currentUser?.name,
+                                chainPublicKeyPreview: node.publicKey.substring(0, 30) + '...',
+                                localStoragePublicKeyPreview: this.publicKeyBase64?.substring(0, 30) + '...'
+                            });
+                            console.error('❌ Your private key in localStorage does not match the public key stored on the blockchain.');
+                            console.error('❌ This means your private key was lost or regenerated, but the public key on chain is still the old one.');
+                            console.error('❌ You will NOT be able to sign transactions or generate session tokens.');
+                            console.error('❌ Options:');
+                            console.error('   1. Clear localStorage and create a new account');
+                            console.error('   2. Use recovery options if available');
+                            console.error('   3. Contact support if this is unexpected');
+                            
+                            // Set private key to null to prevent signing with wrong key
+                            this.keyPair.privateKey = null;
+                            this.publicKeyBase64 = node.publicKey; // Update to match chain
+                            localStorage.setItem('srishti_public_key', node.publicKey);
+                            console.warn('⚠️ Private key cleared - app is now in read-only mode');
+                        } else {
+                            console.log('✅ Private key validated against chain public key - keys match!');
+                            
+                            // Also verify localStorage public key matches chain
+                            if (this.publicKeyBase64 !== node.publicKey) {
+                                console.warn('⚠️ localStorage public key does not match chain, updating...');
+                                this.publicKeyBase64 = node.publicKey;
+                                localStorage.setItem('srishti_public_key', node.publicKey);
+                            }
+                        }
+                    } else {
+                        console.warn('⚠️ Node not found on chain or missing public key, skipping key validation');
+                    }
+                } catch (validationError) {
+                    console.error('❌ Error during key validation:', validationError);
+                    // Don't fail initialization, but log the error
+                }
             }
 
             // Initialize blockchain adapter

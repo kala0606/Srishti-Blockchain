@@ -35,6 +35,42 @@ class SessionAuth {
                 throw new Error('SrishtiKeys library not loaded');
             }
             
+            // Validate that private key matches the public key on chain (if chain is available)
+            if (options.chain) {
+                try {
+                    const nodes = options.chain.buildNodeMap();
+                    const node = nodes[nodeId];
+                    
+                    if (node && node.publicKey) {
+                        // Import the public key from chain
+                        const chainPublicKey = await window.SrishtiKeys.importPublicKey(node.publicKey);
+                        
+                        // Test sign/verify to ensure private key matches public key
+                        const testData = 'key_validation_test_' + Date.now();
+                        const testSignature = await window.SrishtiKeys.sign(privateKey, testData);
+                        const isValid = await window.SrishtiKeys.verify(chainPublicKey, testData, testSignature);
+                        
+                        if (!isValid) {
+                            console.error('❌ [SessionAuth] Private key does not match public key on chain!', {
+                                nodeId: nodeId,
+                                chainPublicKeyPreview: node.publicKey.substring(0, 30) + '...'
+                            });
+                            throw new Error('Private key does not match the public key stored on the chain. Your private key may have been lost or regenerated. Please check your key storage or use recovery options.');
+                        }
+                        
+                        console.log('✅ [SessionAuth] Private key validated against chain public key');
+                    } else {
+                        console.warn('⚠️ [SessionAuth] Node not found on chain, skipping key validation');
+                    }
+                } catch (validationError) {
+                    // If validation fails, throw the error (don't generate invalid token)
+                    if (validationError.message.includes('does not match')) {
+                        throw validationError;
+                    }
+                    console.warn('⚠️ [SessionAuth] Key validation error (non-critical):', validationError);
+                }
+            }
+            
             const expiresIn = options.expiresIn || 24 * 60 * 60; // 24 hours default
             const expiresAt = Date.now() + (expiresIn * 1000);
             const nonce = crypto.getRandomValues(new Uint8Array(16));
@@ -179,8 +215,27 @@ class SessionAuth {
             
             // Verify signature
             // IMPORTANT: We must stringify token.data in the exact same way it was stringified when signing
-            // JSON.stringify should be deterministic, but let's ensure we're using the same method
-            const tokenString = JSON.stringify(token.data);
+            // Reconstruct the tokenData object in the exact same order as when it was created to ensure
+            // JSON.stringify produces the same string
+            // Also ensure null values are handled consistently (null vs undefined)
+            const tokenDataForVerification = {
+                nodeId: token.data.nodeId,
+                expiresAt: token.data.expiresAt,
+                nonce: token.data.nonce,
+                dAppOrigin: token.data.dAppOrigin !== undefined ? token.data.dAppOrigin : null,
+                issuedAt: token.data.issuedAt
+            };
+            const tokenString = JSON.stringify(tokenDataForVerification);
+            
+            // Debug: Compare with what we have in token.data
+            const tokenDataString = JSON.stringify(token.data);
+            if (tokenString !== tokenDataString) {
+                console.warn('⚠️ [SessionAuth] Token string mismatch!', {
+                    reconstructed: tokenString,
+                    original: tokenDataString,
+                    match: tokenString === tokenDataString
+                });
+            }
             
             // Debug: Log the exact string being verified
             console.log('🔍 [SessionAuth] Token string for verification:', {

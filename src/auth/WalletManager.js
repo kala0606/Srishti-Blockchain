@@ -159,7 +159,8 @@ class WalletManager {
                 this.app.keyPair.privateKey,
                 {
                     expiresIn: 24 * 60 * 60, // 24 hours
-                    dAppOrigin: dAppOrigin
+                    dAppOrigin: dAppOrigin,
+                    chain: this.app.chain // Pass chain for key validation
                 }
             );
 
