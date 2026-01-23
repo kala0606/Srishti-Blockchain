@@ -84,13 +84,6 @@ class SrishtiApp {
 
                 await this.karmaManager.init();
                 console.log('✅ Karma Manager initialized');
-                
-                // Recalculate karma balances to ensure all nodes get their rewards
-                // This retroactively awards NODE_JOIN rewards for nodes that joined before KarmaManager was initialized
-                if (this.chain.blocks.length > 0) {
-                    await this.chain.recalculateKarmaBalances();
-                    console.log('✅ Karma balances recalculated after KarmaManager initialization');
-                }
             } else {
                 console.warn('⚠️ KarmaManager not available');
             }

@@ -1,0 +1,41 @@
+{
+  "name": "@srishti/sdk-bundle",
+  "version": "1.0.0",
+  "description": "Complete developer bundle for building dApps on Srishti Blockchain",
+  "main": "loader.js",
+  "files": [
+    "core/",
+    "sdk/",
+    "config.js",
+    "app.js",
+    "loader.js",
+    "README.md",
+    "LICENSE",
+    "examples/"
+  ],
+  "keywords": [
+    "blockchain",
+    "sdk",
+    "dapp",
+    "decentralized",
+    "srishti",
+    "p2p",
+    "web3"
+  ],
+  "author": "Srishti Blockchain Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-repo/srishti-sdk-bundle.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-repo/srishti-sdk-bundle/issues"
+  },
+  "homepage": "https://github.com/your-repo/srishti-sdk-bundle#readme",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "browser": {
+    "loader.js": "./loader.js"
+  }
+}

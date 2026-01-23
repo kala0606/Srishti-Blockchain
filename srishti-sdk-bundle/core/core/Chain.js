@@ -328,28 +328,25 @@ class Chain {
             console.log('🔍 [Chain.handleNodeJoin] Role assignment complete:', this.state.nodeRoles);
         }
 
-        // Award KARMA for joining
-        // Use karmaManager if available, otherwise use default from config
-        const joinReward = this.karmaManager 
-            ? this.karmaManager.getActivityReward('nodeJoin')
-            : (window.SrishtiConfig?.KARMA?.REWARDS?.NODE_JOIN || 50); // Default 50 if not available
-        
-        if (joinReward > 0) {
-            // Create KARMA_EARN transaction
-            const karmaTx = {
-                type: 'KARMA_EARN',
-                sender: 'SYSTEM',
-                recipient: nodeId,
-                payload: {
-                    amount: joinReward,
-                    activityType: 'NODE_JOIN',
-                    metadata: { blockIndex: block.index }
-                },
-                timestamp: Date.now(),
-                signature: 'system_' + Math.random().toString(36).substring(2, 10)
-            };
-            await this.handleKarmaEarn(karmaTx);
-            console.log(`💰 NODE_JOIN reward awarded: ${nodeId} +${joinReward} KARMA`);
+        // Award KARMA for joining (if karma manager is available)
+        if (window.SrishtiKarmaManager && this.karmaManager) {
+            const joinReward = this.karmaManager.getActivityReward('nodeJoin');
+            if (joinReward > 0) {
+                // Create KARMA_EARN transaction
+                const karmaTx = {
+                    type: 'KARMA_EARN',
+                    sender: 'SYSTEM',
+                    recipient: nodeId,
+                    payload: {
+                        amount: joinReward,
+                        activityType: 'NODE_JOIN',
+                        metadata: { blockIndex: block.index }
+                    },
+                    timestamp: Date.now(),
+                    signature: 'system_' + Math.random().toString(36).substring(2, 10)
+                };
+                await this.handleKarmaEarn(karmaTx);
+            }
         }
 
         // Persist to storage
@@ -1277,7 +1274,6 @@ class Chain {
     /**
      * Recalculate karma balances from all transactions in the chain
      * This ensures balances are accurate and match the blockchain state
-     * Also retroactively awards NODE_JOIN rewards for nodes that joined but didn't receive them
      * @returns {Promise<Object>} - Recalculated karma balances
      */
     async recalculateKarmaBalances() {
@@ -1287,10 +1283,6 @@ class Chain {
         const karmaEarnEvents = this.getEvents('KARMA_EARN');
         const karmaTransferEvents = this.getEvents('KARMA_TRANSFER');
         const karmaUbiEvents = this.getEvents('KARMA_UBI');
-        const nodeJoinEvents = this.getEvents('NODE_JOIN');
-        
-        // Track which nodes received NODE_JOIN rewards
-        const nodesWithJoinReward = new Set();
         
         // Process KARMA_EARN transactions
         for (const tx of karmaEarnEvents) {
@@ -1302,11 +1294,6 @@ class Chain {
                     balances[recipient] = 0;
                 }
                 balances[recipient] += amount;
-                
-                // Track if this is a NODE_JOIN reward
-                if (tx.payload?.activityType === 'NODE_JOIN') {
-                    nodesWithJoinReward.add(recipient);
-                }
             }
         }
         
@@ -1351,28 +1338,6 @@ class Chain {
             }
         }
         
-        // ═══════════════════════════════════════════════════════════════
-        // RETROACTIVELY AWARD NODE_JOIN REWARDS
-        // Check all nodes that joined but didn't receive their reward
-        // ═══════════════════════════════════════════════════════════════
-        const nodeJoinReward = this.karmaManager 
-            ? this.karmaManager.getActivityReward('nodeJoin')
-            : (window.SrishtiConfig?.KARMA?.REWARDS?.NODE_JOIN || 50); // Default 50 if not available
-        
-        let retroactiveRewards = 0;
-        for (const joinEvent of nodeJoinEvents) {
-            const nodeId = joinEvent.nodeId;
-            if (nodeId && !nodesWithJoinReward.has(nodeId)) {
-                // This node joined but never received their NODE_JOIN reward
-                if (!balances[nodeId]) {
-                    balances[nodeId] = 0;
-                }
-                balances[nodeId] += nodeJoinReward;
-                retroactiveRewards++;
-                console.log(`💰 Retroactively awarded NODE_JOIN reward: ${nodeId} +${nodeJoinReward} KARMA`);
-            }
-        }
-        
         // Update state with recalculated balances
         this.state.karmaBalances = balances;
         
@@ -1382,9 +1347,6 @@ class Chain {
         }
         
         console.log(`✅ Karma balances recalculated from ${karmaEarnEvents.length + karmaTransferEvents.length + karmaUbiEvents.length} transactions`);
-        if (retroactiveRewards > 0) {
-            console.log(`   Retroactively awarded ${retroactiveRewards} missing NODE_JOIN rewards`);
-        }
         console.log(`   Total nodes with karma: ${Object.keys(balances).length}`);
         
         return balances;

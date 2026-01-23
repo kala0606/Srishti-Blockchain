@@ -5294,6 +5294,22 @@
                     window.SrishtiApp.updatePresence(foundNode.id, { isOnline: true, lastSeen: Date.now() });
                 }
                 
+                // ═══════════════════════════════════════════════════════════════
+                // CRITICAL: Recalculate karma balances after recovery
+                // This ensures balances are accurate after chain sync and retroactively
+                // awards any missing NODE_JOIN rewards
+                // ═══════════════════════════════════════════════════════════════
+                if (window.SrishtiApp && window.SrishtiApp.chain) {
+                    try {
+                        console.log('💰 Recalculating karma balances after recovery...');
+                        await window.SrishtiApp.chain.recalculateKarmaBalances();
+                        const recoveredBalance = window.SrishtiApp.chain.getKarmaBalance(foundNode.id);
+                        console.log(`✅ Karma balance for recovered node: ${recoveredBalance} KARMA`);
+                    } catch (error) {
+                        console.warn('⚠️ Failed to recalculate karma balances after recovery:', error);
+                    }
+                }
+                
                 console.log('✅ Recovered node:', foundNode.name, foundNode.id);
                 if (keyRestored) {
                     console.log('✅ Private key fully restored! All features available.');
