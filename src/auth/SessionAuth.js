@@ -85,9 +85,30 @@ class SessionAuth {
      */
     static async verifyToken(tokenBase64, chain, expectedOrigin = null) {
         try {
-            // Decode token
-            const tokenJson = atob(tokenBase64);
+            // Decode token - handle potential URL encoding issues
+            let decodedToken = tokenBase64;
+            try {
+                // Try to decode if it looks URL-encoded
+                if (tokenBase64.includes('%')) {
+                    decodedToken = decodeURIComponent(tokenBase64);
+                }
+            } catch (e) {
+                // If decode fails, use original
+                console.warn('⚠️ [SessionAuth] Could not URL-decode token, using as-is');
+            }
+            
+            // Decode base64
+            const tokenJson = atob(decodedToken);
             const token = JSON.parse(tokenJson);
+            
+            console.log('🔍 [SessionAuth] Token decoded:', {
+                hasData: !!token.data,
+                hasSignature: !!token.signature,
+                nodeId: token.data?.nodeId,
+                expiresAt: token.data?.expiresAt,
+                currentTime: Date.now(),
+                isExpired: token.data?.expiresAt < Date.now()
+            });
             
             if (!token.data || !token.signature) {
                 return null;
@@ -109,12 +130,21 @@ class SessionAuth {
             const nodes = chain.buildNodeMap();
             const node = nodes[token.data.nodeId];
             
+            console.log('🔍 [SessionAuth] Node lookup:', {
+                nodeId: token.data.nodeId,
+                nodeExists: !!node,
+                hasPublicKey: node ? !!node.publicKey : false,
+                availableNodes: Object.keys(nodes),
+                nodeName: node?.name
+            });
+            
             if (!node || !node.publicKey) {
-                console.warn('Node not found on chain or missing public key', {
+                console.warn('❌ Node not found on chain or missing public key', {
                     nodeId: token.data.nodeId,
                     nodeExists: !!node,
                     hasPublicKey: node ? !!node.publicKey : false,
-                    availableNodes: Object.keys(nodes).length
+                    availableNodes: Object.keys(nodes).length,
+                    allNodeIds: Object.keys(nodes)
                 });
                 return null;
             }
@@ -122,29 +152,97 @@ class SessionAuth {
             // Import public key
             let publicKey;
             try {
+                console.log('🔍 [SessionAuth] Importing public key:', {
+                    nodeId: token.data.nodeId,
+                    publicKeyType: typeof node.publicKey,
+                    publicKeyLength: node.publicKey ? node.publicKey.length : 0,
+                    publicKeyPreview: node.publicKey ? node.publicKey.substring(0, 30) + '...' : 'null'
+                });
+                
                 publicKey = await window.SrishtiKeys.importPublicKey(node.publicKey);
+                
+                console.log('✅ [SessionAuth] Public key imported successfully:', {
+                    publicKeyType: publicKey?.constructor?.name,
+                    publicKeyAlgorithm: publicKey?.algorithm?.name
+                });
             } catch (error) {
-                console.error('Failed to import public key:', error, {
+                console.error('❌ Failed to import public key:', error, {
                     nodeId: token.data.nodeId,
                     publicKeyFormat: typeof node.publicKey,
-                    publicKeyLength: node.publicKey ? node.publicKey.length : 0
+                    publicKeyLength: node.publicKey ? node.publicKey.length : 0,
+                    publicKeyValue: node.publicKey,
+                    errorMessage: error.message,
+                    errorStack: error.stack
                 });
                 return null;
             }
             
             // Verify signature
             const tokenString = JSON.stringify(token.data);
-            const isValid = await window.SrishtiKeys.verify(publicKey, tokenString, token.signature);
             
-            if (!isValid) {
-                console.warn('Token signature invalid', {
-                    nodeId: token.data.nodeId,
-                    tokenData: token.data,
-                    signatureLength: token.signature ? token.signature.length : 0,
-                    publicKeyAvailable: !!publicKey
+            // Validate signature format
+            if (!token.signature || typeof token.signature !== 'string') {
+                console.error('❌ [SessionAuth] Invalid signature format:', {
+                    signatureType: typeof token.signature,
+                    signatureValue: token.signature
                 });
                 return null;
             }
+            
+            // Check if signature is valid base64
+            const base64Regex = /^[A-Za-z0-9+/=]+$/;
+            if (!base64Regex.test(token.signature)) {
+                console.error('❌ [SessionAuth] Signature is not valid base64:', {
+                    signature: token.signature,
+                    signatureLength: token.signature.length,
+                    firstChars: token.signature.substring(0, 20),
+                    lastChars: token.signature.substring(token.signature.length - 20)
+                });
+                return null;
+            }
+            
+            // Debug: Log what we're verifying
+            console.log('🔍 [SessionAuth] Verifying token signature', {
+                nodeId: token.data.nodeId,
+                tokenStringLength: tokenString.length,
+                tokenStringPreview: tokenString.substring(0, 100) + '...',
+                signatureLength: token.signature.length,
+                signaturePreview: token.signature.substring(0, 20) + '...' + token.signature.substring(token.signature.length - 20),
+                publicKeyType: publicKey ? publicKey.constructor?.name : 'null',
+                tokenDataKeys: Object.keys(token.data)
+            });
+            
+            const isValid = await window.SrishtiKeys.verify(publicKey, tokenString, token.signature);
+            
+            if (!isValid) {
+                // Try to get more info about why verification failed
+                console.warn('❌ Token signature invalid', {
+                    nodeId: token.data.nodeId,
+                    tokenData: token.data,
+                    signatureLength: token.signature ? token.signature.length : 0,
+                    signatureBase64: token.signature,
+                    publicKeyAvailable: !!publicKey,
+                    tokenString: tokenString,
+                    // Check if signature looks valid (base64)
+                    signatureIsBase64: token.signature ? /^[A-Za-z0-9+/=]+$/.test(token.signature) : false
+                });
+                
+                // Additional debug: try to verify with a test signature to see if the key works
+                try {
+                    const testData = 'test';
+                    const testSig = await window.SrishtiKeys.sign(
+                        // We can't test sign without private key, but we can check if verify function works
+                        null, testData
+                    ).catch(() => null);
+                    console.log('🔍 [SessionAuth] Test signature generation:', testSig ? 'works' : 'failed (expected - no private key)');
+                } catch (e) {
+                    // Expected to fail
+                }
+                
+                return null;
+            }
+            
+            console.log('✅ [SessionAuth] Token signature verified successfully');
             
             return token.data;
         } catch (error) {

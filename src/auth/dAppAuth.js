@@ -54,11 +54,26 @@ class dAppAuth {
      */
     static async handleLoginCallback(chain) {
         const urlParams = new URLSearchParams(window.location.search);
-        const token = urlParams.get('session_token');
+        let token = urlParams.get('session_token');
         
         if (!token) {
             return null;
         }
+        
+        // Ensure token is properly decoded (URLSearchParams should handle this, but be explicit)
+        try {
+            // Try decoding in case it's double-encoded
+            token = decodeURIComponent(token);
+        } catch (e) {
+            // If decode fails, use token as-is
+            console.warn('⚠️ [dAppAuth] Could not decode token, using as-is:', e);
+        }
+        
+        console.log('🔍 [dAppAuth] Token from URL:', {
+            tokenLength: token.length,
+            tokenPreview: token.substring(0, 50) + '...',
+            tokenEnd: '...' + token.substring(token.length - 20)
+        });
         
         // Wait for chain to be fully loaded (node map built)
         // This ensures we can verify the token with the node's public key
