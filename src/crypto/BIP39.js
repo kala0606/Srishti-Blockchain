@@ -377,8 +377,27 @@ class BIP39 {
         // Use first 32 bytes of seed as the private key seed
         const privateKeySeed = seed.slice(0, 32);
         
-        // Use @noble/ed25519 for deterministic key generation
+        // Wait for @noble/ed25519 library to be ready if needed
+        if (typeof window !== 'undefined' && window.ed25519Ready) {
+            try {
+                await window.ed25519Ready;
+            } catch (error) {
+                console.warn('⚠️ Error waiting for ed25519:', error);
+            }
+        }
+        
+        // Try to access @noble/ed25519 library - it might be exposed in different ways
+        let ed25519Lib = null;
         if (typeof ed25519 !== 'undefined' && ed25519.getPublicKey) {
+            ed25519Lib = ed25519;
+        } else if (typeof window !== 'undefined' && window.ed25519 && window.ed25519.getPublicKey) {
+            ed25519Lib = window.ed25519;
+        } else if (typeof globalThis !== 'undefined' && globalThis.ed25519 && globalThis.ed25519.getPublicKey) {
+            ed25519Lib = globalThis.ed25519;
+        }
+        
+        // Use @noble/ed25519 for deterministic key generation
+        if (ed25519Lib) {
             try {
                 // For Ed25519, we need to hash the seed to get a valid private key
                 // Ed25519 private keys must be 32 bytes and properly formatted
@@ -387,7 +406,7 @@ class BIP39 {
                 const privateKey32 = new Uint8Array(privateKeyRaw).slice(0, 32);
                 
                 // Get public key from private key (deterministic)
-                const publicKeyBytes = ed25519.getPublicKey(privateKey32);
+                const publicKeyBytes = ed25519Lib.getPublicKey(privateKey32);
                 
                 // Convert to Web Crypto API format
                 const privateKey = await window.SrishtiKeys.importPrivateKey(
@@ -404,7 +423,40 @@ class BIP39 {
                 // Continue to fallback method
             }
         } else {
-            console.warn('⚠️ @noble/ed25519 library not available. BIP39 key derivation requires this library.');
+            // Try to wait a bit for the library to load (in case of async loading)
+            console.warn('⚠️ @noble/ed25519 library not immediately available. Checking again...');
+            // Wait 100ms and check again
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+            // Re-check for the library
+            if (typeof ed25519 !== 'undefined' && ed25519.getPublicKey) {
+                ed25519Lib = ed25519;
+            } else if (typeof window !== 'undefined' && window.ed25519 && window.ed25519.getPublicKey) {
+                ed25519Lib = window.ed25519;
+            } else if (typeof globalThis !== 'undefined' && globalThis.ed25519 && globalThis.ed25519.getPublicKey) {
+                ed25519Lib = globalThis.ed25519;
+            }
+            
+            if (ed25519Lib) {
+                console.log('✅ @noble/ed25519 library found after wait');
+                // Retry with the library
+                const privateKeyRaw = await crypto.subtle.digest('SHA-512', privateKeySeed);
+                const privateKey32 = new Uint8Array(privateKeyRaw).slice(0, 32);
+                const publicKeyBytes = ed25519Lib.getPublicKey(privateKey32);
+                
+                const privateKey = await window.SrishtiKeys.importPrivateKey(
+                    this.bytesToBase64(this.constructPKCS8(privateKey32))
+                );
+                
+                const publicKey = await window.SrishtiKeys.importPublicKey(
+                    this.bytesToBase64(publicKeyBytes)
+                );
+                
+                return { publicKey, privateKey };
+            } else {
+                console.error('❌ @noble/ed25519 library not available. BIP39 key derivation requires this library.');
+                throw new Error('@noble/ed25519 library is required for BIP39 key derivation but is not available. Please ensure the library is loaded before using BIP39.');
+            }
         }
         
         // Fallback: Use HKDF to derive key material deterministically
@@ -452,9 +504,9 @@ class BIP39 {
             const privateKeyRaw = exportedBytes.slice(-32);
             
             // Use @noble/ed25519 if available to get public key
-            if (typeof ed25519 !== 'undefined' && ed25519.getPublicKey) {
+            if (ed25519Lib) {
                 try {
-                    const publicKeyBytes = ed25519.getPublicKey(privateKeyRaw);
+                    const publicKeyBytes = ed25519Lib.getPublicKey(privateKeyRaw);
                     const publicKey = await window.SrishtiKeys.importPublicKey(
                         this.bytesToBase64(publicKeyBytes)
                     );

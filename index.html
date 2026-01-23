@@ -16,6 +16,39 @@
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     
     <!-- Ed25519 Library for deterministic key generation -->
+    <!-- Load from CDN and ensure it's available globally -->
+    <script>
+        // Create a promise that resolves when ed25519 is available
+        window.ed25519Ready = new Promise((resolve) => {
+            function checkAndExpose() {
+                if (typeof ed25519 !== 'undefined' && ed25519.getPublicKey) {
+                    // Ensure it's available in all scopes
+                    if (typeof window !== 'undefined') window.ed25519 = ed25519;
+                    if (typeof globalThis !== 'undefined') globalThis.ed25519 = ed25519;
+                    console.log('✅ @noble/ed25519 library available');
+                    resolve(ed25519);
+                    return true;
+                }
+                return false;
+            }
+            
+            // Check immediately (in case script loaded synchronously)
+            if (!checkAndExpose()) {
+                // Poll until available (max 2 seconds)
+                let attempts = 0;
+                const maxAttempts = 20;
+                const checkInterval = setInterval(() => {
+                    attempts++;
+                    if (checkAndExpose() || attempts >= maxAttempts) {
+                        clearInterval(checkInterval);
+                        if (attempts >= maxAttempts && typeof ed25519 === 'undefined') {
+                            console.error('❌ @noble/ed25519 failed to load after', maxAttempts * 100, 'ms');
+                        }
+                    }
+                }, 100);
+            }
+        });
+    </script>
     <script src="https://cdn.jsdelivr.net/npm/@noble/ed25519@1.7.3/index.js"></script>
     
     <!-- Blockchain Core (load in order) -->
