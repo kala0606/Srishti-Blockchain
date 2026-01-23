@@ -6550,14 +6550,11 @@
             }
             
             if (requiresLogin) {
-                // User is not logged in - show onboarding/login screen
-                // Continue with initialization but show login modal
-                console.log('🔐 User not authenticated - showing login screen');
-                // Don't return - continue initialization so blockchain can load
-                // But show onboarding modal to block access
-                setTimeout(() => {
-                    showOnboardingModal();
-                }, 500); // Small delay to let UI render
+                // User is not logged in - enter guest mode
+                // Don't show login modal automatically - let user click "Click to join" button
+                console.log('🔐 User not authenticated - entering guest mode');
+                // Guest mode will be shown by the initialization flow below
+                // The "Click to join" button will trigger showOnboardingModal() when clicked
             } else {
                 // User is authenticated - continue with normal flow
                 console.log('✅ User authenticated - proceeding with wallet initialization');
