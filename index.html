@@ -125,6 +125,7 @@
     <script src="sdk/SrishtiSDK.js"></script>
     <script src="sdk/AppDataStore.js"></script>
     <script src="sdk/apps/attendance/AttendanceApp.js"></script>
+    <script src="sdk/apps/generative-art/GenerativeArtApp.js"></script>
     <script src="sdk/index.js"></script>
     
     <!-- QR Scanner (blockchain-compatible) -->
@@ -3011,6 +3012,36 @@
                         <div style="flex: 1;">
                             <div style="font-weight: 600; color: rgba(255, 255, 255, 0.95); margin-bottom: 4px;">Attendance</div>
                             <div style="font-size: 0.85em; color: rgba(255, 255, 255, 0.6);">Manage attendance sessions</div>
+                        </div>
+                        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px; color: rgba(255, 255, 255, 0.4);">
+                            <polyline points="9 18 15 12 9 6"></polyline>
+                        </svg>
+                    </button>
+                    <button class="dapp-card" onclick="launchDApp('generative-art')" style="
+                        background: linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%);
+                        border: 1px solid rgba(255, 255, 255, 0.08);
+                        border-radius: 16px;
+                        padding: 20px;
+                        cursor: pointer;
+                        transition: all 0.3s ease;
+                        text-align: left;
+                        display: flex;
+                        align-items: center;
+                        gap: 16px;
+                    ">
+                        <div style="
+                            width: 48px;
+                            height: 48px;
+                            border-radius: 12px;
+                            background: linear-gradient(135deg, rgba(255, 107, 107, 0.3), rgba(255, 159, 64, 0.3));
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            font-size: 24px;
+                        ">🎨</div>
+                        <div style="flex: 1;">
+                            <div style="font-weight: 600; color: rgba(255, 255, 255, 0.95); margin-bottom: 4px;">Generative Art</div>
+                            <div style="font-size: 0.85em; color: rgba(255, 255, 255, 0.6);">Create, buy, and sell generative art NFTs</div>
                         </div>
                         <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 20px; height: 20px; color: rgba(255, 255, 255, 0.4);">
                             <polyline points="9 18 15 12 9 6"></polyline>
@@ -6200,7 +6231,8 @@
             }
             
             const dAppUrls = {
-                'attendance': new URL('attendance-app/index.html', baseUrl).toString()
+                'attendance': new URL('attendance-app/index.html', baseUrl).toString(),
+                'generative-art': new URL('generative-art-app/index.html', baseUrl).toString()
             };
             
             const dAppUrl = dAppUrls[dAppId];
