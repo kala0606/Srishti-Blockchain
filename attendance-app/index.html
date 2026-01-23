@@ -463,11 +463,10 @@
                     await loadScript(src);
                 }
 
-                // Load SDK files from main blockchain repo (single source of truth)
+                // Load SDK files from main blockchain repo
                 const sdkScripts = [
                     'sdk/SrishtiSDK.js',
-                    'sdk/AppDataStore.js',
-                    'sdk/apps/attendance/AttendanceApp.js' // Load from main SDK, not local copy
+                    'sdk/AppDataStore.js'
                 ];
 
                 for (const src of sdkScripts) {
@@ -490,9 +489,15 @@
                 await loadScript('docs/qr-scanner-blockchain.js'); // Load from main blockchain repo
                 console.log('✅ QR Scanner loaded');
 
-                // Load attendance app specific files from local directory (only AttendanceQRCode.js)
-                // AttendanceApp.js is now loaded from main SDK above
-                await loadScript('AttendanceQRCode.js', './'); // Load from attendance-app root directory
+                // Load attendance app files from local directory (relative to attendance-app folder)
+                const attendanceScripts = [
+                    'sdk/apps/attendance/AttendanceQRCode.js',
+                    'sdk/apps/attendance/AttendanceApp.js'
+                ];
+
+                for (const src of attendanceScripts) {
+                    await loadScript(src, './'); // Load from local attendance-app directory
+                }
 
                 // Load main app.js (creates SrishtiApp instance)
                 await loadScript('app.js');
