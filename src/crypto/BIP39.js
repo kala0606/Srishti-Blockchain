@@ -406,7 +406,29 @@ class BIP39 {
                 const privateKey32 = new Uint8Array(privateKeyRaw).slice(0, 32);
                 
                 // Get public key from private key (deterministic)
+                // Ensure privateKey32 is a proper Uint8Array
+                if (!(privateKey32 instanceof Uint8Array)) {
+                    throw new Error('Invalid private key format');
+                }
+                
                 const publicKeyBytes = ed25519Lib.getPublicKey(privateKey32);
+                
+                // Ensure publicKeyBytes is a Uint8Array
+                let publicKeyBytesArray;
+                if (publicKeyBytes instanceof Uint8Array) {
+                    publicKeyBytesArray = publicKeyBytes;
+                } else if (Array.isArray(publicKeyBytes)) {
+                    publicKeyBytesArray = new Uint8Array(publicKeyBytes);
+                } else if (publicKeyBytes && typeof publicKeyBytes === 'object') {
+                    // Try to convert object/array-like to Uint8Array
+                    try {
+                        publicKeyBytesArray = new Uint8Array(Array.from(publicKeyBytes));
+                    } catch (e) {
+                        throw new Error('Invalid public key format from getPublicKey: ' + e.message);
+                    }
+                } else {
+                    throw new Error('getPublicKey returned unexpected type: ' + typeof publicKeyBytes);
+                }
                 
                 // Convert to Web Crypto API format
                 const privateKey = await window.SrishtiKeys.importPrivateKey(
@@ -414,7 +436,7 @@ class BIP39 {
                 );
                 
                 const publicKey = await window.SrishtiKeys.importPublicKey(
-                    this.bytesToBase64(publicKeyBytes)
+                    this.bytesToBase64(publicKeyBytesArray)
                 );
                 
                 return { publicKey, privateKey };
@@ -506,9 +528,36 @@ class BIP39 {
             // Use @noble/ed25519 if available to get public key
             if (ed25519Lib) {
                 try {
-                    const publicKeyBytes = ed25519Lib.getPublicKey(privateKeyRaw);
+                    // Ensure privateKeyRaw is a Uint8Array
+                    let privateKeyRawArray;
+                    if (privateKeyRaw instanceof Uint8Array) {
+                        privateKeyRawArray = privateKeyRaw;
+                    } else if (Array.isArray(privateKeyRaw)) {
+                        privateKeyRawArray = new Uint8Array(privateKeyRaw);
+                    } else {
+                        privateKeyRawArray = new Uint8Array(Array.from(privateKeyRaw));
+                    }
+                    
+                    const publicKeyBytes = ed25519Lib.getPublicKey(privateKeyRawArray);
+                    
+                    // Ensure publicKeyBytes is a Uint8Array
+                    let publicKeyBytesArray;
+                    if (publicKeyBytes instanceof Uint8Array) {
+                        publicKeyBytesArray = publicKeyBytes;
+                    } else if (Array.isArray(publicKeyBytes)) {
+                        publicKeyBytesArray = new Uint8Array(publicKeyBytes);
+                    } else if (publicKeyBytes && typeof publicKeyBytes === 'object') {
+                        try {
+                            publicKeyBytesArray = new Uint8Array(Array.from(publicKeyBytes));
+                        } catch (e) {
+                            throw new Error('Invalid public key format: ' + e.message);
+                        }
+                    } else {
+                        throw new Error('getPublicKey returned unexpected type: ' + typeof publicKeyBytes);
+                    }
+                    
                     const publicKey = await window.SrishtiKeys.importPublicKey(
-                        this.bytesToBase64(publicKeyBytes)
+                        this.bytesToBase64(publicKeyBytesArray)
                     );
                     return { publicKey, privateKey };
                 } catch (error) {
@@ -618,11 +667,26 @@ class BIP39 {
     
     /**
      * Convert bytes to base64
-     * @param {Uint8Array} bytes
+     * @param {Uint8Array|Array} bytes
      * @returns {string}
      */
     static bytesToBase64(bytes) {
-        return btoa(String.fromCharCode(...bytes));
+        // Ensure bytes is a Uint8Array
+        if (!(bytes instanceof Uint8Array)) {
+            bytes = new Uint8Array(bytes);
+        }
+        
+        // For large arrays, use a chunked approach to avoid stack overflow
+        // String.fromCharCode can only handle a limited number of arguments
+        const chunkSize = 8192;
+        let result = '';
+        
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+            const chunk = bytes.slice(i, i + chunkSize);
+            result += String.fromCharCode.apply(null, chunk);
+        }
+        
+        return btoa(result);
     }
 
     /**
