@@ -5095,6 +5095,7 @@
                 let restoredKeyPair = null;
                 let restoredPrivateKeyBase64 = null;
                 let keyRestored = false;
+                let bip39Error = null;
                 
                 if (window.SrishtiBIP39) {
                     try {
@@ -5112,14 +5113,23 @@
                             restoredPrivateKeyBase64 = await window.SrishtiKeys.exportPrivateKeyBase64(derivedKeyPair.privateKey);
                             keyRestored = true;
                         } else {
-                            console.log('⚠️ BIP39 derivation did not match chain public key (old recovery method used)');
+                            console.log('⚠️ BIP39 derivation did not match chain public key');
+                            console.log('   This node was created with the old recovery system.');
                             console.log('   Chain public key:', foundNode.publicKey?.substring(0, 30) + '...');
                             console.log('   Derived public key:', derivedPublicKeyBase64?.substring(0, 30) + '...');
+                            console.log('   The recovery phrase was generated FROM the key, not the other way around.');
+                            console.log('   Therefore, the key cannot be restored from the phrase.');
                         }
                     } catch (error) {
-                        console.warn('⚠️ BIP39 key derivation failed:', error);
-                        console.log('   Falling back to identity-only recovery (old recovery method)');
+                        bip39Error = error;
+                        console.warn('⚠️ BIP39 key derivation failed:', error.message);
+                        console.log('   This could mean:');
+                        console.log('   1. The node was created with the old recovery system (most likely)');
+                        console.log('   2. The recovery phrase was entered incorrectly');
+                        console.log('   3. The @noble/ed25519 library is not available');
                     }
+                } else {
+                    console.warn('⚠️ BIP39 library not available');
                 }
                 
                 // Set current user (trim name to prevent space-related issues)
@@ -5212,10 +5222,12 @@
                 console.log('✅ Recovered node:', foundNode.name, foundNode.id);
                 if (keyRestored) {
                     console.log('✅ Private key fully restored! All features available.');
+                    console.log('   You can now sign transactions and use all blockchain features.');
                 } else {
-                    console.warn('⚠️ Note: Private key not restored. Some features may be limited.');
-                    console.warn('   This node was created with the old recovery system.');
+                    console.warn('⚠️ Private key could not be restored from recovery phrase.');
+                    console.warn('   This node may have been created with an older system.');
                     console.warn('   You can view the blockchain but cannot sign transactions.');
+                    console.warn('   Please create a new node to get full recovery support.');
                 }
             } catch (error) {
                 console.error('Recovery failed:', error);

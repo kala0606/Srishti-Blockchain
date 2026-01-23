@@ -400,8 +400,11 @@ class BIP39 {
                 
                 return { publicKey, privateKey };
             } catch (error) {
-                console.error('Error using @noble/ed25519:', error);
+                console.error('Error using @noble/ed25519 for key derivation:', error);
+                // Continue to fallback method
             }
+        } else {
+            console.warn('⚠️ @noble/ed25519 library not available. BIP39 key derivation requires this library.');
         }
         
         // Fallback: Use HKDF to derive key material deterministically
@@ -439,35 +442,42 @@ class BIP39 {
         );
         
         // Derive public key from private key
-        // Export the private key to get the raw bytes, then derive public key
-        const exportedPrivate = await crypto.subtle.exportKey('pkcs8', privateKey);
-        const privateKeyRaw = new Uint8Array(exportedPrivate).slice(-32); // Last 32 bytes are the key
-        
-        // Use @noble/ed25519 if available to get public key
-        if (typeof ed25519 !== 'undefined' && ed25519.getPublicKey) {
-            try {
-                const publicKeyBytes = ed25519.getPublicKey(privateKeyRaw);
-                const publicKey = await window.SrishtiKeys.importPublicKey(
-                    this.bytesToBase64(publicKeyBytes)
-                );
-                return { publicKey, privateKey };
-            } catch (error) {
-                console.error('Error deriving public key:', error);
+        // For Ed25519, we can use @noble/ed25519 to get the public key from private key bytes
+        try {
+            // Export the private key to get the raw bytes
+            const exportedPrivate = await crypto.subtle.exportKey('pkcs8', privateKey);
+            const exportedBytes = new Uint8Array(exportedPrivate);
+            
+            // PKCS8 format: last 32 bytes are the actual Ed25519 private key
+            const privateKeyRaw = exportedBytes.slice(-32);
+            
+            // Use @noble/ed25519 if available to get public key
+            if (typeof ed25519 !== 'undefined' && ed25519.getPublicKey) {
+                try {
+                    const publicKeyBytes = ed25519.getPublicKey(privateKeyRaw);
+                    const publicKey = await window.SrishtiKeys.importPublicKey(
+                        this.bytesToBase64(publicKeyBytes)
+                    );
+                    return { publicKey, privateKey };
+                } catch (error) {
+                    console.error('Error using @noble/ed25519 to derive public key:', error);
+                }
             }
+            
+            // Alternative: Try to use Web Crypto API to derive public key
+            // Create a test signature and verify it to get the public key
+            // Actually, Web Crypto API doesn't have a direct way to get public key from private
+            // So we need @noble/ed25519 or we can't proceed deterministically
+            
+            // If we can't derive the public key, we can't return a valid key pair
+            throw new Error('Cannot derive public key without @noble/ed25519 library');
+            
+        } catch (error) {
+            console.error('Error deriving public key from private key:', error);
+            // If we can't derive the public key deterministically, we should throw
+            // rather than generating a random key (which would be wrong)
+            throw new Error('Failed to derive key pair deterministically: ' + error.message);
         }
-        
-        // Last resort: generate a new key pair (shouldn't happen)
-        console.warn('⚠️ Could not derive key pair deterministically, generating new key');
-        const keyPair = await crypto.subtle.generateKey(
-            {
-                name: 'Ed25519',
-                namedCurve: 'Ed25519'
-            },
-            true,
-            ['sign', 'verify']
-        );
-        
-        return keyPair;
     }
     
     /**

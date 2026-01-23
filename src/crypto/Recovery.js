@@ -156,9 +156,9 @@ class Recovery {
                         }
                     }
                 </style>
-                <h2 style="font-family: 'Syne', sans-serif; color: #fff; margin: 0 0 8px 0; font-size: 1.6em; font-weight: 700;">🔐 Your Recovery Phrase</h2>
+                <h2 style="font-family: 'Syne', sans-serif; color: #fff; margin: 0 0 8px 0; font-size: 1.6em; font-weight: 700;">🔐 Your Recovery Phrase (BIP39)</h2>
                 <p style="color: rgba(255, 255, 255, 0.6); margin: 0 0 28px 0; font-size: 0.9em;">
-                    Write down these 12 words in order. This is the ONLY way to recover your node if you lose access.
+                    Write down these 12 words in order. This BIP39 mnemonic can fully restore your private key and all account access.
                 </p>
                 <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 24px;">
                     ${wordGrid}

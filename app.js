@@ -405,10 +405,24 @@ class SrishtiApp {
                 }
             }
 
-            // Generate key pair FIRST
-            this.keyPair = await window.SrishtiKeys.generateKeyPair();
+            // Generate BIP39 mnemonic FIRST, then derive key pair from it
+            // This allows full key recovery from the mnemonic phrase
+            console.log('🔐 Generating BIP39 mnemonic for key derivation...');
+            
+            if (!window.SrishtiBIP39) {
+                throw new Error('BIP39 library not available. Cannot create node with recoverable keys.');
+            }
+            
+            // Generate a 12-word BIP39 mnemonic (128 bits entropy)
+            const recoveryPhrase = await window.SrishtiBIP39.generateMnemonic();
+            console.log('✅ BIP39 mnemonic generated');
+            
+            // Derive key pair from mnemonic (deterministic)
+            this.keyPair = await window.SrishtiBIP39.mnemonicToKeyPair(recoveryPhrase);
             this.publicKeyBase64 = await window.SrishtiKeys.exportPublicKeyBase64(this.keyPair.publicKey);
             this.nodeId = await window.SrishtiKeys.generateNodeId(this.keyPair.publicKey);
+            
+            console.log('✅ Key pair derived from BIP39 mnemonic');
 
             // Double-check this nodeId doesn't already exist in chain
             const nodeMap = this.chain.buildNodeMap();
@@ -476,9 +490,10 @@ class SrishtiApp {
                 this.needsGenesis = false;
             }
 
-            // Generate recovery phrase and hash it
-            const recoveryPhrase = window.SrishtiRecovery.generatePhrase(privateKeyBase64);
+            // Hash the BIP39 mnemonic phrase for storage on-chain
+            // (The phrase was already generated above and used to derive the keys)
             const recoveryPhraseHash = await window.SrishtiRecovery.hashPhrase(recoveryPhrase);
+            console.log('✅ Recovery phrase hash generated for on-chain storage');
 
             // Final check: ensure node doesn't exist before creating join block
             const finalNodeMap = this.chain.buildNodeMap();
