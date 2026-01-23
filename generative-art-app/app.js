@@ -102,7 +102,7 @@ class GenerativeArtAppUI {
             }
 
             // Wait for GenerativeArtApp class to be available
-            let retries = 0;
+            retries = 0;
             while (!window.SrishtiGenerativeArtApp && retries < 50) {
                 await new Promise(resolve => setTimeout(resolve, 100));
                 retries++;
