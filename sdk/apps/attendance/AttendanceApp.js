@@ -253,12 +253,27 @@ class AttendanceApp {
             }
         }
         
+        // Get student ID if registered (use nodeId if not registered)
+        const studentId = (typeof this.getStudentId === 'function' ? this.getStudentId() : null) || this.sdk.nodeId;
+        
+        // Get node name from chain
+        let nodeName = null;
+        if (this.sdk.chain) {
+            const nodes = this.sdk.chain.buildNodeMap();
+            const node = nodes[this.sdk.nodeId];
+            if (node) {
+                nodeName = node.name;
+            }
+        }
+        
         // Full attendance data (OFF-CHAIN)
         const attendanceData = {
             id: recordId,
             type: 'attendance',
             sessionId: sessionId,
-            studentId: this.sdk.nodeId,
+            studentId: studentId, // Use registered student ID if available
+            walletAddress: this.sdk.nodeId,
+            nodeName: nodeName, // Node name from chain
             timestamp: Date.now(),
             location: options.location || null,
             distanceFromVenue: distanceFromVenue,
@@ -276,9 +291,6 @@ class AttendanceApp {
         // Hash for verification
         const dataHash = await this.sdk.hashData(attendanceData);
         
-        // Get student ID if registered (use nodeId if not registered)
-        const studentId = (typeof this.getStudentId === 'function' ? this.getStudentId() : null) || this.sdk.nodeId;
-        
         // Submit proof ON-CHAIN with essential metadata (so institution can see it)
         const success = await this.sdk.submitAppEvent(
             AttendanceApp.APP_ID,
@@ -289,7 +301,8 @@ class AttendanceApp {
                 dataHash: dataHash,
                 // Include essential metadata so institution can reconstruct the record
                 metadata: {
-                    studentId: studentId,
+                    studentId: studentId, // Registered student ID
+                    nodeName: nodeName, // Node name
                     timestamp: attendanceData.timestamp,
                     hasLocation: !!options.location,
                     hasQRProof: !!qrProof,
@@ -343,7 +356,9 @@ class AttendanceApp {
      * @param {string} [reason] - Reason for rejection
      * @returns {Promise<boolean>}
      */
-    async verifyAttendance(sessionId, studentId, approved = true, reason = null) {
+    async verifyAttendance(sessionId, studentNodeId, approved = true, reason = null) {
+        console.log(`🔍 [verifyAttendance] Verifying attendance for session: ${sessionId}, student node: ${studentNodeId}, approved: ${approved}`);
+        
         const session = await this.store.get(sessionId);
         if (!session) {
             throw new Error('Session not found');
@@ -353,10 +368,53 @@ class AttendanceApp {
             throw new Error('Only session creator can verify attendance');
         }
         
-        const recordId = `${sessionId}_${studentId}`;
-        const record = await this.store.get(recordId);
+        // Record ID is created as ${sessionId}_${nodeId} where nodeId is the wallet address
+        const recordId = `${sessionId}_${studentNodeId}`;
+        console.log(`🔍 [verifyAttendance] Looking for record: ${recordId}`);
+        
+        let record = await this.store.get(recordId);
+        
+        // If record not found locally, try to reconstruct from on-chain events
         if (!record) {
-            throw new Error('Attendance record not found');
+            console.log(`⚠️ [verifyAttendance] Record not found locally, checking on-chain events...`);
+            const markEvents = this.sdk.queryAppEvents(
+                AttendanceApp.APP_ID,
+                AttendanceApp.ACTIONS.MARK_PRESENT,
+                { ref: sessionId, target: studentNodeId }
+            );
+            
+            if (markEvents.length === 0) {
+                throw new Error(`Attendance record not found for node ${studentNodeId}`);
+            }
+            
+            // Reconstruct record from on-chain event (same logic as getSessionAttendees)
+            const event = markEvents[0];
+            const metadata = event.payload.metadata || {};
+            
+            // Get node name from chain
+            let nodeName = null;
+            if (this.sdk.chain) {
+                const nodes = this.sdk.chain.buildNodeMap();
+                const node = nodes[studentNodeId];
+                if (node && node.name) {
+                    nodeName = node.name;
+                }
+            }
+            
+            record = {
+                id: recordId,
+                type: 'attendance',
+                sessionId: sessionId,
+                studentId: metadata.studentId || studentNodeId,
+                walletAddress: studentNodeId,
+                nodeName: nodeName || metadata.nodeName || null,
+                timestamp: metadata.timestamp || event.timestamp,
+                status: AttendanceApp.STATUS.PENDING,
+                owner: studentNodeId,
+                _reconstructed: true
+            };
+            
+            console.log(`📥 [verifyAttendance] Reconstructed record from on-chain: ${record.studentId || record.walletAddress}`);
         }
         
         // Update off-chain record
@@ -365,17 +423,30 @@ class AttendanceApp {
         record.verifiedAt = Date.now();
         record.rejectionReason = approved ? null : reason;
         await this.store.put(recordId, record);
+        console.log(`✅ [verifyAttendance] Updated local record status to: ${record.status}`);
         
         // Submit verification ON-CHAIN
-        return await this.sdk.submitAppEvent(
+        console.log(`📤 [verifyAttendance] Submitting verification event to blockchain...`);
+        const success = await this.sdk.submitAppEvent(
             AttendanceApp.APP_ID,
             AttendanceApp.ACTIONS.VERIFY,
             {
                 ref: sessionId,
-                target: studentId,
+                target: studentNodeId, // Use node ID (wallet address) as target
                 metadata: { verified: approved }
             }
         );
+        
+        if (!success) {
+            console.error(`❌ [verifyAttendance] Failed to submit verification event to blockchain`);
+            // Rollback local update
+            record.status = AttendanceApp.STATUS.PENDING;
+            await this.store.put(recordId, record);
+            throw new Error('Failed to submit verification to blockchain');
+        }
+        
+        console.log(`✅ [verifyAttendance] Verification submitted successfully`);
+        return success;
     }
     
     /**
@@ -387,16 +458,37 @@ class AttendanceApp {
         const attendees = await this.getSessionAttendees(sessionId);
         const pending = attendees.filter(a => a.status === AttendanceApp.STATUS.PENDING);
         
+        console.log(`🔍 [bulkVerifyAll] Found ${pending.length} pending attendees to verify`);
+        
         const results = [];
         for (const attendee of pending) {
             try {
-                await this.verifyAttendance(sessionId, attendee.studentId, true);
-                results.push({ studentId: attendee.studentId, success: true });
+                // Use walletAddress (node ID) not studentId (registered ID) for verification
+                // The record ID is created as ${sessionId}_${nodeId}, so we need the node ID
+                const nodeId = attendee.walletAddress || attendee.owner || attendee.studentId;
+                console.log(`✅ [bulkVerifyAll] Verifying attendance for node: ${nodeId} (student: ${attendee.studentId})`);
+                
+                const success = await this.verifyAttendance(sessionId, nodeId, true);
+                results.push({ 
+                    studentId: attendee.studentId, 
+                    nodeId: nodeId,
+                    nodeName: attendee.nodeName,
+                    success: success 
+                });
+                console.log(`✅ [bulkVerifyAll] Successfully verified: ${attendee.nodeName || nodeId}`);
             } catch (error) {
-                results.push({ studentId: attendee.studentId, success: false, error: error.message });
+                console.error(`❌ [bulkVerifyAll] Failed to verify ${attendee.studentId}:`, error);
+                results.push({ 
+                    studentId: attendee.studentId, 
+                    nodeId: attendee.walletAddress || attendee.owner,
+                    nodeName: attendee.nodeName,
+                    success: false, 
+                    error: error.message 
+                });
             }
         }
         
+        console.log(`📊 [bulkVerifyAll] Verification complete: ${results.filter(r => r.success).length}/${results.length} successful`);
         return results;
     }
     
@@ -560,12 +652,36 @@ class AttendanceApp {
             // If record not found locally, reconstruct from on-chain event
             if (!record) {
                 const metadata = event.payload.metadata || {};
+                
+                // Always get node name from chain (more reliable than metadata)
+                let nodeName = null;
+                if (this.sdk.chain) {
+                    try {
+                        const nodes = this.sdk.chain.buildNodeMap();
+                        const node = nodes[event.payload.target];
+                        if (node && node.name) {
+                            nodeName = node.name;
+                            console.log(`📝 [getSessionAttendees] Found node name from chain: ${nodeName} for ${event.payload.target}`);
+                        } else {
+                            console.warn(`⚠️ [getSessionAttendees] Node not found in chain map: ${event.payload.target}`);
+                        }
+                    } catch (error) {
+                        console.warn(`⚠️ [getSessionAttendees] Error getting node name from chain:`, error);
+                    }
+                }
+                
+                // Fallback to metadata if chain lookup failed
+                if (!nodeName && metadata.nodeName) {
+                    nodeName = metadata.nodeName;
+                }
+                
                 record = {
                     id: recordId,
                     type: 'attendance',
                     sessionId: sessionId,
-                    studentId: metadata.studentId || event.payload.target,
-                    walletAddress: event.payload.target,
+                    studentId: metadata.studentId || event.payload.target, // Registered student ID
+                    walletAddress: event.payload.target, // Node ID / wallet address
+                    nodeName: nodeName || null, // Node name from chain (preferred) or metadata
                     timestamp: metadata.timestamp || event.timestamp,
                     location: metadata.hasLocation ? { provided: true } : null,
                     distanceFromVenue: metadata.distanceFromVenue || null,
@@ -577,9 +693,27 @@ class AttendanceApp {
                 
                 // Store it locally for future use
                 await this.store.put(recordId, record);
-                console.log(`📥 [getSessionAttendees] Reconstructed attendance record from on-chain: ${record.studentId || record.walletAddress}`);
+                console.log(`📥 [getSessionAttendees] Reconstructed attendance record: ${record.nodeName || 'Unknown'} (${record.studentId || record.walletAddress})`);
             } else {
-                console.log(`📋 [getSessionAttendees] Found existing local record: ${record.studentId || record.walletAddress}`);
+                // Always ensure existing records have node name from chain (update if missing or different)
+                if (this.sdk.chain) {
+                    try {
+                        const nodes = this.sdk.chain.buildNodeMap();
+                        const nodeId = record.walletAddress || record.owner || event.payload.target;
+                        const node = nodes[nodeId];
+                        if (node && node.name) {
+                            const chainNodeName = node.name;
+                            if (!record.nodeName || record.nodeName !== chainNodeName) {
+                                record.nodeName = chainNodeName;
+                                await this.store.put(recordId, record);
+                                console.log(`🔄 [getSessionAttendees] Updated node name from chain: ${chainNodeName} for ${nodeId}`);
+                            }
+                        }
+                    } catch (error) {
+                        console.warn(`⚠️ [getSessionAttendees] Error updating node name from chain:`, error);
+                    }
+                }
+                console.log(`📋 [getSessionAttendees] Found existing local record: ${record.nodeName || 'Unknown'} (${record.studentId || record.walletAddress})`);
             }
             
             // Get verification status from on-chain events
@@ -618,7 +752,72 @@ class AttendanceApp {
      */
     async getMyAttendance(sessionId) {
         const recordId = `${sessionId}_${this.sdk.nodeId}`;
-        return await this.store.get(recordId);
+        let record = await this.store.get(recordId);
+        
+        // Always check for verification events from blockchain (even if we have local record)
+        const verifyEvents = this.sdk.queryAppEvents(
+            AttendanceApp.APP_ID,
+            AttendanceApp.ACTIONS.VERIFY,
+            { ref: sessionId, target: this.sdk.nodeId }
+        );
+        
+        if (verifyEvents.length > 0) {
+            const latest = verifyEvents[verifyEvents.length - 1];
+            const verified = latest.payload.metadata?.verified;
+            
+            if (record) {
+                // Update local record with verification status
+                record.status = verified 
+                    ? AttendanceApp.STATUS.VERIFIED 
+                    : AttendanceApp.STATUS.REJECTED;
+                record.verifiedBy = latest.sender;
+                record.verifiedAt = latest.timestamp;
+                await this.store.put(recordId, record);
+                console.log(`🔄 [getMyAttendance] Updated verification status from blockchain: ${record.status}`);
+            } else {
+                // If no local record, reconstruct from on-chain events
+                const markEvents = this.sdk.queryAppEvents(
+                    AttendanceApp.APP_ID,
+                    AttendanceApp.ACTIONS.MARK_PRESENT,
+                    { ref: sessionId, target: this.sdk.nodeId }
+                );
+                
+                if (markEvents.length > 0) {
+                    const event = markEvents[0];
+                    const metadata = event.payload.metadata || {};
+                    
+                    // Get node name from chain
+                    let nodeName = null;
+                    if (this.sdk.chain) {
+                        const nodes = this.sdk.chain.buildNodeMap();
+                        const node = nodes[this.sdk.nodeId];
+                        if (node && node.name) {
+                            nodeName = node.name;
+                        }
+                    }
+                    
+                    record = {
+                        id: recordId,
+                        type: 'attendance',
+                        sessionId: sessionId,
+                        studentId: metadata.studentId || this.sdk.nodeId,
+                        walletAddress: this.sdk.nodeId,
+                        nodeName: nodeName || metadata.nodeName || null,
+                        timestamp: metadata.timestamp || event.timestamp,
+                        status: verified ? AttendanceApp.STATUS.VERIFIED : AttendanceApp.STATUS.REJECTED,
+                        verifiedBy: latest.sender,
+                        verifiedAt: latest.timestamp,
+                        owner: this.sdk.nodeId,
+                        _reconstructed: true
+                    };
+                    
+                    await this.store.put(recordId, record);
+                    console.log(`📥 [getMyAttendance] Reconstructed record with verification status: ${record.status}`);
+                }
+            }
+        }
+        
+        return record;
     }
     
     /**
@@ -634,9 +833,64 @@ class AttendanceApp {
         
         const history = [];
         for (const event of events) {
-            const recordId = `${event.payload.ref}_${this.sdk.nodeId}`;
-            const record = await this.store.get(recordId);
-            const session = await this.store.get(event.payload.ref);
+            const sessionId = event.payload.ref;
+            const recordId = `${sessionId}_${this.sdk.nodeId}`;
+            let record = await this.store.get(recordId);
+            const session = await this.store.get(sessionId);
+            
+            // Check for verification events from blockchain
+            const verifyEvents = this.sdk.queryAppEvents(
+                AttendanceApp.APP_ID,
+                AttendanceApp.ACTIONS.VERIFY,
+                { ref: sessionId, target: this.sdk.nodeId }
+            );
+            
+            if (verifyEvents.length > 0) {
+                const latest = verifyEvents[verifyEvents.length - 1];
+                const verified = latest.payload.metadata?.verified;
+                
+                if (record) {
+                    // Update local record with verification status
+                    record.status = verified 
+                        ? AttendanceApp.STATUS.VERIFIED 
+                        : AttendanceApp.STATUS.REJECTED;
+                    record.verifiedBy = latest.sender;
+                    record.verifiedAt = latest.timestamp;
+                    await this.store.put(recordId, record);
+                    console.log(`🔄 [getMyAttendanceHistory] Updated verification status for ${sessionId}: ${record.status}`);
+                } else {
+                    // Reconstruct record if not found locally
+                    const metadata = event.payload.metadata || {};
+                    
+                    // Get node name from chain
+                    let nodeName = null;
+                    if (this.sdk.chain) {
+                        const nodes = this.sdk.chain.buildNodeMap();
+                        const node = nodes[this.sdk.nodeId];
+                        if (node && node.name) {
+                            nodeName = node.name;
+                        }
+                    }
+                    
+                    record = {
+                        id: recordId,
+                        type: 'attendance',
+                        sessionId: sessionId,
+                        studentId: metadata.studentId || this.sdk.nodeId,
+                        walletAddress: this.sdk.nodeId,
+                        nodeName: nodeName || metadata.nodeName || null,
+                        timestamp: metadata.timestamp || event.timestamp,
+                        status: verified ? AttendanceApp.STATUS.VERIFIED : AttendanceApp.STATUS.REJECTED,
+                        verifiedBy: latest.sender,
+                        verifiedAt: latest.timestamp,
+                        owner: this.sdk.nodeId,
+                        _reconstructed: true
+                    };
+                    
+                    await this.store.put(recordId, record);
+                    console.log(`📥 [getMyAttendanceHistory] Reconstructed record with verification: ${record.status}`);
+                }
+            }
             
             if (record) {
                 history.push({

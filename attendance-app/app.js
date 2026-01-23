@@ -1046,7 +1046,11 @@ class AttendanceAppUI {
         html += '<ul>';
 
         for (const attendee of attendees) {
-            html += `<li>${attendee.studentId} - <span class="badge ${attendee.status.toLowerCase()}">${attendee.status}</span></li>`;
+            const displayName = attendee.nodeName || attendee.walletAddress || 'Unknown';
+            const studentIdDisplay = attendee.studentId && attendee.studentId !== attendee.walletAddress 
+                ? ` (${attendee.studentId})` 
+                : '';
+            html += `<li>${displayName}${studentIdDisplay} - <span class="badge ${attendee.status.toLowerCase()}">${attendee.status}</span></li>`;
         }
 
         html += '</ul>';
