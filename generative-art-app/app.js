@@ -648,8 +648,32 @@ class GenerativeArtAppUI {
             // Show loading
             this.showFullRenderModal(null, piece.projectTitle || 'Art Piece', true);
             
-            // Generate render
-            const imageUrl = await this.artApp.generatePreview(piece.projectId, piece.seed);
+            // Generate render - use _executeCode directly if generatePreview doesn't exist
+            let imageUrl;
+            if (typeof this.artApp.generatePreview === 'function') {
+                imageUrl = await this.artApp.generatePreview(piece.projectId, piece.seed);
+            } else {
+                // Fallback: execute code directly
+                const params = {
+                    seed: piece.seed || `piece_${piece.id}_${Date.now()}`,
+                    ...project.parameters
+                };
+                
+                const generateFunction = new Function('params', `
+                    ${project.code}
+                    return typeof generate === 'function' ? generate(params) : null;
+                `);
+                
+                const result = generateFunction(params);
+                
+                if (typeof result === 'string' && result.startsWith('data:image')) {
+                    imageUrl = result;
+                } else if (result && result.nodeName === 'CANVAS') {
+                    imageUrl = result.toDataURL('image/png');
+                } else {
+                    throw new Error('Code did not return a valid image');
+                }
+            }
             
             if (imageUrl) {
                 // Update piece with generated image
@@ -678,8 +702,38 @@ class GenerativeArtAppUI {
             // Show loading
             this.showFullRenderModal(null, project.title, true);
             
-            // Generate fresh render
-            const imageUrl = await this.artApp.generatePreview(projectId);
+            // Generate fresh render - use _executeCode directly if generatePreview doesn't exist
+            let imageUrl;
+            console.log('🔍 Checking generatePreview method:', typeof this.artApp.generatePreview);
+            console.log('🔍 ArtApp methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(this.artApp)));
+            
+            if (typeof this.artApp.generatePreview === 'function') {
+                console.log('✅ Using generatePreview method');
+                imageUrl = await this.artApp.generatePreview(projectId);
+            } else {
+                console.log('⚠️ generatePreview not found, using fallback');
+                // Fallback: execute code directly
+                const params = {
+                    seed: `preview_${projectId}_${Date.now()}`,
+                    ...project.parameters
+                };
+                
+                // Use the internal _executeCode method
+                const generateFunction = new Function('params', `
+                    ${project.code}
+                    return typeof generate === 'function' ? generate(params) : null;
+                `);
+                
+                const result = generateFunction(params);
+                
+                if (typeof result === 'string' && result.startsWith('data:image')) {
+                    imageUrl = result;
+                } else if (result && result.nodeName === 'CANVAS') {
+                    imageUrl = result.toDataURL('image/png');
+                } else {
+                    throw new Error('Code did not return a valid image');
+                }
+            }
             
             if (imageUrl) {
                 this.showFullRenderModal(imageUrl, project.title);
