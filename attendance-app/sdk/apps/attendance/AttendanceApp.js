@@ -573,6 +573,29 @@ class AttendanceApp {
         // Get student ID if registered
         const studentId = this.getStudentId() || this.sdk.nodeId;
         
+        // Get node name from chain (for metadata and local record)
+        let nodeName = null;
+        if (this.sdk.chain) {
+            try {
+                const nodes = this.sdk.chain.buildNodeMap();
+                const node = nodes[this.sdk.nodeId];
+                if (node && node.name) {
+                    nodeName = node.name;
+                    console.log(`📝 [markAttendance] Found node name from chain: ${nodeName} for ${this.sdk.nodeId}`);
+                } else {
+                    // Also check institutions
+                    const institutions = this.sdk.chain.getInstitutions();
+                    const institution = institutions.verified?.[this.sdk.nodeId];
+                    if (institution && institution.name) {
+                        nodeName = institution.name;
+                        console.log(`📝 [markAttendance] Found institution name from chain: ${nodeName} for ${this.sdk.nodeId}`);
+                    }
+                }
+            } catch (error) {
+                console.warn(`⚠️ [markAttendance] Error getting node name from chain:`, error);
+            }
+        }
+        
         // Full attendance data (OFF-CHAIN)
         const attendanceData = {
             id: recordId,
@@ -580,6 +603,7 @@ class AttendanceApp {
             sessionId: sessionId,
             studentId: studentId, // Use registered student ID if available
             walletAddress: this.sdk.nodeId,
+            nodeName: nodeName || null, // Node name from chain
             timestamp: Date.now(),
             location: options.location || null,
             distanceFromVenue: distanceFromVenue,
