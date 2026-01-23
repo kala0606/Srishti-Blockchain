@@ -108,13 +108,13 @@ class AttendanceAppUI {
                         console.warn('⚠️ Session token in URL but invalid. Not redirecting to prevent loop.');
                         this.updateStatus('disconnected', '⚠️ Invalid session token. Please log in to the main blockchain app first.');
                         document.getElementById('userInfo').innerHTML = `
-                            <div style="background: #fff3cd; padding: 16px; border-radius: 8px; margin-top: 10px;">
-                                <strong>🔐 Login Required</strong><br>
-                                Your session token is invalid or expired.<br>
-                                <a href="${window.SRISHTI_BLOCKCHAIN_URL || 'https://kala0606.github.io/Srishti-Blockchain/'}" target="_blank" style="color: #667eea; text-decoration: underline;">
+                            <div style="background: rgba(251, 191, 36, 0.15); border: 1px solid rgba(251, 191, 36, 0.3); padding: 20px; border-radius: 16px; margin-top: 16px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);">
+                                <strong style="color: #fbbf24;">🔐 Login Required</strong><br>
+                                <span style="color: rgba(255, 255, 255, 0.8);">Your session token is invalid or expired.</span><br>
+                                <a href="${window.SRISHTI_BLOCKCHAIN_URL || 'https://kala0606.github.io/Srishti-Blockchain/'}" target="_blank" style="color: #ffffff; text-decoration: underline; margin-top: 8px; display: inline-block;">
                                     Click here to log in to the blockchain →
                                 </a>
-                                <br><small>After logging in, return to this page.</small>
+                                <br><small style="color: rgba(255, 255, 255, 0.6);">After logging in, return to this page.</small>
                             </div>
                         `;
                         this.initialized = false;
@@ -126,10 +126,10 @@ class AttendanceAppUI {
                         console.error('❌ Too many redirect attempts. Stopping to prevent infinite loop.');
                         this.updateStatus('disconnected', '⚠️ Authentication failed. Too many redirect attempts.');
                         document.getElementById('userInfo').innerHTML = `
-                            <div style="background: #ffebee; padding: 16px; border-radius: 8px; margin-top: 10px;">
-                                <strong>⚠️ Redirect Loop Detected</strong><br>
-                                Please clear your browser data and try again, or log in to the main blockchain app first.<br>
-                                <a href="${window.SRISHTI_BLOCKCHAIN_URL || 'https://kala0606.github.io/Srishti-Blockchain/'}" target="_blank" style="color: #667eea; text-decoration: underline;">
+                            <div style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); padding: 20px; border-radius: 16px; margin-top: 16px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);">
+                                <strong style="color: #ef4444;">⚠️ Redirect Loop Detected</strong><br>
+                                <span style="color: rgba(255, 255, 255, 0.8);">Please clear your browser data and try again, or log in to the main blockchain app first.</span><br>
+                                <a href="${window.SRISHTI_BLOCKCHAIN_URL || 'https://kala0606.github.io/Srishti-Blockchain/'}" target="_blank" style="color: #ffffff; text-decoration: underline; margin-top: 8px; display: inline-block;">
                                     Go to Blockchain App →
                                 </a>
                             </div>
@@ -454,7 +454,8 @@ class AttendanceAppUI {
             await this.loadSessions();
 
             // Switch to sessions tab
-            showTab('sessions');
+            const sessionsTab = document.querySelector('.tab[onclick*="sessions"]');
+            showTab('sessions', sessionsTab);
         } catch (error) {
             errorEl.innerHTML = `<div class="error">❌ ${error.message}</div>`;
         }
@@ -716,20 +717,29 @@ class AttendanceAppUI {
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0,0,0,0.8);
+            background: rgba(5, 5, 16, 0.8);
             display: flex;
             align-items: center;
             justify-content: center;
             z-index: 10000;
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
         `;
         
         const content = document.createElement('div');
         content.style.cssText = `
-            background: white;
-            padding: 24px;
-            border-radius: 12px;
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.03) 100%);
+            backdrop-filter: blur(40px);
+            -webkit-backdrop-filter: blur(40px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            padding: 40px;
+            border-radius: 32px;
             max-width: 400px;
+            width: 90%;
             text-align: center;
+            box-shadow: 
+                0 24px 80px rgba(0, 0, 0, 0.5),
+                inset 0 1px 0 rgba(255, 255, 255, 0.1);
         `;
         
         const qrContainer = document.createElement('div');
@@ -738,32 +748,46 @@ class AttendanceAppUI {
             width: 300px;
             height: 300px;
             margin: 20px auto;
-            background: white;
-            border: 2px solid #667eea;
-            border-radius: 8px;
-            padding: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            padding: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         `;
         
         content.innerHTML = `
-            <h3>📱 Attendance QR Code</h3>
-            <p style="color: #666; margin-bottom: 16px;">Students scan this code to mark attendance</p>
-            <p style="color: #999; font-size: 0.9em;">QR code refreshes every 10 seconds</p>
+            <h3 style="font-family: 'Syne', sans-serif; color: var(--text-primary); margin-bottom: 12px; font-size: 1.6em; font-weight: 700;">📱 Attendance QR Code</h3>
+            <p style="color: var(--text-secondary); margin-bottom: 16px;">Students scan this code to mark attendance</p>
+            <p style="color: rgba(255, 255, 255, 0.5); font-size: 0.9em;">QR code refreshes every 10 seconds</p>
         `;
         content.appendChild(qrContainer);
         
         const closeBtn = document.createElement('button');
         closeBtn.textContent = 'Close';
         closeBtn.style.cssText = `
-            margin-top: 16px;
-            padding: 8px 24px;
-            background: #667eea;
-            color: white;
+            margin-top: 24px;
+            padding: 14px 32px;
+            background: var(--text-primary);
+            color: #000;
             border: none;
-            border-radius: 6px;
+            border-radius: 50px;
             cursor: pointer;
+            font-weight: 600;
+            font-family: 'Outfit', sans-serif;
+            transition: all 0.3s ease;
         `;
         closeBtn.onclick = () => {
             document.body.removeChild(modal);
+        };
+        closeBtn.onmouseenter = () => {
+            closeBtn.style.transform = 'translateY(-2px)';
+            closeBtn.style.boxShadow = '0 8px 24px rgba(0, 0, 0, 0.3)';
+        };
+        closeBtn.onmouseleave = () => {
+            closeBtn.style.transform = 'translateY(0)';
+            closeBtn.style.boxShadow = 'none';
         };
         content.appendChild(closeBtn);
         
@@ -793,7 +817,7 @@ class AttendanceAppUI {
     }
     
     async generateQRVisual(container, qrData) {
-        container.innerHTML = '<div style="padding: 20px; text-align: center;">Generating QR code...</div>';
+        container.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary);">Generating QR code...</div>';
         
         try {
             // Try qrcodejs library (simple constructor API)
@@ -856,12 +880,12 @@ class AttendanceAppUI {
             const escapedData = qrData.replace(/'/g, "\\'").replace(/"/g, '&quot;');
             container.innerHTML = `
                 <div style="padding: 20px; text-align: center;">
-                    <p style="color: #666; margin-bottom: 10px;">QR Code Library not available</p>
-                    <textarea readonly id="qr-data-text" style="width: 100%; height: 100px; padding: 10px; font-size: 0.8em; border: 1px solid #ddd; border-radius: 4px; font-family: monospace;">${escapedData}</textarea>
-                    <button onclick="navigator.clipboard.writeText(document.getElementById('qr-data-text').value).then(() => alert('Copied!'))" style="margin-top: 10px; padding: 8px 16px; background: #667eea; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                    <p style="color: var(--text-secondary); margin-bottom: 12px;">QR Code Library not available</p>
+                    <textarea readonly id="qr-data-text" style="width: 100%; height: 100px; padding: 12px; font-size: 0.85em; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; font-family: monospace; background: rgba(255, 255, 255, 0.05); color: var(--text-primary); resize: none;">${escapedData}</textarea>
+                    <button onclick="navigator.clipboard.writeText(document.getElementById('qr-data-text').value).then(() => alert('Copied!'))" style="margin-top: 12px; padding: 12px 24px; background: var(--text-primary); color: #000; border: none; border-radius: 50px; cursor: pointer; font-weight: 600; font-family: 'Outfit', sans-serif;">
                         Copy QR Data
                     </button>
-                    <p style="color: #999; font-size: 0.8em; margin-top: 10px;">Students can paste this data to mark attendance</p>
+                    <p style="color: rgba(255, 255, 255, 0.5); font-size: 0.8em; margin-top: 12px;">Students can paste this data to mark attendance</p>
                 </div>
             `;
         }
@@ -939,10 +963,10 @@ class AttendanceAppUI {
             if (studentId) {
                 currentEl.innerHTML = `<strong>${studentId}</strong> (Wallet: ${this.sdk.nodeId})`;
             } else {
-                currentEl.innerHTML = '<em>No student ID registered</em>';
+                currentEl.innerHTML = '<em style="color: var(--text-secondary);">No student ID registered</em>';
             }
         } catch (error) {
-            currentEl.innerHTML = `<span style="color: red;">Error: ${error.message}</span>`;
+            currentEl.innerHTML = `<span style="color: #ef4444;">Error: ${error.message}</span>`;
         }
     }
 
@@ -1060,7 +1084,7 @@ class AttendanceAppUI {
 }
 
 // Global functions
-function showTab(tabName) {
+function showTab(tabName, clickedElement) {
     // Hide all tabs
     document.querySelectorAll('.tab-content').forEach(tab => {
         tab.classList.remove('active');
@@ -1070,8 +1094,30 @@ function showTab(tabName) {
     });
 
     // Show selected tab
-    document.getElementById(tabName).classList.add('active');
-    event.target.classList.add('active');
+    const tabContent = document.getElementById(tabName);
+    if (tabContent) {
+        tabContent.classList.add('active');
+    }
+    
+    // Activate the clicked tab button
+    if (clickedElement) {
+        clickedElement.classList.add('active');
+    } else {
+        // Fallback: find tab by text content
+        document.querySelectorAll('.tab').forEach(tab => {
+            const tabText = tab.textContent.toLowerCase().trim();
+            const tabNameLower = tabName.toLowerCase();
+            if (tabText.includes(tabNameLower) || 
+                (tabNameLower === 'sessions' && tabText.includes('my sessions')) ||
+                (tabNameLower === 'create' && tabText.includes('create')) ||
+                (tabNameLower === 'attend' && tabText.includes('mark attendance')) ||
+                (tabNameLower === 'register' && tabText.includes('register')) ||
+                (tabNameLower === 'history' && tabText.includes('history')) ||
+                (tabNameLower === 'certificates' && tabText.includes('certificates'))) {
+                tab.classList.add('active');
+            }
+        });
+    }
 }
 
 // Initialize app when blockchain is ready
