@@ -1,70 +1,71 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Srishti Attendance - Decentralized Attendance Management</title>
-    
+
     <style>
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
-        
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             padding: 20px;
         }
-        
+
         .container {
             max-width: 1200px;
             margin: 0 auto;
         }
-        
+
         header {
             background: white;
             border-radius: 12px;
             padding: 20px;
             margin-bottom: 20px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         }
-        
+
         h1 {
             color: #667eea;
             margin-bottom: 10px;
         }
-        
+
         .status {
             padding: 10px;
             border-radius: 8px;
             margin: 10px 0;
             font-weight: 500;
         }
-        
+
         .status.connected {
             background: #d4edda;
             color: #155724;
         }
-        
+
         .status.disconnected {
             background: #f8d7da;
             color: #721c24;
         }
-        
+
         .status.loading {
             background: #fff3cd;
             color: #856404;
         }
-        
+
         .tabs {
             display: flex;
             gap: 10px;
             margin-bottom: 20px;
         }
-        
+
         .tab {
             background: white;
             border: none;
@@ -75,37 +76,39 @@
             color: #666;
             transition: all 0.3s;
         }
-        
+
         .tab.active {
             background: white;
             color: #667eea;
             border-bottom: 3px solid #667eea;
         }
-        
+
         .tab-content {
             display: none;
             background: white;
             border-radius: 12px;
             padding: 24px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         }
-        
+
         .tab-content.active {
             display: block;
         }
-        
+
         .form-group {
             margin-bottom: 20px;
         }
-        
+
         label {
             display: block;
             margin-bottom: 8px;
             color: #333;
             font-weight: 500;
         }
-        
-        input, textarea, select {
+
+        input,
+        textarea,
+        select {
             width: 100%;
             padding: 12px;
             border: 2px solid #e0e0e0;
@@ -113,12 +116,14 @@
             font-size: 14px;
             transition: border-color 0.3s;
         }
-        
-        input:focus, textarea:focus, select:focus {
+
+        input:focus,
+        textarea:focus,
+        select:focus {
             outline: none;
             border-color: #667eea;
         }
-        
+
         button {
             background: #667eea;
             color: white;
@@ -130,49 +135,49 @@
             cursor: pointer;
             transition: background 0.3s;
         }
-        
+
         button:hover {
             background: #5568d3;
         }
-        
+
         button:disabled {
             background: #ccc;
             cursor: not-allowed;
         }
-        
+
         .btn-secondary {
             background: #6c757d;
         }
-        
+
         .btn-secondary:hover {
             background: #5a6268;
         }
-        
+
         .btn-danger {
             background: #dc3545;
         }
-        
+
         .btn-danger:hover {
             background: #c82333;
         }
-        
+
         .card {
             background: #f8f9fa;
             border-radius: 8px;
             padding: 16px;
             margin-bottom: 16px;
         }
-        
+
         .card h3 {
             color: #333;
             margin-bottom: 8px;
         }
-        
+
         .card p {
             color: #666;
             margin-bottom: 4px;
         }
-        
+
         .badge {
             display: inline-block;
             padding: 4px 8px;
@@ -181,39 +186,39 @@
             font-weight: 500;
             margin-left: 8px;
         }
-        
+
         .badge.active {
             background: #d4edda;
             color: #155724;
         }
-        
+
         .badge.ended {
             background: #f8d7da;
             color: #721c24;
         }
-        
+
         .badge.pending {
             background: #fff3cd;
             color: #856404;
         }
-        
+
         .badge.verified {
             background: #d1ecf1;
             color: #0c5460;
         }
-        
+
         .grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
             gap: 20px;
         }
-        
+
         .loading {
             text-align: center;
             padding: 40px;
             color: #666;
         }
-        
+
         .error {
             background: #f8d7da;
             color: #721c24;
@@ -221,7 +226,7 @@
             border-radius: 8px;
             margin-bottom: 16px;
         }
-        
+
         .success {
             background: #d4edda;
             color: #155724;
@@ -229,28 +234,28 @@
             border-radius: 8px;
             margin-bottom: 16px;
         }
-        
+
         .location-input {
             display: flex;
             gap: 10px;
         }
-        
+
         .location-input input {
             flex: 1;
         }
-        
+
         .actions {
             display: flex;
             gap: 10px;
             margin-top: 12px;
         }
-        
+
         .empty-state {
             text-align: center;
             padding: 60px 20px;
             color: #999;
         }
-        
+
         .empty-state svg {
             width: 64px;
             height: 64px;
@@ -259,6 +264,7 @@
         }
     </style>
 </head>
+
 <body>
     <div class="container">
         <header>
@@ -267,7 +273,7 @@
             <div id="status" class="status loading">Connecting to blockchain...</div>
             <div id="userInfo" style="margin-top: 10px; color: #666;"></div>
         </header>
-        
+
         <div class="tabs">
             <button class="tab active" onclick="showTab('sessions')">My Sessions</button>
             <button class="tab" onclick="showTab('create')">Create Session</button>
@@ -276,13 +282,13 @@
             <button class="tab" onclick="showTab('history')">My History</button>
             <button class="tab" onclick="showTab('certificates')">Certificates</button>
         </div>
-        
+
         <!-- My Sessions Tab -->
         <div id="sessions" class="tab-content active">
             <h2>My Sessions</h2>
             <div id="sessionsList" class="loading">Loading sessions...</div>
         </div>
-        
+
         <!-- Create Session Tab -->
         <div id="create" class="tab-content">
             <h2>Create Attendance Session</h2>
@@ -318,7 +324,7 @@
                 <button type="submit">Create Session</button>
             </form>
         </div>
-        
+
         <!-- Mark Attendance Tab -->
         <div id="attend" class="tab-content">
             <h2>Mark Attendance</h2>
@@ -333,13 +339,14 @@
                     font-size: 0.9em;
                 ">🔄 Refresh Sessions</button>
                 <small style="display: block; margin-top: 8px; color: #666;">
-                    Sessions are discovered from the blockchain. If you don't see a session, wait a few seconds for the chain to sync, then refresh.
+                    Sessions are discovered from the blockchain. If you don't see a session, wait a few seconds for the
+                    chain to sync, then refresh.
                 </small>
             </div>
             <div id="attendError"></div>
             <div id="activeSessionsList" class="loading">Loading active sessions...</div>
         </div>
-        
+
         <!-- Register Student ID Tab -->
         <div id="register" class="tab-content">
             <h2>Register Student ID</h2>
@@ -357,25 +364,26 @@
                 </div>
                 <button type="submit">Register Student ID</button>
             </form>
-            <div id="currentRegistration" style="margin-top: 20px; padding: 16px; background: #f8f9fa; border-radius: 8px;">
+            <div id="currentRegistration"
+                style="margin-top: 20px; padding: 16px; background: #f8f9fa; border-radius: 8px;">
                 <strong>Current Registration:</strong>
                 <div id="currentStudentId" style="margin-top: 8px; color: #666;">Loading...</div>
             </div>
         </div>
-        
+
         <!-- My History Tab -->
         <div id="history" class="tab-content">
             <h2>My Attendance History</h2>
             <div id="historyList" class="loading">Loading history...</div>
         </div>
-        
+
         <!-- Certificates Tab -->
         <div id="certificates" class="tab-content">
             <h2>My Attendance Certificates</h2>
             <div id="certificatesList" class="loading">Loading certificates...</div>
         </div>
     </div>
-    
+
     <!-- Load blockchain from parent directory or CDN -->
     <!-- Option 1: Load from parent directory (if hosting together) -->
     <!-- Option 2: Load from your GitHub Pages deployment -->
@@ -383,21 +391,21 @@
         // ═══════════════════════════════════════════════════════════════════
         // CONFIGURATION: Set your Srishti blockchain URL
         // ═══════════════════════════════════════════════════════════════════
-        
+
         // Option A: Load from parent directory (if hosting together)
         //const SRISHTI_BLOCKCHAIN_URL = '../';
-        
+
         // Option B: Load from GitHub Pages deployment (uncomment and set your URL)
         const SRISHTI_BLOCKCHAIN_URL = 'https://kala0606.github.io/Srishti-Blockchain/';
         window.SRISHTI_BLOCKCHAIN_URL = SRISHTI_BLOCKCHAIN_URL; // Make available globally
-        
+
         // Option C: Load from CDN (if you publish blockchain to a CDN)
         // const SRISHTI_BLOCKCHAIN_URL = 'https://cdn.example.com/srishti-blockchain/';
-        
+
         // ═══════════════════════════════════════════════════════════════════
         // Load blockchain core scripts
         // ═══════════════════════════════════════════════════════════════════
-        
+
         const scripts = [
             'src/core/Hasher.js',
             'src/core/Event.js',
@@ -419,7 +427,7 @@
             'src/ui/BlockchainAdapter.js',  // Required for SrishtiApp.init()
             'config.js'
         ];
-        
+
         function loadScript(src, baseUrl = null) {
             return new Promise((resolve, reject) => {
                 const script = document.createElement('script');
@@ -430,37 +438,37 @@
                 document.head.appendChild(script);
             });
         }
-        
+
         // Load all scripts sequentially
         async function loadBlockchain() {
             try {
                 console.log('📦 Loading blockchain from:', SRISHTI_BLOCKCHAIN_URL);
-                
+
                 for (const src of scripts) {
                     await loadScript(src);
                 }
-                
+
                 // Load auth scripts (for session token authentication)
                 const authScripts = [
                     'src/auth/SessionAuth.js',
                     'src/auth/WalletProvider.js',
                     'src/auth/dAppAuth.js'
                 ];
-                
+
                 for (const src of authScripts) {
                     await loadScript(src);
                 }
-                
+
                 // Load SDK files from main blockchain repo
                 const sdkScripts = [
                     'sdk/SrishtiSDK.js',
                     'sdk/AppDataStore.js'
                 ];
-                
+
                 for (const src of sdkScripts) {
                     await loadScript(src); // Load from main blockchain repo (SRISHTI_BLOCKCHAIN_URL)
                 }
-                
+
                 // Load QR Scanner (same as main app)
                 // Ensure html5-qrcode is loaded first (it's loaded in body, but verify)
                 if (typeof Html5Qrcode === 'undefined') {
@@ -476,40 +484,40 @@
                 }
                 await loadScript('docs/qr-scanner-blockchain.js'); // Load from main blockchain repo
                 console.log('✅ QR Scanner loaded');
-                
+
                 // Load attendance app files from local directory (relative to attendance-app folder)
                 const attendanceScripts = [
                     'sdk/apps/attendance/AttendanceQRCode.js',
                     'sdk/apps/attendance/AttendanceApp.js'
                 ];
-                
+
                 for (const src of attendanceScripts) {
                     await loadScript(src, './'); // Load from local attendance-app directory
                 }
-                
+
                 // Load main app.js (creates SrishtiApp instance)
                 await loadScript('app.js');
-                
+
                 // Wait for SrishtiApp instance to be created and initialized
                 let retries = 0;
                 while ((!window.SrishtiApp || !window.SrishtiApp.initialized) && retries < 50) {
                     await new Promise(resolve => setTimeout(resolve, 100));
                     retries++;
                 }
-                
+
                 if (!window.SrishtiApp) {
                     throw new Error('SrishtiApp instance not found. Check if app.js loaded correctly.');
                 }
-                
+
                 // Use the existing instance (main app.js creates it)
                 window.srishtiAppInstance = window.SrishtiApp;
-                
+
                 // Ensure it's initialized
                 if (!window.srishtiAppInstance.initialized) {
                     console.log('⚠️ SrishtiApp not initialized, waiting...');
                     await new Promise(resolve => setTimeout(resolve, 2000));
                 }
-                
+
                 console.log('✅ Blockchain loaded and initialized');
             } catch (error) {
                 console.error('❌ Failed to load blockchain:', error);
@@ -517,55 +525,28 @@
                 document.getElementById('status').textContent = `Failed to connect: ${error.message}`;
             }
         }
-        
+
         loadBlockchain();
     </script>
-    
+
     <!-- QR Code Libraries -->
-    <!-- For generating QR codes -->
-    <script src="https://unpkg.com/qrcode@1.5.3/build/qrcode.min.js"></script>
+    <!-- For generating QR codes (same as main app) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <!-- For scanning QR codes (same as main app) -->
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     <script>
-        // Verify QRCode library loaded and create compatibility wrapper
+        // Verify QRCode library loaded
         window.addEventListener('load', () => {
             if (typeof QRCode !== 'undefined') {
-                console.log('✅ QRCode library loaded');
-                
-                // If it's the modern library without constructor, create a wrapper
-                if (!QRCode.CorrectLevel && QRCode.toCanvas) {
-                    // Create a compatibility wrapper for the constructor API
-                    const QRCodeWrapper = function(container, options) {
-                        const canvas = document.createElement('canvas');
-                        container.appendChild(canvas);
-                        
-                        QRCode.toCanvas(canvas, options.text, {
-                            width: options.width || 280,
-                            margin: 2,
-                            color: {
-                                dark: options.colorDark || '#000000',
-                                light: options.colorLight || '#ffffff'
-                            }
-                        }).catch(err => {
-                            console.error('QR code generation failed:', err);
-                            container.innerHTML = '<p style="color: red;">QR code generation failed</p>';
-                        });
-                    };
-                    
-                    // Add CorrectLevel enum
-                    QRCodeWrapper.CorrectLevel = { L: 0, M: 1, Q: 2, H: 3 };
-                    
-                    // Replace global QRCode with wrapper
-                    window.QRCode = QRCodeWrapper;
-                    console.log('✅ Created QRCode compatibility wrapper');
-                }
+                console.log('✅ QRCode library loaded (qrcodejs)');
             } else {
                 console.warn('⚠️ QRCode library not loaded - QR codes will use fallback');
             }
         });
     </script>
-    
+
     <!-- Attendance App UI (loaded after blockchain is ready) -->
     <script src="app.js"></script>
 </body>
+
 </html>

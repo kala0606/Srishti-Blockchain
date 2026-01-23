@@ -413,7 +413,9 @@ class BIP39 {
 
                 // Get public key from private key (deterministic)
                 // This returns a Promise in newer versions of @noble/ed25519
+                console.log('🔑 Calling getPublicKey with', privateKey32.length, 'bytes');
                 const publicKeyBytesResult = await Promise.resolve(ed25519Lib.getPublicKey(privateKey32));
+                console.log('📦 getPublicKey result:', typeof publicKeyBytesResult, publicKeyBytesResult instanceof Uint8Array, publicKeyBytesResult?.length);
 
                 // Ensure publicKeyBytes is a Uint8Array
                 let publicKeyBytesArray;
@@ -711,7 +713,8 @@ class BIP39 {
 
         for (let i = 0; i < bytes.length; i += chunkSize) {
             const chunk = bytes.slice(i, i + chunkSize);
-            result += String.fromCharCode.apply(null, chunk);
+            // Convert Uint8Array to regular array for apply
+            result += String.fromCharCode.apply(null, Array.from(chunk));
         }
 
         return btoa(result);

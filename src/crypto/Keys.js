@@ -19,10 +19,10 @@ class KeyManager {
             true, // extractable
             ['sign', 'verify']
         );
-        
+
         return keyPair;
     }
-    
+
     /**
      * Export public key to raw bytes
      * @param {CryptoKey} publicKey
@@ -31,7 +31,7 @@ class KeyManager {
     static async exportPublicKey(publicKey) {
         return await crypto.subtle.exportKey('raw', publicKey);
     }
-    
+
     /**
      * Export public key to base64 string
      * @param {CryptoKey} publicKey
@@ -42,19 +42,27 @@ class KeyManager {
         const base64 = btoa(String.fromCharCode(...new Uint8Array(raw)));
         return base64;
     }
-    
+
     /**
      * Import public key from base64
      * @param {string} base64Key
      * @returns {Promise<CryptoKey>}
      */
     static async importPublicKey(base64Key) {
+        console.log('🔑 importPublicKey: base64 length', base64Key.length);
         const binary = atob(base64Key);
+        console.log('📦 importPublicKey: binary length', binary.length);
         const bytes = new Uint8Array(binary.length);
         for (let i = 0; i < binary.length; i++) {
             bytes[i] = binary.charCodeAt(i);
         }
-        
+        console.log('🔍 importPublicKey: bytes length', bytes.length, 'bytes');
+
+        if (bytes.length !== 32) {
+            console.error('❌ Invalid public key length:', bytes.length, 'bytes (expected 32)');
+            throw new Error(`Invalid Ed25519 public key length: ${bytes.length} bytes (expected 32)`);
+        }
+
         return await crypto.subtle.importKey(
             'raw',
             bytes,
@@ -66,7 +74,7 @@ class KeyManager {
             ['verify']
         );
     }
-    
+
     /**
      * Export private key to base64 (for storage)
      * @param {CryptoKey} privateKey
@@ -77,7 +85,7 @@ class KeyManager {
         const base64 = btoa(String.fromCharCode(...new Uint8Array(raw)));
         return base64;
     }
-    
+
     /**
      * Import private key from base64
      * @param {string} base64Key
@@ -89,7 +97,7 @@ class KeyManager {
         for (let i = 0; i < binary.length; i++) {
             bytes[i] = binary.charCodeAt(i);
         }
-        
+
         return await crypto.subtle.importKey(
             'pkcs8',
             bytes,
@@ -101,7 +109,7 @@ class KeyManager {
             ['sign']
         );
     }
-    
+
     /**
      * Sign data with private key
      * @param {CryptoKey} privateKey
@@ -112,17 +120,17 @@ class KeyManager {
         const dataString = typeof data === 'string' ? data : JSON.stringify(data);
         const encoder = new TextEncoder();
         const dataBuffer = encoder.encode(dataString);
-        
+
         const signature = await crypto.subtle.sign(
             'Ed25519',
             privateKey,
             dataBuffer
         );
-        
+
         const base64 = btoa(String.fromCharCode(...new Uint8Array(signature)));
         return base64;
     }
-    
+
     /**
      * Verify signature with public key
      * @param {CryptoKey} publicKey
@@ -134,13 +142,13 @@ class KeyManager {
         const dataString = typeof data === 'string' ? data : JSON.stringify(data);
         const encoder = new TextEncoder();
         const dataBuffer = encoder.encode(dataString);
-        
+
         const binary = atob(signature);
         const signatureBytes = new Uint8Array(binary.length);
         for (let i = 0; i < binary.length; i++) {
             signatureBytes[i] = binary.charCodeAt(i);
         }
-        
+
         try {
             return await crypto.subtle.verify(
                 'Ed25519',
@@ -152,7 +160,7 @@ class KeyManager {
             return false;
         }
     }
-    
+
     /**
      * Generate a node ID from public key (deterministic)
      * @param {CryptoKey} publicKey
