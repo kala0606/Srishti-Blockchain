@@ -365,9 +365,31 @@ class GenerativeArtAppUI {
             projectsEl.innerHTML = '<div class="gallery"></div>';
             const gallery = projectsEl.querySelector('.gallery');
 
+            // Generate thumbnails for projects that don't have them
             for (const project of projects) {
                 const card = this.createProjectCard(project);
                 gallery.appendChild(card);
+                
+                // Generate thumbnail in background if missing
+                if (!project.thumbnailUrl && project.code) {
+                    this.artApp.getProject(project.id, true).then(updatedProject => {
+                        if (updatedProject && updatedProject.thumbnailUrl) {
+                            // Update the card with the new thumbnail
+                            const img = card.querySelector('.art-image img');
+                            if (img) {
+                                img.src = updatedProject.thumbnailUrl;
+                            } else {
+                                // Replace emoji with image
+                                const artImage = card.querySelector('.art-image');
+                                if (artImage) {
+                                    artImage.innerHTML = `<img src="${updatedProject.thumbnailUrl}" alt="${updatedProject.title}" style="width: 100%; height: 100%; object-fit: cover;">`;
+                                }
+                            }
+                        }
+                    }).catch(err => 
+                        console.warn('Failed to generate thumbnail for project:', project.id, err)
+                    );
+                }
             }
         } catch (error) {
             console.error('Failed to load projects:', error);

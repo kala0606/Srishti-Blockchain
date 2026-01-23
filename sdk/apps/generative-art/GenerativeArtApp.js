@@ -94,15 +94,29 @@ class GenerativeArtApp {
         for (const event of projectEvents) {
             const projectId = event.payload.ref;
             const existing = await this.store.get(projectId);
+            
+            // Extract code and parameters from on-chain metadata
+            const codeFromChain = event.payload.metadata?.code || null;
+            let parametersFromChain = {};
+            try {
+                if (event.payload.metadata?.parameters) {
+                    parametersFromChain = typeof event.payload.metadata.parameters === 'string' 
+                        ? JSON.parse(event.payload.metadata.parameters)
+                        : event.payload.metadata.parameters;
+                }
+            } catch (e) {
+                console.warn('Failed to parse parameters from chain:', e);
+            }
+            
             if (!existing) {
-                // Project exists on-chain but not locally - reconstruct basic info
+                // Project exists on-chain but not locally - reconstruct from chain
                 const project = {
                     id: projectId,
                     type: 'project',
                     title: event.payload.metadata?.title || 'Unknown Project',
                     description: '',
-                    code: null, // Code not stored on-chain
-                    parameters: {},
+                    code: codeFromChain, // Extract code from on-chain metadata
+                    parameters: parametersFromChain,
                     maxSupply: event.payload.metadata?.maxSupply || null,
                     mintPrice: event.payload.metadata?.mintPrice || 0,
                     artistId: event.sender,
@@ -110,26 +124,68 @@ class GenerativeArtApp {
                     createdAt: event.timestamp,
                     pieceCount: 0,
                     status: GenerativeArtApp.PROJECT_STATUS.DRAFT, // Default to DRAFT when reconstructing
-                    thumbnailUrl: null // Thumbnail stored in local store, not on-chain
+                    thumbnailUrl: null // Will be generated below if code exists
                 };
+                
+                // Generate thumbnail if code is available
+                if (codeFromChain) {
+                    try {
+                        console.log('🎨 Generating thumbnail from on-chain code for project:', projectId);
+                        const thumbnailUrl = await this._executeCode(codeFromChain, {
+                            seed: `preview_${projectId}`,
+                            ...parametersFromChain
+                        });
+                        if (thumbnailUrl) {
+                            project.thumbnailUrl = thumbnailUrl;
+                            console.log('✅ Thumbnail generated from on-chain code');
+                        }
+                    } catch (error) {
+                        console.warn('Failed to generate thumbnail from on-chain code:', projectId, error);
+                    }
+                }
+                
                 await this.store.put(projectId, project);
             } else {
-                // Update existing project with any missing thumbnail from local store
-                // (thumbnail is stored locally, not reconstructed from chain)
-                if (!existing.thumbnailUrl && existing.code) {
-                    // Try to regenerate thumbnail if code exists
+                // Update existing project: ensure code and parameters are synced from chain
+                let needsUpdate = false;
+                
+                // Update code from chain if missing locally
+                if (!existing.code && codeFromChain) {
+                    existing.code = codeFromChain;
+                    needsUpdate = true;
+                }
+                
+                // Update parameters from chain if missing locally
+                if (Object.keys(existing.parameters || {}).length === 0 && Object.keys(parametersFromChain).length > 0) {
+                    existing.parameters = parametersFromChain;
+                    needsUpdate = true;
+                }
+                
+                // Generate thumbnail if code exists but thumbnail is missing
+                if (!existing.thumbnailUrl && (existing.code || codeFromChain)) {
+                    const codeToUse = existing.code || codeFromChain;
+                    const paramsToUse = Object.keys(existing.parameters || {}).length > 0 
+                        ? existing.parameters 
+                        : parametersFromChain;
+                    
                     try {
-                        const thumbnailUrl = await this._executeCode(existing.code, {
+                        console.log('🎨 Regenerating thumbnail for project:', projectId);
+                        const thumbnailUrl = await this._executeCode(codeToUse, {
                             seed: `preview_${projectId}`,
-                            ...existing.parameters
+                            ...paramsToUse
                         });
                         if (thumbnailUrl) {
                             existing.thumbnailUrl = thumbnailUrl;
-                            await this.store.put(projectId, existing);
+                            needsUpdate = true;
+                            console.log('✅ Thumbnail regenerated');
                         }
                     } catch (error) {
                         console.warn('Failed to regenerate thumbnail for project:', projectId, error);
                     }
+                }
+                
+                if (needsUpdate) {
+                    await this.store.put(projectId, existing);
                 }
             }
         }
@@ -362,7 +418,7 @@ class GenerativeArtApp {
         delete dataForHash.thumbnailUrl;
         const dataHash = await this.sdk.hashData(dataForHash);
         
-        // Submit minimal proof ON-CHAIN (include thumbnail URL in metadata)
+        // Submit minimal proof ON-CHAIN (include code in metadata so others can generate thumbnails)
         const success = await this.sdk.submitAppEvent(
             GenerativeArtApp.APP_ID,
             GenerativeArtApp.ACTIONS.PROJECT_CREATE,
@@ -375,6 +431,8 @@ class GenerativeArtApp {
                     maxSupply: options.maxSupply,
                     mintPrice: options.mintPrice || 0,
                     hasThumbnail: !!thumbnailUrl,
+                    code: options.code || null, // Store code on-chain so others can generate thumbnails
+                    parameters: JSON.stringify(options.parameters || {}), // Store parameters as JSON string
                     thumbnailUrl: thumbnailUrl ? thumbnailUrl.substring(0, 100) + '...' : null // Store preview in metadata
                 }
             }
@@ -979,14 +1037,35 @@ class GenerativeArtApp {
     /**
      * Get a specific project
      * @param {string} projectId - Project ID
+     * @param {boolean} generateThumbnailIfMissing - Generate thumbnail if missing (default: true)
      * @returns {Promise<Object|null>}
      */
-    async getProject(projectId) {
+    async getProject(projectId, generateThumbnailIfMissing = true) {
         // Ensure store is initialized and synced
         await this._initPromise;
         await this._syncWithChain();
         
-        return await this.store.get(projectId);
+        const project = await this.store.get(projectId);
+        
+        // Generate thumbnail on-demand if missing
+        if (project && generateThumbnailIfMissing && !project.thumbnailUrl && project.code) {
+            try {
+                console.log('🎨 Generating thumbnail on-demand for project:', projectId);
+                const thumbnailUrl = await this._executeCode(project.code, {
+                    seed: `preview_${projectId}`,
+                    ...(project.parameters || {})
+                });
+                if (thumbnailUrl) {
+                    project.thumbnailUrl = thumbnailUrl;
+                    await this.store.put(projectId, project);
+                    console.log('✅ Thumbnail generated on-demand');
+                }
+            } catch (error) {
+                console.warn('Failed to generate thumbnail on-demand:', projectId, error);
+            }
+        }
+        
+        return project;
     }
     
     /**
