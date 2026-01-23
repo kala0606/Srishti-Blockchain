@@ -622,9 +622,28 @@ function closeModal() {
     document.getElementById('pieceModal').classList.remove('active');
 }
 
-// Initialize app
+// Initialize app - wait for blockchain to be ready
 let artAppUI;
-window.addEventListener('DOMContentLoaded', async () => {
+async function initializeApp() {
+    // Wait for blockchain instance to be available
+    let retries = 0;
+    while (!window.srishtiAppInstance && retries < 100) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        retries++;
+    }
+    
+    if (!window.srishtiAppInstance) {
+        console.error('❌ Blockchain instance not available after waiting');
+        return;
+    }
+    
     artAppUI = new GenerativeArtAppUI();
     await artAppUI.init();
-});
+}
+
+// Start initialization when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeApp);
+} else {
+    initializeApp();
+}

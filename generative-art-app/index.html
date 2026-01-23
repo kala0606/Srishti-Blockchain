@@ -618,14 +618,8 @@
                     await new Promise(resolve => setTimeout(resolve, 2000));
                 }
 
-                // Load generative art app files from local directory
-                const artScripts = [
-                    'sdk/apps/generative-art/GenerativeArtApp.js'
-                ];
-
-                for (const src of artScripts) {
-                    await loadScript(src, './'); // Load from local generative-art-app directory
-                }
+                // Load generative art app SDK from main blockchain repo
+                await loadScript('sdk/apps/generative-art/GenerativeArtApp.js');
 
                 console.log('✅ Blockchain loaded and initialized');
             } catch (error) {
