@@ -53,9 +53,25 @@ class SessionAuth {
                         if (!isValid) {
                             console.error('❌ [SessionAuth] Private key does not match public key on chain!', {
                                 nodeId: nodeId,
-                                chainPublicKeyPreview: node.publicKey.substring(0, 30) + '...'
+                                chainPublicKeyPreview: node.publicKey.substring(0, 30) + '...',
+                                chainPublicKey: node.publicKey
                             });
-                            throw new Error('Private key does not match the public key stored on the chain. Your private key may have been lost or regenerated. Please check your key storage or use recovery options.');
+                            
+                            // Provide helpful error message with actionable steps
+                            const errorMsg = `Private key mismatch detected!\n\n` +
+                                `Your private key does not match the public key stored on the blockchain.\n\n` +
+                                `This usually happens when:\n` +
+                                `• Your private key was lost or corrupted\n` +
+                                `• You're using a different device/browser\n` +
+                                `• localStorage was cleared\n\n` +
+                                `To fix this:\n` +
+                                `1. Go to the main blockchain app\n` +
+                                `2. Check the console for key validation messages\n` +
+                                `3. If keys don't match, clear localStorage and create a new account\n` +
+                                `4. Or use recovery options if you saved your recovery phrase\n\n` +
+                                `Your account on the blockchain is still valid, but you need matching keys to sign transactions.`;
+                            
+                            throw new Error(errorMsg);
                         }
                         
                         console.log('✅ [SessionAuth] Private key validated against chain public key');

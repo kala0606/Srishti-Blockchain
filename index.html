@@ -6589,6 +6589,11 @@
                         try {
                             console.log('✅ Generating session token for dApp...');
                             
+                            // Check if private key is actually valid (not null/undefined)
+                            if (!window.SrishtiApp.keyPair.privateKey) {
+                                throw new Error('Private key is not available. Your keys may have been cleared due to a mismatch with the blockchain. Please check the console and fix your key storage.');
+                            }
+                            
                             // Verify SrishtiKeys is available
                             if (!window.SrishtiKeys) {
                                 throw new Error('SrishtiKeys library not loaded');
@@ -6636,10 +6641,27 @@
                                 message: error.message,
                                 stack: error.stack,
                                 name: error.name,
-                                dappReturnUrl: dappReturnUrl
+                                dappReturnUrl: dappReturnUrl,
+                                hasPrivateKey: !!window.SrishtiApp?.keyPair?.privateKey,
+                                nodeId: window.SrishtiApp?.nodeId
                             });
                             sessionStorage.removeItem('dapp_return_url');
-                            alert(`Failed to generate session token: ${error.message || 'Unknown error'}. Please check the console for details.`);
+                            
+                            // Show user-friendly error message
+                            let userMessage = 'Failed to generate session token.\n\n';
+                            if (error.message && error.message.includes('does not match')) {
+                                userMessage += 'Your private key does not match your account on the blockchain.\n\n';
+                                userMessage += 'This usually means your private key was lost or corrupted.\n\n';
+                                userMessage += 'To fix this:\n';
+                                userMessage += '1. Check the browser console for detailed error messages\n';
+                                userMessage += '2. If keys don\'t match, you may need to clear localStorage\n';
+                                userMessage += '3. Create a new account or use recovery options\n\n';
+                                userMessage += 'Your blockchain account is still valid, but you need matching keys to sign.';
+                            } else {
+                                userMessage += error.message || 'Unknown error occurred.';
+                            }
+                            
+                            alert(userMessage);
                         }
                     } else {
                         console.log('⏳ Waiting for credentials to load before redirecting to dApp...', debugInfo);
