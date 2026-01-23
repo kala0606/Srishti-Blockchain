@@ -103,9 +103,28 @@ class GenerativeArtApp {
                     artistName: event.payload.metadata?.artistName || 'Unknown',
                     createdAt: event.timestamp,
                     pieceCount: 0,
-                    status: 'ACTIVE'
+                    status: 'ACTIVE',
+                    thumbnailUrl: null // Thumbnail stored in local store, not on-chain
                 };
                 await this.store.put(projectId, project);
+            } else {
+                // Update existing project with any missing thumbnail from local store
+                // (thumbnail is stored locally, not reconstructed from chain)
+                if (!existing.thumbnailUrl && existing.code) {
+                    // Try to regenerate thumbnail if code exists
+                    try {
+                        const thumbnailUrl = await this._executeCode(existing.code, {
+                            seed: `preview_${projectId}`,
+                            ...existing.parameters
+                        });
+                        if (thumbnailUrl) {
+                            existing.thumbnailUrl = thumbnailUrl;
+                            await this.store.put(projectId, existing);
+                        }
+                    } catch (error) {
+                        console.warn('Failed to regenerate thumbnail for project:', projectId, error);
+                    }
+                }
             }
         }
         
@@ -284,15 +303,25 @@ class GenerativeArtApp {
         
         // Generate preview thumbnail if code is provided
         let thumbnailUrl = null;
-        if (options.code) {
+        if (options.code && options.code.trim()) {
             try {
+                console.log('🎨 Generating thumbnail for project:', projectId);
                 thumbnailUrl = await this._executeCode(options.code, {
                     seed: `preview_${projectId}`,
                     ...options.parameters
                 });
+                
+                if (thumbnailUrl) {
+                    console.log('✅ Thumbnail generated successfully');
+                } else {
+                    console.warn('⚠️ Thumbnail generation returned null - code may not have returned an image');
+                }
             } catch (error) {
-                console.warn('Failed to generate preview thumbnail:', error);
+                console.error('❌ Failed to generate preview thumbnail:', error);
+                console.error('   This will not prevent project creation, but thumbnail will be missing');
             }
+        } else {
+            console.log('ℹ️ No code provided, skipping thumbnail generation');
         }
         
         // Full project data (stored OFF-CHAIN)
@@ -313,13 +342,21 @@ class GenerativeArtApp {
             thumbnailUrl: thumbnailUrl
         };
         
-        // Store full data OFF-CHAIN
+        // Store full data OFF-CHAIN (including thumbnail)
         await this.store.put(projectId, projectData);
         
-        // Hash for on-chain reference
-        const dataHash = await this.sdk.hashData(projectData);
+        console.log('💾 Project stored with thumbnail:', {
+            projectId,
+            hasThumbnail: !!projectData.thumbnailUrl,
+            thumbnailSize: projectData.thumbnailUrl ? projectData.thumbnailUrl.length : 0
+        });
         
-        // Submit minimal proof ON-CHAIN
+        // Hash for on-chain reference (exclude thumbnail from hash - too large)
+        const dataForHash = { ...projectData };
+        delete dataForHash.thumbnailUrl;
+        const dataHash = await this.sdk.hashData(dataForHash);
+        
+        // Submit minimal proof ON-CHAIN (include thumbnail URL in metadata)
         const success = await this.sdk.submitAppEvent(
             GenerativeArtApp.APP_ID,
             GenerativeArtApp.ACTIONS.PROJECT_CREATE,
@@ -330,7 +367,9 @@ class GenerativeArtApp {
                     title: options.title,
                     artistName: artistName,
                     maxSupply: options.maxSupply,
-                    mintPrice: options.mintPrice || 0
+                    mintPrice: options.mintPrice || 0,
+                    hasThumbnail: !!thumbnailUrl,
+                    thumbnailUrl: thumbnailUrl ? thumbnailUrl.substring(0, 100) + '...' : null // Store preview in metadata
                 }
             }
         );
@@ -986,29 +1025,62 @@ class GenerativeArtApp {
      * @private
      */
     async _executeCode(code, params) {
-        // Create a safe execution context
-        const generateFunction = new Function('params', `
-            ${code}
-            return typeof generate === 'function' ? generate(params) : null;
-        `);
-        
         try {
+            console.log('🎨 Executing generative code with params:', params);
+            
+            // Create a safe execution context with all necessary functions
+            const generateFunction = new Function('params', `
+                // Helper functions that might be needed
+                function hash(str) {
+                    let h = 0;
+                    for (let i = 0; i < str.length; i++) {
+                        h = ((h << 5) - h) + str.charCodeAt(i);
+                        h = h & h;
+                    }
+                    return Math.abs(h);
+                }
+                
+                ${code}
+                
+                // Call generate function if it exists
+                if (typeof generate === 'function') {
+                    return generate(params);
+                }
+                
+                // If code doesn't define generate, try to execute it directly
+                // (some code might be self-executing)
+                return null;
+            `);
+            
             const result = generateFunction(params);
+            
+            console.log('🎨 Code execution result type:', typeof result, result?.constructor?.name);
             
             // If result is a data URL, return it
             if (typeof result === 'string' && result.startsWith('data:image')) {
+                console.log('✅ Generated image data URL (length:', result.length, ')');
                 return result;
             }
             
             // If result is a canvas, convert to data URL
             if (result && result.nodeName === 'CANVAS') {
+                console.log('✅ Generated canvas, converting to data URL');
                 return result.toDataURL('image/png');
             }
             
-            // If no result, return null
+            // If result is a canvas element (check by methods)
+            if (result && typeof result.toDataURL === 'function' && typeof result.getContext === 'function') {
+                console.log('✅ Generated canvas-like object, converting to data URL');
+                return result.toDataURL('image/png');
+            }
+            
+            // If no result, log warning
+            console.warn('⚠️ Code execution returned no valid image. Result:', result);
             return null;
         } catch (error) {
-            console.error('Error executing generative code:', error);
+            console.error('❌ Error executing generative code:', error);
+            console.error('   Code snippet:', code.substring(0, 200));
+            console.error('   Params:', params);
             throw new Error(`Code execution failed: ${error.message}`);
         }
     }

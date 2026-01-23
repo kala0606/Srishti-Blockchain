@@ -190,6 +190,14 @@ class GenerativeArtAppUI {
                 return;
             }
 
+            // Show loading state
+            const submitBtn = document.querySelector('#createProjectForm button[type="submit"]');
+            const originalText = submitBtn?.textContent;
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Creating project & generating thumbnail...';
+            }
+
             const projectId = await this.artApp.createProject({
                 title,
                 description,
@@ -198,7 +206,19 @@ class GenerativeArtAppUI {
                 mintPrice
             });
 
-            alert(`✅ Project created: ${projectId}`);
+            // Get the created project to check thumbnail
+            const project = await this.artApp.getProject(projectId);
+            
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.textContent = originalText || 'Create Project';
+            }
+
+            if (project.thumbnailUrl) {
+                alert(`✅ Project created: ${projectId}\n\nThumbnail generated successfully!`);
+            } else {
+                alert(`✅ Project created: ${projectId}\n\n⚠️ Note: Thumbnail could not be generated. Make sure your code has a \`generate(params)\` function that returns a canvas or data URL.`);
+            }
             
             // Reset form
             document.getElementById('createProjectForm').reset();
@@ -214,6 +234,12 @@ class GenerativeArtAppUI {
         } catch (error) {
             console.error('Failed to create project:', error);
             alert(`Failed to create project: ${error.message}`);
+            
+            // Re-enable button
+            const submitBtn = document.querySelector('#createProjectForm button[type="submit"]');
+            if (submitBtn) {
+                submitBtn.disabled = false;
+            }
         }
     }
 
