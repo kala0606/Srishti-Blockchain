@@ -598,18 +598,30 @@ class AttendanceApp {
         // Hash for verification
         const dataHash = await this.sdk.hashData(attendanceData);
         
-        // Submit proof ON-CHAIN
+        // Submit proof ON-CHAIN with essential metadata (so institution can see it)
+        console.log(`📤 [markAttendance] Submitting attendance event for session: ${sessionId}, student: ${studentId}`);
+        console.log(`📤 [markAttendance] App ID: ${AttendanceApp.APP_ID}, Action: ${AttendanceApp.ACTIONS.MARK_PRESENT}`);
         const success = await this.sdk.submitAppEvent(
             AttendanceApp.APP_ID,
             AttendanceApp.ACTIONS.MARK_PRESENT,
             {
                 ref: sessionId,
                 target: this.sdk.nodeId,
-                dataHash: dataHash
+                dataHash: dataHash,
+                // Include essential metadata so institution can reconstruct the record
+                metadata: {
+                    studentId: studentId,
+                    timestamp: attendanceData.timestamp,
+                    hasLocation: !!options.location,
+                    hasQRProof: !!qrProof,
+                    distanceFromVenue: distanceFromVenue,
+                    qrProofTimestamp: qrProof?.timestamp || null
+                }
             }
         );
         
         if (!success) {
+            console.error(`❌ [markAttendance] Failed to submit attendance event to blockchain`);
             // Rollback
             await this.store.delete(recordId);
             session.attendeeCount--;
@@ -617,7 +629,8 @@ class AttendanceApp {
             throw new Error('Failed to submit attendance to blockchain');
         }
         
-        console.log(`✅ Attendance marked: ${recordId}`);
+        console.log(`✅ [markAttendance] Attendance marked and submitted to blockchain: ${recordId}`);
+        console.log(`✅ [markAttendance] Event should be visible to institution after chain sync`);
         return recordId;
     }
     
@@ -917,29 +930,80 @@ class AttendanceApp {
             { ref: sessionId }
         );
         
-        const attendees = [];
-        for (const event of events) {
-            const recordId = `${sessionId}_${event.payload.target}`;
-            const record = await this.store.get(recordId);
-            if (record) {
-                // Get verification status
-                const verifyEvents = this.sdk.queryAppEvents(
-                    AttendanceApp.APP_ID,
-                    AttendanceApp.ACTIONS.VERIFY,
-                    { ref: sessionId, target: event.payload.target }
-                );
-                
-                if (verifyEvents.length > 0) {
-                    const latest = verifyEvents[verifyEvents.length - 1];
-                    record.status = latest.payload.metadata?.verified 
-                        ? AttendanceApp.STATUS.VERIFIED 
-                        : AttendanceApp.STATUS.REJECTED;
-                }
-                
-                attendees.push(record);
-            }
+        console.log(`🔍 [getSessionAttendees] Querying for sessionId: ${sessionId}`);
+        console.log(`🔍 [getSessionAttendees] Found ${events.length} MARK_PRESENT events`);
+        if (events.length > 0) {
+            console.log('🔍 [getSessionAttendees] Sample event:', {
+                appId: events[0].appId,
+                action: events[0].action,
+                ref: events[0].payload?.ref,
+                target: events[0].payload?.target,
+                metadata: events[0].payload?.metadata
+            });
         }
         
+        const attendees = [];
+        for (const event of events) {
+            // Validate event structure
+            if (!event.payload || !event.payload.target) {
+                console.warn(`⚠️ [getSessionAttendees] Event missing payload or target:`, event);
+                continue;
+            }
+            
+            const recordId = `${sessionId}_${event.payload.target}`;
+            let record = await this.store.get(recordId);
+            
+            // If record not found locally, reconstruct from on-chain event
+            if (!record) {
+                const metadata = event.payload.metadata || {};
+                record = {
+                    id: recordId,
+                    type: 'attendance',
+                    sessionId: sessionId,
+                    studentId: metadata.studentId || event.payload.target,
+                    walletAddress: event.payload.target,
+                    timestamp: metadata.timestamp || event.timestamp,
+                    location: metadata.hasLocation ? { provided: true } : null,
+                    distanceFromVenue: metadata.distanceFromVenue || null,
+                    qrProof: metadata.hasQRProof ? { timestamp: metadata.qrProofTimestamp } : null,
+                    status: AttendanceApp.STATUS.PENDING,
+                    owner: event.payload.target,
+                    _reconstructed: true // Mark as reconstructed from chain
+                };
+                
+                // Store it locally for future use
+                await this.store.put(recordId, record);
+                console.log(`📥 [getSessionAttendees] Reconstructed attendance record from on-chain: ${record.studentId || record.walletAddress}`);
+            } else {
+                console.log(`📋 [getSessionAttendees] Found existing local record: ${record.studentId || record.walletAddress}`);
+            }
+            
+            // Get verification status from on-chain events
+            const verifyEvents = this.sdk.queryAppEvents(
+                AttendanceApp.APP_ID,
+                AttendanceApp.ACTIONS.VERIFY,
+                { ref: sessionId, target: event.payload.target }
+            );
+            
+            if (verifyEvents.length > 0) {
+                const latest = verifyEvents[verifyEvents.length - 1];
+                record.status = latest.payload.metadata?.verified 
+                    ? AttendanceApp.STATUS.VERIFIED 
+                    : AttendanceApp.STATUS.REJECTED;
+                record.verifiedBy = latest.sender;
+                record.verifiedAt = latest.timestamp;
+                
+                // Update local record if it exists
+                if (!record._reconstructed) {
+                    await this.store.put(recordId, record);
+                }
+            }
+            
+            console.log(`✅ [getSessionAttendees] Adding attendee: ${record.studentId || record.walletAddress}, status: ${record.status}`);
+            attendees.push(record);
+        }
+        
+        console.log(`📊 [getSessionAttendees] Total attendees found: ${attendees.length}`);
         return attendees;
     }
     

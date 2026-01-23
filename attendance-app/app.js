@@ -485,6 +485,21 @@ class AttendanceAppUI {
             listEl.innerHTML = '<div class="grid">';
 
             for (const session of sessions) {
+                // Wait a moment for chain to sync (in case new attendance was just marked)
+                // This helps ensure we see the latest attendance records
+                if (this.srishtiApp && this.srishtiApp.network) {
+                    // Try to trigger a sync if network is available
+                    try {
+                        if (typeof this.srishtiApp.network.syncWithBestPeer === 'function') {
+                            await this.srishtiApp.network.syncWithBestPeer().catch(() => {
+                                // Ignore sync errors, just continue
+                            });
+                        }
+                    } catch (e) {
+                        // Ignore sync errors
+                    }
+                }
+                
                 const attendees = await this.attendance.getSessionAttendees(session.id);
                 const stats = await this.attendance.getSessionStats(session.id);
 
