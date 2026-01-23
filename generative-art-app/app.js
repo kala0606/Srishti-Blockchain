@@ -424,6 +424,7 @@ class GenerativeArtAppUI {
                     ${project.maxSupply ? ` / ${project.maxSupply} max` : ''}
                 </div>
                 ${project.mintPrice > 0 ? `<div style="font-size: 0.9em; color: var(--text-secondary); margin-top: 4px;">Mint: ${project.mintPrice} KARMA</div>` : ''}
+                ${project.status === 'DRAFT' ? '<span class="art-status" style="background: rgba(255, 193, 7, 0.2); color: #ffc107; margin-top: 8px; display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 0.75em;">DRAFT</span>' : '<span class="art-status" style="background: rgba(16, 185, 129, 0.2); color: #10b981; margin-top: 8px; display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 0.75em;">RELEASED</span>'}
                 <button class="btn" style="margin-top: 12px; width: 100%; font-size: 0.85em; padding: 8px;" onclick="event.stopPropagation(); artAppUI.viewProjectFull('${project.id}')">View Full Render</button>
             </div>
         `;
@@ -516,11 +517,16 @@ class GenerativeArtAppUI {
                 </div>
             </div>
             <div style="margin-bottom: 16px;">
+                <strong>Status:</strong> ${project.status === 'DRAFT' ? '<span style="color: #ffc107;">DRAFT</span> (Only you can mint)' : '<span style="color: #10b981;">RELEASED</span> (Anyone can mint)'}<br>
                 <strong>Pieces:</strong> ${project.pieceCount || 0}${project.maxSupply ? ` / ${project.maxSupply}` : ''}<br>
                 <strong>Mint Price:</strong> ${project.mintPrice || 0} KARMA<br>
                 <strong>Created:</strong> ${new Date(project.createdAt).toLocaleDateString()}
             </div>
-            <button class="btn btn-primary" onclick="artAppUI.mintFromProject('${project.id}')">Mint New Piece</button>
+            <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                ${project.status === 'DRAFT' && project.artistId === this.srishtiApp.nodeId ? 
+                    `<button class="btn btn-primary" onclick="artAppUI.releaseProject('${project.id}')">Release Project</button>` : ''}
+                <button class="btn btn-primary" onclick="artAppUI.mintFromProject('${project.id}')">Mint New Piece</button>
+            </div>
         `;
 
         modal.classList.add('active');
@@ -649,6 +655,22 @@ class GenerativeArtAppUI {
         } catch (error) {
             console.error('Failed to mint:', error);
             alert(`Failed to mint: ${error.message}`);
+        }
+    }
+    
+    async releaseProject(projectId) {
+        if (!confirm('Release this project? Once released, anyone will be able to mint pieces from it.')) {
+            return;
+        }
+        
+        try {
+            await this.artApp.releaseProject(projectId);
+            alert('✅ Project released! Anyone can now mint from it.');
+            closeModal();
+            await this.loadProjects();
+        } catch (error) {
+            console.error('Failed to release project:', error);
+            alert(`Failed to release project: ${error.message}`);
         }
     }
     

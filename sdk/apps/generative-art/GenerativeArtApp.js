@@ -41,6 +41,12 @@ class GenerativeArtApp {
         TRANSFERRED: 'TRANSFERRED'
     };
     
+    // Project status
+    static PROJECT_STATUS = {
+        DRAFT: 'DRAFT',      // Only artist can mint
+        RELEASED: 'RELEASED' // Anyone can mint
+    };
+    
     /**
      * Create a new Generative Art App instance
      * @param {SrishtiSDK} sdk - Initialized SDK instance
@@ -103,7 +109,7 @@ class GenerativeArtApp {
                     artistName: event.payload.metadata?.artistName || 'Unknown',
                     createdAt: event.timestamp,
                     pieceCount: 0,
-                    status: 'ACTIVE',
+                    status: GenerativeArtApp.PROJECT_STATUS.DRAFT, // Default to DRAFT when reconstructing
                     thumbnailUrl: null // Thumbnail stored in local store, not on-chain
                 };
                 await this.store.put(projectId, project);
@@ -338,7 +344,7 @@ class GenerativeArtApp {
             artistName: artistName,
             createdAt: Date.now(),
             pieceCount: 0,
-            status: 'ACTIVE',
+            status: GenerativeArtApp.PROJECT_STATUS.DRAFT, // Projects start as DRAFT
             thumbnailUrl: thumbnailUrl
         };
         
@@ -384,6 +390,57 @@ class GenerativeArtApp {
         return projectId;
     }
     
+    /**
+     * Release a project so anyone can mint from it
+     * Only the artist can release their project
+     * 
+     * @param {string} projectId - Project ID
+     * @returns {Promise<boolean>} Success
+     */
+    async releaseProject(projectId) {
+        // Ensure store is initialized
+        await this._initPromise;
+        
+        const project = await this.store.get(projectId);
+        if (!project) {
+            throw new Error('Project not found');
+        }
+        
+        // Only artist can release
+        if (project.artistId !== this.sdk.nodeId) {
+            throw new Error('Only the artist can release their project');
+        }
+        
+        // Already released?
+        if (project.status === GenerativeArtApp.PROJECT_STATUS.RELEASED) {
+            console.log('Project is already released');
+            return true;
+        }
+        
+        // Update status
+        project.status = GenerativeArtApp.PROJECT_STATUS.RELEASED;
+        await this.store.put(projectId, project);
+        
+        // Submit on-chain event (optional - for tracking releases)
+        const dataHash = await this.sdk.hashData({ projectId, status: 'RELEASED' });
+        await this.sdk.submitAppEvent(
+            GenerativeArtApp.APP_ID,
+            GenerativeArtApp.ACTIONS.PROJECT_CREATE, // Reuse PROJECT_CREATE with updated metadata
+            {
+                ref: projectId,
+                dataHash: dataHash,
+                metadata: {
+                    ...project,
+                    status: 'RELEASED',
+                    releasedAt: Date.now()
+                }
+            }
+        );
+        
+        console.log(`✅ Project released: ${projectId}`);
+        return true;
+    }
+    
     // ═══════════════════════════════════════════════════════════════════════════
     // MINTING (Artists and Collectors)
     // ═══════════════════════════════════════════════════════════════════════════
@@ -411,6 +468,13 @@ class GenerativeArtApp {
         const project = await this.store.get(projectId);
         if (!project) {
             throw new Error('Project not found');
+        }
+        
+        // Check project status: only released projects can be minted by anyone
+        // Artists can mint their own draft projects
+        const isArtist = project.artistId === this.sdk.nodeId;
+        if (project.status !== GenerativeArtApp.PROJECT_STATUS.RELEASED && !isArtist) {
+            throw new Error('Project is not released yet. Only the artist can mint from draft projects.');
         }
         
         // Check max supply
@@ -904,6 +968,15 @@ class GenerativeArtApp {
     }
     
     /**
+     * Get released projects (projects that anyone can mint from)
+     * @returns {Promise<Array>}
+     */
+    async getReleasedProjects() {
+        const allProjects = await this.getAllProjects();
+        return allProjects.filter(p => p.status === GenerativeArtApp.PROJECT_STATUS.RELEASED);
+    }
+    
+    /**
      * Get a specific project
      * @param {string} projectId - Project ID
      * @returns {Promise<Object|null>}
@@ -985,14 +1058,23 @@ class GenerativeArtApp {
         await this._initPromise;
         await this._syncWithChain();
         
-        // Update status for all pieces before filtering
-        const allPieces = await this.getAllPieces();
+        // Get all pieces and filter for listed ones
+        // We'll update status on-demand for listed pieces only
+        const allPieces = await this.store.filter(p => p.type === 'piece');
+        const listedPieces = [];
+        
         for (const piece of allPieces) {
+            // Update status from chain
             await this._updatePieceStatusFromChain(piece.id);
+            
+            // Re-fetch to get updated status
+            const updatedPiece = await this.store.get(piece.id);
+            if (updatedPiece && updatedPiece.status === GenerativeArtApp.STATUS.LISTED) {
+                listedPieces.push(updatedPiece);
+            }
         }
         
-        // Now get listed pieces
-        return await this.store.filter(p => p.type === 'piece' && p.status === GenerativeArtApp.STATUS.LISTED);
+        return listedPieces;
     }
     
     /**
