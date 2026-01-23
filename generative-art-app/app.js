@@ -101,6 +101,25 @@ class GenerativeArtAppUI {
                 this.updateStatus('disconnected', '⚠️ Network not connected. You can view data but cannot create or purchase art.');
             }
 
+            // Wait for GenerativeArtApp class to be available
+            let retries = 0;
+            while (!window.SrishtiGenerativeArtApp && retries < 50) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+                retries++;
+            }
+            
+            if (!window.SrishtiGenerativeArtApp) {
+                console.error('❌ SrishtiGenerativeArtApp not found. Available window properties:', Object.keys(window).filter(k => k.includes('Srishti')));
+                throw new Error('SrishtiGenerativeArtApp class not loaded. Check if sdk/apps/generative-art/GenerativeArtApp.js loaded correctly.');
+            }
+            
+            if (typeof window.SrishtiGenerativeArtApp !== 'function') {
+                console.error('❌ SrishtiGenerativeArtApp is not a function. Type:', typeof window.SrishtiGenerativeArtApp, 'Value:', window.SrishtiGenerativeArtApp);
+                throw new Error('SrishtiGenerativeArtApp is not a constructor. Check the script export.');
+            }
+            
+            console.log('✅ SrishtiGenerativeArtApp class found, initializing...');
+            
             // Initialize Generative Art App
             this.artApp = new window.SrishtiGenerativeArtApp(this.sdk);
 

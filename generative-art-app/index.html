@@ -619,7 +619,27 @@
                 }
 
                 // Load generative art app SDK from main blockchain repo
-                await loadScript('sdk/apps/generative-art/GenerativeArtApp.js');
+                try {
+                    await loadScript('sdk/apps/generative-art/GenerativeArtApp.js');
+                    
+                    // Wait a bit for the script to execute
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    
+                    // Verify the class is available
+                    if (window.SrishtiGenerativeArtApp) {
+                        console.log('✅ GenerativeArtApp class loaded');
+                        if (typeof window.SrishtiGenerativeArtApp !== 'function') {
+                            console.error('❌ GenerativeArtApp is not a function. Type:', typeof window.SrishtiGenerativeArtApp);
+                        }
+                    } else {
+                        console.warn('⚠️ GenerativeArtApp class not found after loading script');
+                        console.warn('   Available Srishti classes:', Object.keys(window).filter(k => k.startsWith('Srishti')));
+                    }
+                } catch (error) {
+                    console.error('❌ Failed to load GenerativeArtApp.js:', error);
+                    console.error('   Make sure the file exists at: ' + SRISHTI_BLOCKCHAIN_URL + 'sdk/apps/generative-art/GenerativeArtApp.js');
+                    throw error;
+                }
 
                 console.log('✅ Blockchain loaded and initialized');
             } catch (error) {
