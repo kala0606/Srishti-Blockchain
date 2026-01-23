@@ -131,6 +131,7 @@ class GenerativeArtAppUI {
 
             // Load initial data
             await this.loadGallery();
+            await this.loadReleases();
             await this.loadMarketplace();
             await this.loadCollection();
             await this.loadProjects();
@@ -343,6 +344,60 @@ class GenerativeArtAppUI {
         }
     }
 
+    async loadReleases() {
+        const releasesEl = document.getElementById('releasesList');
+        releasesEl.innerHTML = '<div class="loading">Loading releases...</div>';
+
+        try {
+            const projects = await this.artApp.getReleasedProjects();
+            
+            if (projects.length === 0) {
+                releasesEl.innerHTML = `
+                    <div class="empty-state">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+                        </svg>
+                        <p>No released projects yet. Check back soon!</p>
+                    </div>
+                `;
+                return;
+            }
+
+            releasesEl.innerHTML = '<div class="gallery"></div>';
+            const gallery = releasesEl.querySelector('.gallery');
+
+            // Generate thumbnails for projects that don't have them
+            for (const project of projects) {
+                const card = this.createReleaseCard(project);
+                gallery.appendChild(card);
+                
+                // Generate thumbnail in background if missing
+                if (!project.thumbnailUrl && project.code) {
+                    this.artApp.getProject(project.id, true).then(updatedProject => {
+                        if (updatedProject && updatedProject.thumbnailUrl) {
+                            // Update the card with the new thumbnail
+                            const img = card.querySelector('.art-image img');
+                            if (img) {
+                                img.src = updatedProject.thumbnailUrl;
+                            } else {
+                                // Replace emoji with image
+                                const artImage = card.querySelector('.art-image');
+                                if (artImage) {
+                                    artImage.innerHTML = `<img src="${updatedProject.thumbnailUrl}" alt="${updatedProject.title}" style="width: 100%; height: 100%; object-fit: cover;">`;
+                                }
+                            }
+                        }
+                    }).catch(err => 
+                        console.warn('Failed to generate thumbnail for project:', project.id, err)
+                    );
+                }
+            }
+        } catch (error) {
+            console.error('Failed to load releases:', error);
+            releasesEl.innerHTML = `<div class="empty-state">Error loading releases: ${error.message}</div>`;
+        }
+    }
+
     async loadProjects() {
         const projectsEl = document.getElementById('projectsList');
         projectsEl.innerHTML = '<div class="loading">Loading projects...</div>';
@@ -420,6 +475,44 @@ class GenerativeArtAppUI {
 
         card.addEventListener('click', () => {
             this.showPieceModal(piece, showPurchase, showActions);
+        });
+
+        return card;
+    }
+
+    createReleaseCard(project) {
+        const card = document.createElement('div');
+        card.className = 'art-card';
+        
+        // Use thumbnail if available, otherwise show emoji
+        const thumbnail = project.thumbnailUrl ? 
+            `<img src="${project.thumbnailUrl}" alt="${project.title}" style="width: 100%; height: 100%; object-fit: cover;">` :
+            `<div>🎨</div>`;
+        
+        const canMint = !project.maxSupply || (project.pieceCount || 0) < project.maxSupply;
+        
+        card.innerHTML = `
+            <div class="art-image">
+                ${thumbnail}
+            </div>
+            <div class="art-info">
+                <div class="art-title">${project.title}</div>
+                <div class="art-artist">by ${project.artistName || 'Unknown'}</div>
+                <div style="font-size: 0.85em; color: var(--text-secondary); margin-top: 8px;">
+                    ${project.pieceCount || 0} pieces minted
+                    ${project.maxSupply ? ` / ${project.maxSupply} max` : ''}
+                </div>
+                ${project.mintPrice > 0 ? `<div style="font-size: 0.9em; color: var(--text-secondary); margin-top: 4px;">Mint: ${project.mintPrice} KARMA</div>` : '<div style="font-size: 0.9em; color: var(--text-secondary); margin-top: 4px;">Free to mint</div>'}
+                <span class="art-status" style="background: rgba(16, 185, 129, 0.2); color: #10b981; margin-top: 8px; display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 0.75em;">RELEASED</span>
+                <div style="display: flex; gap: 8px; margin-top: 12px;">
+                    <button class="btn btn-primary" style="flex: 1; font-size: 0.85em; padding: 8px;" onclick="event.stopPropagation(); artAppUI.mintFromProject('${project.id}')" ${!canMint ? 'disabled' : ''}>${canMint ? 'Mint' : 'Sold Out'}</button>
+                    <button class="btn" style="flex: 1; font-size: 0.85em; padding: 8px;" onclick="event.stopPropagation(); artAppUI.viewProjectFull('${project.id}')">View</button>
+                </div>
+            </div>
+        `;
+
+        card.addEventListener('click', () => {
+            this.showProjectModal(project);
         });
 
         return card;
@@ -852,6 +945,8 @@ function showTab(tabName, clickedElement) {
     // Load data if needed
     if (tabName === 'gallery' && artAppUI) {
         artAppUI.loadGallery();
+    } else if (tabName === 'releases' && artAppUI) {
+        artAppUI.loadReleases();
     } else if (tabName === 'marketplace' && artAppUI) {
         artAppUI.loadMarketplace();
     } else if (tabName === 'collection' && artAppUI) {

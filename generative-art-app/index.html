@@ -446,6 +446,7 @@
 
         <div class="tabs">
             <button class="tab active" onclick="showTab('gallery', this)">Gallery</button>
+            <button class="tab" onclick="showTab('releases', this)">Releases</button>
             <button class="tab" onclick="showTab('marketplace', this)">Marketplace</button>
             <button class="tab" onclick="showTab('collection', this)">My Collection</button>
             <button class="tab" onclick="showTab('create', this)">Create Project</button>
@@ -456,6 +457,13 @@
         <div id="gallery" class="tab-content active">
             <h2>Gallery</h2>
             <div id="galleryList" class="loading">Loading gallery...</div>
+        </div>
+
+        <!-- Releases Tab -->
+        <div id="releases" class="tab-content">
+            <h2>Released Projects</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 16px;">Browse and mint from released generative art projects</p>
+            <div id="releasesList" class="loading">Loading releases...</div>
         </div>
 
         <!-- Marketplace Tab -->

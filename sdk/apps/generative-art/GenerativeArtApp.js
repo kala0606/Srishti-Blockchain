@@ -96,7 +96,8 @@ class GenerativeArtApp {
             const existing = await this.store.get(projectId);
             
             // Extract code and parameters from on-chain metadata
-            const codeFromChain = event.payload.metadata?.code || null;
+            // Code is stored on-chain, so anyone can access it
+            const codeFromChain = event.payload.metadata?.code ? event.payload.metadata.code.trim() : null;
             let parametersFromChain = {};
             try {
                 if (event.payload.metadata?.parameters) {
@@ -418,7 +419,11 @@ class GenerativeArtApp {
         delete dataForHash.thumbnailUrl;
         const dataHash = await this.sdk.hashData(dataForHash);
         
-        // Submit minimal proof ON-CHAIN (include code in metadata so others can generate thumbnails)
+        // Submit proof ON-CHAIN
+        // Store code on-chain in metadata so anyone can generate thumbnails and mint pieces
+        // Code is stored as a clean string (trimmed, no extra whitespace)
+        const codeForChain = options.code ? options.code.trim() : null;
+        
         const success = await this.sdk.submitAppEvent(
             GenerativeArtApp.APP_ID,
             GenerativeArtApp.ACTIONS.PROJECT_CREATE,
@@ -431,9 +436,9 @@ class GenerativeArtApp {
                     maxSupply: options.maxSupply,
                     mintPrice: options.mintPrice || 0,
                     hasThumbnail: !!thumbnailUrl,
-                    code: options.code || null, // Store code on-chain so others can generate thumbnails
-                    parameters: JSON.stringify(options.parameters || {}), // Store parameters as JSON string
-                    thumbnailUrl: thumbnailUrl ? thumbnailUrl.substring(0, 100) + '...' : null // Store preview in metadata
+                    code: codeForChain, // ✅ p5.js code stored ON-CHAIN (trimmed, clean)
+                    parameters: JSON.stringify(options.parameters || {}), // Parameters as JSON string
+                    thumbnailUrl: thumbnailUrl ? thumbnailUrl.substring(0, 100) + '...' : null // Preview only
                 }
             }
         );
