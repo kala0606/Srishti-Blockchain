@@ -424,7 +424,7 @@ class GenerativeArtAppUI {
                     ${project.maxSupply ? ` / ${project.maxSupply} max` : ''}
                 </div>
                 ${project.mintPrice > 0 ? `<div style="font-size: 0.9em; color: var(--text-secondary); margin-top: 4px;">Mint: ${project.mintPrice} KARMA</div>` : ''}
-                ${project.status === 'DRAFT' ? '<span class="art-status" style="background: rgba(255, 193, 7, 0.2); color: #ffc107; margin-top: 8px; display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 0.75em;">DRAFT</span>' : '<span class="art-status" style="background: rgba(16, 185, 129, 0.2); color: #10b981; margin-top: 8px; display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 0.75em;">RELEASED</span>'}
+                ${(project.status || 'DRAFT') === 'DRAFT' ? '<span class="art-status" style="background: rgba(255, 193, 7, 0.2); color: #ffc107; margin-top: 8px; display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 0.75em;">DRAFT</span>' : '<span class="art-status" style="background: rgba(16, 185, 129, 0.2); color: #10b981; margin-top: 8px; display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 0.75em;">RELEASED</span>'}
                 <button class="btn" style="margin-top: 12px; width: 100%; font-size: 0.85em; padding: 8px;" onclick="event.stopPropagation(); artAppUI.viewProjectFull('${project.id}')">View Full Render</button>
             </div>
         `;
@@ -509,6 +509,21 @@ class GenerativeArtAppUI {
             `;
         }).join('');
 
+        // Check if user is the artist and project is draft
+        const isDraft = (project.status || 'DRAFT') === 'DRAFT';
+        const isArtist = project.artistId === this.srishtiApp.nodeId;
+        const showReleaseButton = isDraft && isArtist;
+        
+        console.log('🔍 Project Modal Debug:', {
+            projectId: project.id,
+            status: project.status || 'DRAFT',
+            artistId: project.artistId,
+            currentNodeId: this.srishtiApp.nodeId,
+            isDraft,
+            isArtist,
+            showReleaseButton
+        });
+
         modalBody.innerHTML = `
             <div style="margin-bottom: 24px;">
                 <p style="color: var(--text-secondary); margin-bottom: 16px;">${project.description || 'No description'}</p>
@@ -517,13 +532,13 @@ class GenerativeArtAppUI {
                 </div>
             </div>
             <div style="margin-bottom: 16px;">
-                <strong>Status:</strong> ${project.status === 'DRAFT' ? '<span style="color: #ffc107;">DRAFT</span> (Only you can mint)' : '<span style="color: #10b981;">RELEASED</span> (Anyone can mint)'}<br>
+                <strong>Status:</strong> ${isDraft ? '<span style="color: #ffc107;">DRAFT</span> (Only you can mint)' : '<span style="color: #10b981;">RELEASED</span> (Anyone can mint)'}<br>
                 <strong>Pieces:</strong> ${project.pieceCount || 0}${project.maxSupply ? ` / ${project.maxSupply}` : ''}<br>
                 <strong>Mint Price:</strong> ${project.mintPrice || 0} KARMA<br>
                 <strong>Created:</strong> ${new Date(project.createdAt).toLocaleDateString()}
             </div>
             <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-                ${project.status === 'DRAFT' && project.artistId === this.srishtiApp.nodeId ? 
+                ${showReleaseButton ? 
                     `<button class="btn btn-primary" onclick="artAppUI.releaseProject('${project.id}')">Release Project</button>` : ''}
                 <button class="btn btn-primary" onclick="artAppUI.mintFromProject('${project.id}')">Mint New Piece</button>
             </div>
@@ -535,39 +550,6 @@ class GenerativeArtAppUI {
     showPieceModalFromData(pieceJson, showPurchase, showActions) {
         const piece = JSON.parse(pieceJson.replace(/&#39;/g, "'").replace(/&quot;/g, '"'));
         this.showPieceModal(piece, showPurchase, showActions);
-    }
-
-    async showProjectModal(project) {
-        const modal = document.getElementById('pieceModal');
-        const modalTitle = document.getElementById('modalTitle');
-        const modalBody = document.getElementById('modalBody');
-
-        modalTitle.textContent = project.title;
-        
-        const pieces = await this.artApp.getProjectPieces(project.id);
-
-        modalBody.innerHTML = `
-            <div style="margin-bottom: 24px;">
-                <p style="color: var(--text-secondary); margin-bottom: 16px;">${project.description || 'No description'}</p>
-                <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px;">
-                    ${pieces.map(p => `
-                        <div class="art-card" style="cursor: pointer;" onclick="artAppUI.showPieceModal(${JSON.stringify(p).replace(/"/g, '&quot;')}, false, false)">
-                            <div class="art-image" style="height: 120px;">
-                                <div>${this.getArtEmoji(p.seed || p.id)}</div>
-                            </div>
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-            <div style="margin-bottom: 16px;">
-                <strong>Pieces:</strong> ${project.pieceCount || 0}${project.maxSupply ? ` / ${project.maxSupply}` : ''}<br>
-                <strong>Mint Price:</strong> ${project.mintPrice || 0} KARMA<br>
-                <strong>Created:</strong> ${new Date(project.createdAt).toLocaleDateString()}
-            </div>
-            <button class="btn btn-primary" onclick="artAppUI.mintFromProject('${project.id}')">Mint New Piece</button>
-        `;
-
-        modal.classList.add('active');
     }
 
     async purchasePiece(pieceId) {
