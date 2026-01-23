@@ -205,27 +205,6 @@ class SrishtiApp {
                         console.log('⚠️ Node ID set but keys unavailable - read-only mode');
                     }
                 }
-                    
-                    // If backup also fails, fall back to read-only mode
-                    try {
-                        this.nodeId = savedNodeId;
-                        this.currentUser = { id: savedNodeId, name: savedNodeName || 'Unknown' };
-                        this.publicKeyBase64 = savedPublicKey;
-                        this.keyPair = {
-                            publicKey: await window.SrishtiKeys.importPublicKey(savedPublicKey),
-                            privateKey: null // No private key = read-only mode
-                        };
-                        console.log('✅ Node loaded in read-only mode (private key unavailable):', savedNodeName);
-                        console.warn('⚠️ IMPORTANT: Your private key is missing. You cannot sign transactions.');
-                        console.warn('⚠️ To restore full access, you may need to create a new account or use recovery options.');
-                    } catch (publicKeyError) {
-                        console.error('❌ Failed to import public key as well:', publicKeyError);
-                        // Still set nodeId so it can be verified on chain
-                        this.nodeId = savedNodeId;
-                        this.currentUser = { id: savedNodeId, name: savedNodeName || 'Unknown' };
-                        console.log('⚠️ Node ID set but keys unavailable - read-only mode');
-                    }
-                }
             } else {
                 // Will create node during onboarding
                 console.log('📝 No existing node found');
