@@ -16,40 +16,82 @@
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     
     <!-- Ed25519 Library for deterministic key generation -->
-    <!-- Load from CDN and ensure it's available globally -->
+    <!-- Use unpkg which provides a UMD bundle that works in browsers -->
     <script>
-        // Create a promise that resolves when ed25519 is available
-        window.ed25519Ready = new Promise((resolve) => {
-            function checkAndExpose() {
-                if (typeof ed25519 !== 'undefined' && ed25519.getPublicKey) {
-                    // Ensure it's available in all scopes
-                    if (typeof window !== 'undefined') window.ed25519 = ed25519;
-                    if (typeof globalThis !== 'undefined') globalThis.ed25519 = ed25519;
-                    console.log('✅ @noble/ed25519 library available');
-                    resolve(ed25519);
-                    return true;
-                }
-                return false;
-            }
-            
-            // Check immediately (in case script loaded synchronously)
-            if (!checkAndExpose()) {
-                // Poll until available (max 2 seconds)
-                let attempts = 0;
-                const maxAttempts = 20;
-                const checkInterval = setInterval(() => {
-                    attempts++;
-                    if (checkAndExpose() || attempts >= maxAttempts) {
-                        clearInterval(checkInterval);
-                        if (attempts >= maxAttempts && typeof ed25519 === 'undefined') {
-                            console.error('❌ @noble/ed25519 failed to load after', maxAttempts * 100, 'ms');
-                        }
+        // Load @noble/ed25519 and expose globally
+        window.ed25519Ready = new Promise((resolve, reject) => {
+            // Try dynamic import first (works in modern browsers)
+            (async function() {
+                try {
+                    console.log('🔄 Loading @noble/ed25519 library...');
+                    
+                    // @noble/ed25519 exports named functions, not a default export
+                    // Import all exports and create a wrapper object
+                    const ed25519Module = await import('https://esm.sh/@noble/ed25519@1.7.3');
+                    
+                    console.log('📦 Module loaded, checking exports:', Object.keys(ed25519Module));
+                    
+                    // @noble/ed25519 exports: getPublicKey, sign, verify, etc.
+                    // Create a wrapper object with the functions we need
+                    const ed25519Lib = {
+                        getPublicKey: ed25519Module.getPublicKey || ed25519Module.default?.getPublicKey,
+                        sign: ed25519Module.sign || ed25519Module.default?.sign,
+                        verify: ed25519Module.verify || ed25519Module.default?.verify,
+                        utils: ed25519Module.utils || ed25519Module.default?.utils
+                    };
+                    
+                    if (ed25519Lib.getPublicKey && typeof ed25519Lib.getPublicKey === 'function') {
+                        // Expose globally
+                        window.ed25519 = ed25519Lib;
+                        globalThis.ed25519 = ed25519Lib;
+                        // Also expose the raw module in case we need it
+                        window._ed25519Module = ed25519Module;
+                        console.log('✅ @noble/ed25519 loaded successfully');
+                        resolve(ed25519Lib);
+                        return;
                     }
-                }, 100);
-            }
+                    
+                    // If the wrapper didn't work, try using the module directly
+                    if (ed25519Module.getPublicKey) {
+                        window.ed25519 = ed25519Module;
+                        globalThis.ed25519 = ed25519Module;
+                        window._ed25519Module = ed25519Module;
+                        console.log('✅ @noble/ed25519 loaded (direct module)');
+                        resolve(ed25519Module);
+                        return;
+                    }
+                    
+                    throw new Error('getPublicKey function not found in module');
+                } catch (error) {
+                    console.warn('⚠️ esm.sh failed:', error.message);
+                    console.warn('⚠️ Trying unpkg fallback...');
+                    
+                    // Fallback: Try loading from unpkg as a script
+                    const script = document.createElement('script');
+                    script.src = 'https://unpkg.com/@noble/ed25519@1.7.3';
+                    script.onload = () => {
+                        setTimeout(() => {
+                            // Check if it exposed itself
+                            if (typeof ed25519 !== 'undefined' && ed25519.getPublicKey) {
+                                window.ed25519 = ed25519;
+                                globalThis.ed25519 = ed25519;
+                                console.log('✅ @noble/ed25519 loaded via unpkg script tag');
+                                resolve(ed25519);
+                            } else {
+                                console.error('❌ @noble/ed25519 not exposed after script load');
+                                reject(new Error('@noble/ed25519 library failed to load: not exposed'));
+                            }
+                        }, 200);
+                    };
+                    script.onerror = () => {
+                        console.error('❌ All loading methods failed');
+                        reject(new Error('@noble/ed25519 library failed to load from all sources'));
+                    };
+                    document.head.appendChild(script);
+                }
+            })();
         });
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/@noble/ed25519@1.7.3/index.js"></script>
     
     <!-- Blockchain Core (load in order) -->
     <script src="src/core/Hasher.js"></script>

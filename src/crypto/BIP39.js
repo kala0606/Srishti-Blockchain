@@ -516,13 +516,75 @@ class BIP39 {
                 }
             }
             
-            // Alternative: Try to use Web Crypto API to derive public key
-            // Create a test signature and verify it to get the public key
-            // Actually, Web Crypto API doesn't have a direct way to get public key from private
-            // So we need @noble/ed25519 or we can't proceed deterministically
-            
-            // If we can't derive the public key, we can't return a valid key pair
-            throw new Error('Cannot derive public key without @noble/ed25519 library');
+            // Alternative: Try to use Web Crypto API's Ed25519 support
+            // We can generate a key pair from the seed deterministically using Web Crypto
+            // by importing the private key seed and letting Web Crypto derive the public key
+            try {
+                // Web Crypto API can derive public key from private key when we import it
+                // First, create a key pair from the seed deterministically
+                // We'll use the seed to generate a deterministic private key
+                const seedKey = await crypto.subtle.importKey(
+                    'raw',
+                    privateKeySeed,
+                    { name: 'HKDF' },
+                    false,
+                    ['deriveBits']
+                );
+                
+                const keyMaterial = await crypto.subtle.deriveBits(
+                    {
+                        name: 'HKDF',
+                        salt: new Uint8Array(0),
+                        info: new TextEncoder().encode('srishti-ed25519-deterministic'),
+                        hash: 'SHA-256'
+                    },
+                    seedKey,
+                    256
+                );
+                
+                const privateKeyBytes = new Uint8Array(keyMaterial).slice(0, 32);
+                const pkcs8Key = this.constructPKCS8(privateKeyBytes);
+                
+                // Import as Ed25519 private key - Web Crypto will derive the public key
+                const fullKeyPair = await crypto.subtle.importKey(
+                    'pkcs8',
+                    pkcs8Key,
+                    {
+                        name: 'Ed25519',
+                        namedCurve: 'Ed25519'
+                    },
+                    true,
+                    ['sign']
+                );
+                
+                // Export to get both keys
+                const exportedPrivate = await crypto.subtle.exportKey('pkcs8', fullKeyPair);
+                const exportedPublic = await crypto.subtle.exportKey('raw', await crypto.subtle.importKey(
+                    'raw',
+                    new Uint8Array(await crypto.subtle.exportKey('raw', fullKeyPair)).slice(0, 32), // This won't work directly
+                    { name: 'Ed25519' },
+                    false,
+                    ['verify']
+                ));
+                
+                // Actually, we need to sign something and extract public key from the signature
+                // Or use the key pair that Web Crypto generated
+                // Let's use a different approach: generate key pair and use the private key we derived
+                const testKeyPair = await crypto.subtle.generateKey(
+                    {
+                        name: 'Ed25519',
+                        namedCurve: 'Ed25519'
+                    },
+                    true,
+                    ['sign', 'verify']
+                );
+                
+                // This approach won't work - we need @noble/ed25519
+                throw new Error('Cannot derive public key without @noble/ed25519 library');
+            } catch (webCryptoError) {
+                console.error('Web Crypto API fallback failed:', webCryptoError);
+                throw new Error('Cannot derive public key without @noble/ed25519 library');
+            }
             
         } catch (error) {
             console.error('Error deriving public key from private key:', error);
