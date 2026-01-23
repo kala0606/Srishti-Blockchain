@@ -276,26 +276,26 @@ class BIP39 {
         // Generate 128 bits of entropy (16 bytes)
         const entropy = new Uint8Array(16);
         crypto.getRandomValues(entropy);
-        
+
         // Calculate checksum: first 4 bits of SHA-256 hash
         const hashBuffer = await crypto.subtle.digest('SHA-256', entropy);
         const hashArray = new Uint8Array(hashBuffer);
-        
+
         // Combine entropy + checksum = 132 bits = 12 words (11 bits per word)
         const bits = [];
-        
+
         // Add entropy bits (128 bits)
         for (let i = 0; i < 16; i++) {
             for (let j = 7; j >= 0; j--) {
                 bits.push((entropy[i] >> j) & 1);
             }
         }
-        
+
         // Add checksum bits (first 4 bits of hash)
         for (let j = 7; j >= 4; j--) {
             bits.push((hashArray[0] >> j) & 1);
         }
-        
+
         // Convert to words (11 bits per word)
         const words = [];
         for (let i = 0; i < 12; i++) {
@@ -308,7 +308,7 @@ class BIP39 {
             }
             words.push(this.WORD_LIST[index % 2048]);
         }
-        
+
         return words.join(' ');
     }
 
@@ -319,18 +319,18 @@ class BIP39 {
      */
     static async validateMnemonic(mnemonic) {
         const words = mnemonic.toLowerCase().trim().split(/\s+/);
-        
+
         if (words.length !== 12) {
             return false;
         }
-        
+
         // Check all words are in word list
         for (const word of words) {
             if (!this.WORD_LIST.includes(word)) {
                 return false;
             }
         }
-        
+
         // TODO: Validate checksum
         return true;
     }
@@ -353,7 +353,7 @@ class BIP39 {
             false,
             ['deriveBits']
         );
-        
+
         const seed = await crypto.subtle.deriveBits(
             {
                 name: 'HKDF',
@@ -364,7 +364,7 @@ class BIP39 {
             inputKey,
             512 // 64 bytes
         );
-        
+
         return new Uint8Array(seed);
     }
 
@@ -376,7 +376,7 @@ class BIP39 {
     static async seedToKeyPair(seed) {
         // Use first 32 bytes of seed as the private key seed
         const privateKeySeed = seed.slice(0, 32);
-        
+
         // Wait for @noble/ed25519 library to be ready if needed
         if (typeof window !== 'undefined' && window.ed25519Ready) {
             try {
@@ -385,7 +385,7 @@ class BIP39 {
                 console.warn('⚠️ Error waiting for ed25519:', error);
             }
         }
-        
+
         // Try to access @noble/ed25519 library - it might be exposed in different ways
         let ed25519Lib = null;
         if (typeof ed25519 !== 'undefined' && ed25519.getPublicKey) {
@@ -395,7 +395,7 @@ class BIP39 {
         } else if (typeof globalThis !== 'undefined' && globalThis.ed25519 && globalThis.ed25519.getPublicKey) {
             ed25519Lib = globalThis.ed25519;
         }
-        
+
         // Use @noble/ed25519 for deterministic key generation
         if (ed25519Lib) {
             try {
@@ -404,41 +404,50 @@ class BIP39 {
                 // We use SHA-512 hash of the seed, then take first 32 bytes
                 const privateKeyRaw = await crypto.subtle.digest('SHA-512', privateKeySeed);
                 const privateKey32 = new Uint8Array(privateKeyRaw).slice(0, 32);
-                
+
                 // Get public key from private key (deterministic)
                 // Ensure privateKey32 is a proper Uint8Array
                 if (!(privateKey32 instanceof Uint8Array)) {
                     throw new Error('Invalid private key format');
                 }
-                
-                const publicKeyBytes = ed25519Lib.getPublicKey(privateKey32);
-                
+
+                // Get public key from private key (deterministic)
+                // This returns a Promise in newer versions of @noble/ed25519
+                const publicKeyBytesResult = await Promise.resolve(ed25519Lib.getPublicKey(privateKey32));
+
                 // Ensure publicKeyBytes is a Uint8Array
                 let publicKeyBytesArray;
-                if (publicKeyBytes instanceof Uint8Array) {
-                    publicKeyBytesArray = publicKeyBytes;
-                } else if (Array.isArray(publicKeyBytes)) {
-                    publicKeyBytesArray = new Uint8Array(publicKeyBytes);
-                } else if (publicKeyBytes && typeof publicKeyBytes === 'object') {
+                if (publicKeyBytesResult instanceof Uint8Array) {
+                    publicKeyBytesArray = publicKeyBytesResult;
+                } else if (Array.isArray(publicKeyBytesResult)) {
+                    publicKeyBytesArray = new Uint8Array(publicKeyBytesResult);
+                } else if (publicKeyBytesResult && typeof publicKeyBytesResult === 'object') {
                     // Try to convert object/array-like to Uint8Array
                     try {
-                        publicKeyBytesArray = new Uint8Array(Array.from(publicKeyBytes));
+                        publicKeyBytesArray = new Uint8Array(Array.from(publicKeyBytesResult));
                     } catch (e) {
                         throw new Error('Invalid public key format from getPublicKey: ' + e.message);
                     }
                 } else {
-                    throw new Error('getPublicKey returned unexpected type: ' + typeof publicKeyBytes);
+                    throw new Error('getPublicKey returned unexpected type: ' + typeof publicKeyBytesResult);
                 }
-                
+
+                // Validate that the public key is exactly 32 bytes
+                if (publicKeyBytesArray.length !== 32) {
+                    throw new Error(`Invalid public key length: expected 32 bytes, got ${publicKeyBytesArray.length} bytes`);
+                }
+
+                console.log('✅ Derived public key:', publicKeyBytesArray.length, 'bytes');
+
                 // Convert to Web Crypto API format
                 const privateKey = await window.SrishtiKeys.importPrivateKey(
                     this.bytesToBase64(this.constructPKCS8(privateKey32))
                 );
-                
+
                 const publicKey = await window.SrishtiKeys.importPublicKey(
                     this.bytesToBase64(publicKeyBytesArray)
                 );
-                
+
                 return { publicKey, privateKey };
             } catch (error) {
                 console.error('Error using @noble/ed25519 for key derivation:', error);
@@ -449,7 +458,7 @@ class BIP39 {
             console.warn('⚠️ @noble/ed25519 library not immediately available. Checking again...');
             // Wait 100ms and check again
             await new Promise(resolve => setTimeout(resolve, 100));
-            
+
             // Re-check for the library
             if (typeof ed25519 !== 'undefined' && ed25519.getPublicKey) {
                 ed25519Lib = ed25519;
@@ -458,29 +467,43 @@ class BIP39 {
             } else if (typeof globalThis !== 'undefined' && globalThis.ed25519 && globalThis.ed25519.getPublicKey) {
                 ed25519Lib = globalThis.ed25519;
             }
-            
+
             if (ed25519Lib) {
                 console.log('✅ @noble/ed25519 library found after wait');
                 // Retry with the library
                 const privateKeyRaw = await crypto.subtle.digest('SHA-512', privateKeySeed);
                 const privateKey32 = new Uint8Array(privateKeyRaw).slice(0, 32);
-                const publicKeyBytes = ed25519Lib.getPublicKey(privateKey32);
-                
+                const publicKeyBytesResult = await Promise.resolve(ed25519Lib.getPublicKey(privateKey32));
+
+                // Ensure it's a Uint8Array and exactly 32 bytes
+                let publicKeyBytesArray;
+                if (publicKeyBytesResult instanceof Uint8Array) {
+                    publicKeyBytesArray = publicKeyBytesResult;
+                } else if (Array.isArray(publicKeyBytesResult)) {
+                    publicKeyBytesArray = new Uint8Array(publicKeyBytesResult);
+                } else {
+                    publicKeyBytesArray = new Uint8Array(Array.from(publicKeyBytesResult));
+                }
+
+                if (publicKeyBytesArray.length !== 32) {
+                    throw new Error(`Invalid public key length: expected 32 bytes, got ${publicKeyBytesArray.length} bytes`);
+                }
+
                 const privateKey = await window.SrishtiKeys.importPrivateKey(
                     this.bytesToBase64(this.constructPKCS8(privateKey32))
                 );
-                
+
                 const publicKey = await window.SrishtiKeys.importPublicKey(
-                    this.bytesToBase64(publicKeyBytes)
+                    this.bytesToBase64(publicKeyBytesArray)
                 );
-                
+
                 return { publicKey, privateKey };
             } else {
                 console.error('❌ @noble/ed25519 library not available. BIP39 key derivation requires this library.');
                 throw new Error('@noble/ed25519 library is required for BIP39 key derivation but is not available. Please ensure the library is loaded before using BIP39.');
             }
         }
-        
+
         // Fallback: Use HKDF to derive key material deterministically
         const keyMaterial = await crypto.subtle.importKey(
             'raw',
@@ -489,7 +512,7 @@ class BIP39 {
             false,
             ['deriveBits']
         );
-        
+
         const derivedPrivate = await crypto.subtle.deriveBits(
             {
                 name: 'HKDF',
@@ -500,10 +523,10 @@ class BIP39 {
             keyMaterial,
             256
         );
-        
+
         const privateKeyBytes = new Uint8Array(derivedPrivate).slice(0, 32);
         const pkcs8Key = this.constructPKCS8(privateKeyBytes);
-        
+
         const privateKey = await crypto.subtle.importKey(
             'pkcs8',
             pkcs8Key,
@@ -514,17 +537,17 @@ class BIP39 {
             true,
             ['sign']
         );
-        
+
         // Derive public key from private key
         // For Ed25519, we can use @noble/ed25519 to get the public key from private key bytes
         try {
             // Export the private key to get the raw bytes
             const exportedPrivate = await crypto.subtle.exportKey('pkcs8', privateKey);
             const exportedBytes = new Uint8Array(exportedPrivate);
-            
+
             // PKCS8 format: last 32 bytes are the actual Ed25519 private key
             const privateKeyRaw = exportedBytes.slice(-32);
-            
+
             // Use @noble/ed25519 if available to get public key
             if (ed25519Lib) {
                 try {
@@ -537,25 +560,30 @@ class BIP39 {
                     } else {
                         privateKeyRawArray = new Uint8Array(Array.from(privateKeyRaw));
                     }
-                    
-                    const publicKeyBytes = ed25519Lib.getPublicKey(privateKeyRawArray);
-                    
+
+                    const publicKeyBytesResult = await Promise.resolve(ed25519Lib.getPublicKey(privateKeyRawArray));
+
                     // Ensure publicKeyBytes is a Uint8Array
                     let publicKeyBytesArray;
-                    if (publicKeyBytes instanceof Uint8Array) {
-                        publicKeyBytesArray = publicKeyBytes;
-                    } else if (Array.isArray(publicKeyBytes)) {
-                        publicKeyBytesArray = new Uint8Array(publicKeyBytes);
-                    } else if (publicKeyBytes && typeof publicKeyBytes === 'object') {
+                    if (publicKeyBytesResult instanceof Uint8Array) {
+                        publicKeyBytesArray = publicKeyBytesResult;
+                    } else if (Array.isArray(publicKeyBytesResult)) {
+                        publicKeyBytesArray = new Uint8Array(publicKeyBytesResult);
+                    } else if (publicKeyBytesResult && typeof publicKeyBytesResult === 'object') {
                         try {
-                            publicKeyBytesArray = new Uint8Array(Array.from(publicKeyBytes));
+                            publicKeyBytesArray = new Uint8Array(Array.from(publicKeyBytesResult));
                         } catch (e) {
                             throw new Error('Invalid public key format: ' + e.message);
                         }
                     } else {
-                        throw new Error('getPublicKey returned unexpected type: ' + typeof publicKeyBytes);
+                        throw new Error('getPublicKey returned unexpected type: ' + typeof publicKeyBytesResult);
                     }
-                    
+
+                    // Validate that the public key is exactly 32 bytes
+                    if (publicKeyBytesArray.length !== 32) {
+                        throw new Error(`Invalid public key length: expected 32 bytes, got ${publicKeyBytesArray.length} bytes`);
+                    }
+
                     const publicKey = await window.SrishtiKeys.importPublicKey(
                         this.bytesToBase64(publicKeyBytesArray)
                     );
@@ -564,7 +592,7 @@ class BIP39 {
                     console.error('Error using @noble/ed25519 to derive public key:', error);
                 }
             }
-            
+
             // Alternative: Try to use Web Crypto API's Ed25519 support
             // We can generate a key pair from the seed deterministically using Web Crypto
             // by importing the private key seed and letting Web Crypto derive the public key
@@ -579,7 +607,7 @@ class BIP39 {
                     false,
                     ['deriveBits']
                 );
-                
+
                 const keyMaterial = await crypto.subtle.deriveBits(
                     {
                         name: 'HKDF',
@@ -590,10 +618,10 @@ class BIP39 {
                     seedKey,
                     256
                 );
-                
+
                 const privateKeyBytes = new Uint8Array(keyMaterial).slice(0, 32);
                 const pkcs8Key = this.constructPKCS8(privateKeyBytes);
-                
+
                 // Import as Ed25519 private key - Web Crypto will derive the public key
                 const fullKeyPair = await crypto.subtle.importKey(
                     'pkcs8',
@@ -605,7 +633,7 @@ class BIP39 {
                     true,
                     ['sign']
                 );
-                
+
                 // Export to get both keys
                 const exportedPrivate = await crypto.subtle.exportKey('pkcs8', fullKeyPair);
                 const exportedPublic = await crypto.subtle.exportKey('raw', await crypto.subtle.importKey(
@@ -615,7 +643,7 @@ class BIP39 {
                     false,
                     ['verify']
                 ));
-                
+
                 // Actually, we need to sign something and extract public key from the signature
                 // Or use the key pair that Web Crypto generated
                 // Let's use a different approach: generate key pair and use the private key we derived
@@ -627,14 +655,14 @@ class BIP39 {
                     true,
                     ['sign', 'verify']
                 );
-                
+
                 // This approach won't work - we need @noble/ed25519
                 throw new Error('Cannot derive public key without @noble/ed25519 library');
             } catch (webCryptoError) {
                 console.error('Web Crypto API fallback failed:', webCryptoError);
                 throw new Error('Cannot derive public key without @noble/ed25519 library');
             }
-            
+
         } catch (error) {
             console.error('Error deriving public key from private key:', error);
             // If we can't derive the public key deterministically, we should throw
@@ -642,7 +670,7 @@ class BIP39 {
             throw new Error('Failed to derive key pair deterministically: ' + error.message);
         }
     }
-    
+
     /**
      * Construct PKCS8 format for Ed25519 private key
      * @param {Uint8Array} privateKeyBytes - 32-byte private key
@@ -657,14 +685,14 @@ class BIP39 {
             0x04, 0x22, // OCTET STRING, 34 bytes
             0x04, 0x20 // OCTET STRING, 32 bytes (the actual key)
         ]);
-        
+
         const pkcs8Key = new Uint8Array(pkcs8Header.length + privateKeyBytes.length);
         pkcs8Key.set(pkcs8Header);
         pkcs8Key.set(privateKeyBytes, pkcs8Header.length);
-        
+
         return pkcs8Key;
     }
-    
+
     /**
      * Convert bytes to base64
      * @param {Uint8Array|Array} bytes
@@ -675,17 +703,17 @@ class BIP39 {
         if (!(bytes instanceof Uint8Array)) {
             bytes = new Uint8Array(bytes);
         }
-        
+
         // For large arrays, use a chunked approach to avoid stack overflow
         // String.fromCharCode can only handle a limited number of arguments
         const chunkSize = 8192;
         let result = '';
-        
+
         for (let i = 0; i < bytes.length; i += chunkSize) {
             const chunk = bytes.slice(i, i + chunkSize);
             result += String.fromCharCode.apply(null, chunk);
         }
-        
+
         return btoa(result);
     }
 
