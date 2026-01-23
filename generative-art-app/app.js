@@ -349,7 +349,9 @@ class GenerativeArtAppUI {
         releasesEl.innerHTML = '<div class="loading">Loading releases...</div>';
 
         try {
+            console.log('🔄 Loading released projects...');
             const projects = await this.artApp.getReleasedProjects();
+            console.log('✅ Found released projects:', projects.length, projects.map(p => ({ id: p.id, status: p.status, hasCode: !!p.code, hasThumbnail: !!p.thumbnailUrl })));
             
             if (projects.length === 0) {
                 releasesEl.innerHTML = `
@@ -368,13 +370,17 @@ class GenerativeArtAppUI {
 
             // Generate thumbnails for projects that don't have them
             for (const project of projects) {
+                console.log('📦 Processing project:', project.id, 'hasCode:', !!project.code, 'hasThumbnail:', !!project.thumbnailUrl, 'status:', project.status);
+                
                 const card = this.createReleaseCard(project);
                 gallery.appendChild(card);
                 
                 // Generate thumbnail in background if missing
                 if (!project.thumbnailUrl && project.code) {
+                    console.log('🎨 Generating thumbnail for project:', project.id);
                     this.artApp.getProject(project.id, true).then(updatedProject => {
                         if (updatedProject && updatedProject.thumbnailUrl) {
+                            console.log('✅ Thumbnail generated for project:', project.id);
                             // Update the card with the new thumbnail
                             const img = card.querySelector('.art-image img');
                             if (img) {
@@ -386,15 +392,20 @@ class GenerativeArtAppUI {
                                     artImage.innerHTML = `<img src="${updatedProject.thumbnailUrl}" alt="${updatedProject.title}" style="width: 100%; height: 100%; object-fit: cover;">`;
                                 }
                             }
+                        } else {
+                            console.warn('⚠️ Thumbnail generation returned no image for project:', project.id);
                         }
-                    }).catch(err => 
-                        console.warn('Failed to generate thumbnail for project:', project.id, err)
-                    );
+                    }).catch(err => {
+                        console.error('❌ Failed to generate thumbnail for project:', project.id, err);
+                    });
+                } else if (!project.code) {
+                    console.warn('⚠️ Project has no code:', project.id);
                 }
             }
         } catch (error) {
-            console.error('Failed to load releases:', error);
-            releasesEl.innerHTML = `<div class="empty-state">Error loading releases: ${error.message}</div>`;
+            console.error('❌ Failed to load releases:', error);
+            console.error('Error stack:', error.stack);
+            releasesEl.innerHTML = `<div class="empty-state">Error loading releases: ${error.message}<br><small>Check console for details</small></div>`;
         }
     }
 

@@ -1035,8 +1035,21 @@ class GenerativeArtApp {
      * @returns {Promise<Array>}
      */
     async getReleasedProjects() {
+        // Ensure store is initialized and synced
+        await this._initPromise;
+        await this._syncWithChain();
+        
         const allProjects = await this.getAllProjects();
-        return allProjects.filter(p => p.status === GenerativeArtApp.PROJECT_STATUS.RELEASED);
+        console.log('🔍 All projects:', allProjects.length, allProjects.map(p => ({ id: p.id, status: p.status })));
+        
+        // Filter for released projects (check both constant and string)
+        const released = allProjects.filter(p => {
+            const isReleased = p.status === GenerativeArtApp.PROJECT_STATUS.RELEASED || p.status === 'RELEASED';
+            return isReleased;
+        });
+        
+        console.log('✅ Released projects:', released.length);
+        return released;
     }
     
     /**
@@ -1194,8 +1207,14 @@ class GenerativeArtApp {
         try {
             console.log('🎨 Executing generative code with params:', params);
             
-            // Create a safe execution context with all necessary functions
-            const generateFunction = new Function('params', `
+            // Create a canvas element for rendering
+            const canvas = document.createElement('canvas');
+            canvas.width = 512;
+            canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+            
+            // Create a safe execution context with all necessary functions and canvas
+            const generateFunction = new Function('params', 'canvas', 'ctx', `
                 // Helper functions that might be needed
                 function hash(str) {
                     let h = 0;
@@ -1206,19 +1225,35 @@ class GenerativeArtApp {
                     return Math.abs(h);
                 }
                 
+                // Canvas helpers
+                const width = canvas.width;
+                const height = canvas.height;
+                
                 ${code}
                 
                 // Call generate function if it exists
                 if (typeof generate === 'function') {
-                    return generate(params);
+                    const result = generate(params);
+                    // If result is a canvas, return it
+                    if (result && (result.nodeName === 'CANVAS' || (typeof result.toDataURL === 'function' && typeof result.getContext === 'function'))) {
+                        return result;
+                    }
+                    // If result is a data URL, return it
+                    if (typeof result === 'string' && result.startsWith('data:image')) {
+                        return result;
+                    }
+                    // If result is null/undefined but code executed, return canvas
+                    if (result === null || result === undefined) {
+                        return canvas;
+                    }
+                    return result;
                 }
                 
-                // If code doesn't define generate, try to execute it directly
-                // (some code might be self-executing)
-                return null;
+                // If no generate function, return the canvas (code might have drawn directly)
+                return canvas;
             `);
             
-            const result = generateFunction(params);
+            const result = generateFunction(params, canvas, ctx);
             
             console.log('🎨 Code execution result type:', typeof result, result?.constructor?.name);
             
@@ -1240,12 +1275,18 @@ class GenerativeArtApp {
                 return result.toDataURL('image/png');
             }
             
+            // If result is the canvas we created, return it
+            if (result === canvas) {
+                console.log('✅ Code executed, returning canvas');
+                return canvas.toDataURL('image/png');
+            }
+            
             // If no result, log warning
             console.warn('⚠️ Code execution returned no valid image. Result:', result);
             return null;
         } catch (error) {
             console.error('❌ Error executing generative code:', error);
-            console.error('   Code snippet:', code.substring(0, 200));
+            console.error('   Code snippet:', code ? code.substring(0, 200) : 'null');
             console.error('   Params:', params);
             throw new Error(`Code execution failed: ${error.message}`);
         }
