@@ -53,8 +53,166 @@ class GenerativeArtApp {
         this.sdk = sdk;
         this.store = sdk.getAppStore(GenerativeArtApp.APP_ID);
         
+        // Initialize store and sync data
+        this._initPromise = this._initializeStore();
+        
         // Set up event listener for real-time updates
         this._setupEventListener();
+    }
+    
+    /**
+     * Initialize the store and sync data from IndexedDB
+     * @private
+     */
+    async _initializeStore() {
+        // Ensure store is initialized
+        await this.store.init();
+        
+        // Sync on-chain events with local data
+        await this._syncWithChain();
+    }
+    
+    /**
+     * Sync local data with on-chain events
+     * Reconstructs any missing local data from blockchain
+     * @private
+     */
+    async _syncWithChain() {
+        // Get all on-chain project events
+        const projectEvents = this.sdk.queryAppEvents(
+            GenerativeArtApp.APP_ID,
+            GenerativeArtApp.ACTIONS.PROJECT_CREATE
+        );
+        
+        // Ensure all projects exist locally
+        for (const event of projectEvents) {
+            const projectId = event.payload.ref;
+            const existing = await this.store.get(projectId);
+            if (!existing) {
+                // Project exists on-chain but not locally - reconstruct basic info
+                const project = {
+                    id: projectId,
+                    type: 'project',
+                    title: event.payload.metadata?.title || 'Unknown Project',
+                    description: '',
+                    code: null, // Code not stored on-chain
+                    parameters: {},
+                    maxSupply: event.payload.metadata?.maxSupply || null,
+                    mintPrice: event.payload.metadata?.mintPrice || 0,
+                    artistId: event.sender,
+                    artistName: event.payload.metadata?.artistName || 'Unknown',
+                    createdAt: event.timestamp,
+                    pieceCount: 0,
+                    status: 'ACTIVE'
+                };
+                await this.store.put(projectId, project);
+            }
+        }
+        
+        // Get all on-chain mint events
+        const mintEvents = this.sdk.queryAppEvents(
+            GenerativeArtApp.APP_ID,
+            GenerativeArtApp.ACTIONS.PIECE_MINT
+        );
+        
+        // Ensure all pieces exist locally
+        for (const event of mintEvents) {
+            const pieceId = event.payload.target;
+            const existing = await this.store.get(pieceId);
+            if (!existing) {
+                // Piece exists on-chain but not locally - reconstruct basic info
+                const projectId = event.payload.ref;
+                const project = await this.store.get(projectId);
+                
+                const piece = {
+                    id: pieceId,
+                    type: 'piece',
+                    projectId: projectId,
+                    projectTitle: project?.title || event.payload.metadata?.projectTitle || 'Unknown',
+                    artistId: event.payload.metadata?.artistId || event.sender,
+                    artistName: project?.artistName || 'Unknown',
+                    ownerId: event.payload.metadata?.ownerId || event.sender,
+                    ownerName: this._getNodeName(event.payload.metadata?.ownerId || event.sender),
+                    mintedAt: event.payload.metadata?.mintedAt || event.timestamp,
+                    seed: event.payload.metadata?.seed || null,
+                    parameters: {},
+                    imageUrl: null,
+                    status: GenerativeArtApp.STATUS.MINTED,
+                    price: null,
+                    transferHistory: [{
+                        from: null,
+                        to: event.payload.metadata?.ownerId || event.sender,
+                        timestamp: event.payload.metadata?.mintedAt || event.timestamp,
+                        type: 'MINT'
+                    }]
+                };
+                await this.store.put(pieceId, piece);
+            } else {
+                // Update status from on-chain events (listings, purchases, etc.)
+                await this._updatePieceStatusFromChain(pieceId);
+            }
+        }
+    }
+    
+    /**
+     * Update piece status from on-chain events
+     * @private
+     */
+    async _updatePieceStatusFromChain(pieceId) {
+        const piece = await this.store.get(pieceId);
+        if (!piece) return;
+        
+        // Check for listing events
+        const listEvents = this.sdk.queryAppEvents(
+            GenerativeArtApp.APP_ID,
+            GenerativeArtApp.ACTIONS.PIECE_LIST,
+            { ref: pieceId }
+        );
+        
+        if (listEvents.length > 0) {
+            const latest = listEvents[listEvents.length - 1];
+            const unlistEvents = this.sdk.queryAppEvents(
+                GenerativeArtApp.APP_ID,
+                GenerativeArtApp.ACTIONS.PIECE_UNLIST,
+                { ref: pieceId }
+            );
+            
+            // If there's a more recent unlist, or no unlist, check purchase
+            if (unlistEvents.length === 0 || unlistEvents[unlistEvents.length - 1].timestamp < latest.timestamp) {
+                const purchaseEvents = this.sdk.queryAppEvents(
+                    GenerativeArtApp.APP_ID,
+                    GenerativeArtApp.ACTIONS.PIECE_PURCHASE,
+                    { ref: pieceId }
+                );
+                
+                if (purchaseEvents.length > 0) {
+                    const purchase = purchaseEvents[purchaseEvents.length - 1];
+                    piece.status = GenerativeArtApp.STATUS.SOLD;
+                    piece.ownerId = purchase.payload.metadata?.newOwnerId || piece.ownerId;
+                    piece.ownerName = this._getNodeName(piece.ownerId);
+                    piece.price = null;
+                } else {
+                    piece.status = GenerativeArtApp.STATUS.LISTED;
+                    piece.price = latest.payload.metadata?.price || piece.price;
+                }
+            }
+        }
+        
+        // Check for transfer events
+        const transferEvents = this.sdk.queryAppEvents(
+            GenerativeArtApp.APP_ID,
+            GenerativeArtApp.ACTIONS.PIECE_TRANSFER,
+            { ref: pieceId }
+        );
+        
+        if (transferEvents.length > 0) {
+            const latest = transferEvents[transferEvents.length - 1];
+            piece.ownerId = latest.payload.target;
+            piece.ownerName = this._getNodeName(piece.ownerId);
+            piece.status = GenerativeArtApp.STATUS.TRANSFERRED;
+        }
+        
+        await this.store.put(pieceId, piece);
     }
     
     /**
@@ -105,6 +263,9 @@ class GenerativeArtApp {
      * });
      */
     async createProject(options) {
+        // Ensure store is initialized
+        await this._initPromise;
+        
         if (!options.title) {
             throw new Error('Project title is required');
         }
@@ -205,6 +366,9 @@ class GenerativeArtApp {
      * });
      */
     async mintPiece(projectId, options = {}) {
+        // Ensure store is initialized
+        await this._initPromise;
+        
         const project = await this.store.get(projectId);
         if (!project) {
             throw new Error('Project not found');
@@ -380,6 +544,9 @@ class GenerativeArtApp {
      * @returns {Promise<boolean>}
      */
     async listForSale(pieceId, price) {
+        // Ensure store is initialized
+        await this._initPromise;
+        
         if (!price || price <= 0) {
             throw new Error('Price must be greater than 0');
         }
@@ -437,6 +604,9 @@ class GenerativeArtApp {
      * @returns {Promise<boolean>}
      */
     async unlistFromSale(pieceId) {
+        // Ensure store is initialized
+        await this._initPromise;
+        
         const piece = await this.store.get(pieceId);
         if (!piece) {
             throw new Error('Piece not found');
@@ -489,6 +659,9 @@ class GenerativeArtApp {
      * @returns {Promise<boolean>}
      */
     async purchasePiece(pieceId) {
+        // Ensure store is initialized
+        await this._initPromise;
+        
         const piece = await this.store.get(pieceId);
         if (!piece) {
             throw new Error('Piece not found');
@@ -570,6 +743,9 @@ class GenerativeArtApp {
      * @returns {Promise<boolean>}
      */
     async transferPiece(pieceId, recipientId) {
+        // Ensure store is initialized
+        await this._initPromise;
+        
         const piece = await this.store.get(pieceId);
         if (!piece) {
             throw new Error('Piece not found');
@@ -642,20 +818,36 @@ class GenerativeArtApp {
      * @returns {Promise<Array>}
      */
     async getAllProjects() {
+        // Ensure store is initialized
+        await this._initPromise;
+        
+        // First, sync with chain to ensure we have all data
+        await this._syncWithChain();
+        
+        // Get all projects from store (more reliable than just on-chain events)
+        const allProjects = await this.store.filter(p => p.type === 'project');
+        
+        // Also check on-chain events to catch any we might have missed
         const events = this.sdk.queryAppEvents(
             GenerativeArtApp.APP_ID,
             GenerativeArtApp.ACTIONS.PROJECT_CREATE
         );
         
-        const projects = [];
+        const projectMap = new Map();
+        allProjects.forEach(p => projectMap.set(p.id, p));
+        
+        // Add any from on-chain that aren't in local store
         for (const event of events) {
-            const project = await this.store.get(event.payload.ref);
-            if (project) {
-                projects.push(project);
+            const projectId = event.payload.ref;
+            if (!projectMap.has(projectId)) {
+                const project = await this.store.get(projectId);
+                if (project) {
+                    projectMap.set(projectId, project);
+                }
             }
         }
         
-        return projects;
+        return Array.from(projectMap.values());
     }
     
     /**
@@ -663,7 +855,13 @@ class GenerativeArtApp {
      * @returns {Promise<Array>}
      */
     async getMyProjects() {
-        return await this.store.filter(p => p.type === 'project' && p.artistId === this.sdk.nodeId);
+        // Ensure store is initialized and synced
+        await this._initPromise;
+        await this._syncWithChain();
+        
+        // Get all projects and filter by artist
+        const allProjects = await this.getAllProjects();
+        return allProjects.filter(p => p.artistId === this.sdk.nodeId);
     }
     
     /**
@@ -672,6 +870,10 @@ class GenerativeArtApp {
      * @returns {Promise<Object|null>}
      */
     async getProject(projectId) {
+        // Ensure store is initialized and synced
+        await this._initPromise;
+        await this._syncWithChain();
+        
         return await this.store.get(projectId);
     }
     
@@ -680,20 +882,36 @@ class GenerativeArtApp {
      * @returns {Promise<Array>}
      */
     async getAllPieces() {
+        // Ensure store is initialized
+        await this._initPromise;
+        
+        // First, sync with chain to ensure we have all data
+        await this._syncWithChain();
+        
+        // Get all pieces from store (more reliable than just on-chain events)
+        const allPieces = await this.store.filter(p => p.type === 'piece');
+        
+        // Also check on-chain events to catch any we might have missed
         const events = this.sdk.queryAppEvents(
             GenerativeArtApp.APP_ID,
             GenerativeArtApp.ACTIONS.PIECE_MINT
         );
         
-        const pieces = [];
+        const pieceMap = new Map();
+        allPieces.forEach(p => pieceMap.set(p.id, p));
+        
+        // Add any from on-chain that aren't in local store
         for (const event of events) {
-            const piece = await this.store.get(event.payload.target);
-            if (piece) {
-                pieces.push(piece);
+            const pieceId = event.payload.target;
+            if (!pieceMap.has(pieceId)) {
+                const piece = await this.store.get(pieceId);
+                if (piece) {
+                    pieceMap.set(pieceId, piece);
+                }
             }
         }
         
-        return pieces;
+        return Array.from(pieceMap.values());
     }
     
     /**
@@ -710,7 +928,13 @@ class GenerativeArtApp {
      * @returns {Promise<Array>}
      */
     async getMyPieces() {
-        return await this.store.filter(p => p.type === 'piece' && p.ownerId === this.sdk.nodeId);
+        // Ensure store is initialized and synced
+        await this._initPromise;
+        await this._syncWithChain();
+        
+        // Get all pieces and filter by owner
+        const allPieces = await this.getAllPieces();
+        return allPieces.filter(p => p.ownerId === this.sdk.nodeId);
     }
     
     /**
@@ -718,6 +942,17 @@ class GenerativeArtApp {
      * @returns {Promise<Array>}
      */
     async getListedPieces() {
+        // Ensure store is initialized and synced
+        await this._initPromise;
+        await this._syncWithChain();
+        
+        // Update status for all pieces before filtering
+        const allPieces = await this.getAllPieces();
+        for (const piece of allPieces) {
+            await this._updatePieceStatusFromChain(piece.id);
+        }
+        
+        // Now get listed pieces
         return await this.store.filter(p => p.type === 'piece' && p.status === GenerativeArtApp.STATUS.LISTED);
     }
     
@@ -727,6 +962,13 @@ class GenerativeArtApp {
      * @returns {Promise<Object|null>}
      */
     async getPiece(pieceId) {
+        // Ensure store is initialized and synced
+        await this._initPromise;
+        await this._syncWithChain();
+        
+        // Update status from chain before returning
+        await this._updatePieceStatusFromChain(pieceId);
+        
         return await this.store.get(pieceId);
     }
     
