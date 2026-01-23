@@ -178,7 +178,17 @@ class SessionAuth {
             }
             
             // Verify signature
+            // IMPORTANT: We must stringify token.data in the exact same way it was stringified when signing
+            // JSON.stringify should be deterministic, but let's ensure we're using the same method
             const tokenString = JSON.stringify(token.data);
+            
+            // Debug: Log the exact string being verified
+            console.log('🔍 [SessionAuth] Token string for verification:', {
+                tokenString: tokenString,
+                tokenStringLength: tokenString.length,
+                tokenDataKeys: Object.keys(token.data),
+                tokenDataValues: Object.values(token.data).map(v => typeof v === 'string' ? v.substring(0, 20) + '...' : v)
+            });
             
             // Validate signature format
             if (!token.signature || typeof token.signature !== 'string') {
@@ -212,7 +222,43 @@ class SessionAuth {
                 tokenDataKeys: Object.keys(token.data)
             });
             
-            const isValid = await window.SrishtiKeys.verify(publicKey, tokenString, token.signature);
+            // Try to verify - but first check if signature might be double-encoded
+            let signatureToVerify = token.signature;
+            
+            // Check if signature looks like it might be double-base64-encoded
+            // (if it's very long, it might be double-encoded)
+            if (signatureToVerify.length > 100) {
+                console.warn('⚠️ [SessionAuth] Signature is unusually long, might be double-encoded. Trying to decode...');
+                try {
+                    // Try decoding once to see if it's double-encoded
+                    const decoded = atob(signatureToVerify);
+                    // Check if decoded result looks like base64
+                    if (/^[A-Za-z0-9+/=]+$/.test(decoded) && decoded.length > 20) {
+                        console.log('🔍 [SessionAuth] Signature appears to be double-encoded, using decoded version');
+                        signatureToVerify = decoded;
+                    }
+                } catch (e) {
+                    console.log('🔍 [SessionAuth] Signature is not double-encoded, using as-is');
+                }
+            }
+            
+            console.log('🔍 [SessionAuth] Final verification attempt:', {
+                tokenString: tokenString,
+                signatureLength: signatureToVerify.length,
+                signaturePreview: signatureToVerify.substring(0, 30) + '...' + signatureToVerify.substring(signatureToVerify.length - 10),
+                publicKeyAvailable: !!publicKey
+            });
+            
+            let isValid = false;
+            let verifyError = null;
+            try {
+                isValid = await window.SrishtiKeys.verify(publicKey, tokenString, signatureToVerify);
+                console.log('🔍 [SessionAuth] Verification result:', isValid);
+            } catch (error) {
+                verifyError = error;
+                console.error('❌ [SessionAuth] Verification threw an error:', error);
+                isValid = false;
+            }
             
             if (!isValid) {
                 // Try to get more info about why verification failed
@@ -221,11 +267,31 @@ class SessionAuth {
                     tokenData: token.data,
                     signatureLength: token.signature ? token.signature.length : 0,
                     signatureBase64: token.signature,
+                    signatureToVerifyLength: signatureToVerify.length,
+                    signatureToVerify: signatureToVerify,
                     publicKeyAvailable: !!publicKey,
                     tokenString: tokenString,
                     // Check if signature looks valid (base64)
-                    signatureIsBase64: token.signature ? /^[A-Za-z0-9+/=]+$/.test(token.signature) : false
+                    signatureIsBase64: token.signature ? /^[A-Za-z0-9+/=]+$/.test(token.signature) : false,
+                    signatureToVerifyIsBase64: /^[A-Za-z0-9+/=]+$/.test(signatureToVerify),
+                    verifyError: verifyError ? {
+                        message: verifyError.message,
+                        stack: verifyError.stack,
+                        name: verifyError.name
+                    } : null
                 });
+                
+                // Additional diagnostic: Check if we can decode the signature bytes
+                try {
+                    const sigBytes = atob(signatureToVerify);
+                    console.log('🔍 [SessionAuth] Signature bytes info:', {
+                        byteLength: sigBytes.length,
+                        expectedLength: 64, // Ed25519 signatures are 64 bytes
+                        matchesExpected: sigBytes.length === 64
+                    });
+                } catch (e) {
+                    console.error('❌ [SessionAuth] Cannot decode signature bytes:', e);
+                }
                 
                 // Additional debug: try to verify with a test signature to see if the key works
                 try {
