@@ -5088,31 +5088,70 @@
                     return;
                 }
                 
-                // Step 3: Restore node identity
-                console.log('🔑 Step 3: Restoring node identity...');
+                // Step 3: Restore node identity and private key
+                console.log('🔑 Step 3: Restoring node identity and private key...');
                 
-                // We found the node, but we can't restore the private key from just the phrase
-                // (the phrase only encodes part of the key). However, we can restore the identity.
-                // For now, we'll need to generate a new key pair and update the node.
-                // In a full implementation, we'd need to store the encrypted private key.
+                // Try to restore private key using BIP39 (for nodes created with BIP39)
+                let restoredKeyPair = null;
+                let restoredPrivateKeyBase64 = null;
+                let keyRestored = false;
                 
-                // For now, restore what we can:
-                // - Node ID (from chain)
-                // - Node name (from chain or user input)
-                // - Public key (from chain)
+                if (window.SrishtiBIP39) {
+                    try {
+                        console.log('🔐 Attempting BIP39 key derivation from recovery phrase...');
+                        // Derive key pair from mnemonic phrase
+                        const derivedKeyPair = await window.SrishtiBIP39.mnemonicToKeyPair(phrase);
+                        
+                        // Export the derived public key to compare with chain
+                        const derivedPublicKeyBase64 = await window.SrishtiKeys.exportPublicKeyBase64(derivedKeyPair.publicKey);
+                        
+                        // Verify the derived public key matches the public key on-chain
+                        if (foundNode.publicKey && derivedPublicKeyBase64 === foundNode.publicKey) {
+                            console.log('✅ Private key successfully restored from BIP39 mnemonic!');
+                            restoredKeyPair = derivedKeyPair;
+                            restoredPrivateKeyBase64 = await window.SrishtiKeys.exportPrivateKeyBase64(derivedKeyPair.privateKey);
+                            keyRestored = true;
+                        } else {
+                            console.log('⚠️ BIP39 derivation did not match chain public key (old recovery method used)');
+                            console.log('   Chain public key:', foundNode.publicKey?.substring(0, 30) + '...');
+                            console.log('   Derived public key:', derivedPublicKeyBase64?.substring(0, 30) + '...');
+                        }
+                    } catch (error) {
+                        console.warn('⚠️ BIP39 key derivation failed:', error);
+                        console.log('   Falling back to identity-only recovery (old recovery method)');
+                    }
+                }
                 
                 // Set current user (trim name to prevent space-related issues)
                 const recoveredName = ((foundNode.name || name || '').trim()) || 'Unknown';
                 currentUser = { id: foundNode.id, name: recoveredName };
                 
-                // Save to localStorage (but note: we don't have the private key)
+                // Save to localStorage
                 localStorage.setItem('srishti_node_id', foundNode.id);
                 localStorage.setItem('srishti_node_name', recoveredName);
                 localStorage.setItem('srishti_public_key', foundNode.publicKey || '');
                 
-                // Note: We can't restore the private key from just the recovery phrase
-                // The user will need to re-join or we'd need a different recovery mechanism
-                console.warn('⚠️ Private key cannot be restored from recovery phrase alone');
+                if (keyRestored && restoredPrivateKeyBase64) {
+                    // Save the restored private key
+                    localStorage.setItem('srishti_private_key', restoredPrivateKeyBase64);
+                    
+                    // Also save to IndexedDB backup
+                    if (window.SrishtiApp && window.SrishtiApp.storage) {
+                        await window.SrishtiApp.storage.saveKeys(foundNode.id, {
+                            publicKey: foundNode.publicKey,
+                            privateKey: restoredPrivateKeyBase64
+                        });
+                    }
+                    
+                    // Update app's key pair
+                    window.SrishtiApp.keyPair = restoredKeyPair;
+                    console.log('✅ Private key saved and verified');
+                } else {
+                    // Old recovery method - can't restore private key
+                    console.warn('⚠️ Private key cannot be restored from recovery phrase alone');
+                    console.warn('   This node was created with the old recovery system.');
+                    console.warn('   You can view the blockchain but cannot sign transactions.');
+                }
                 
                 // Initialize QR with the public key from chain
                 if (window.SrishtiQRCode && foundNode.publicKey) {
@@ -5124,9 +5163,33 @@
                 window.SrishtiApp.currentUser = currentUser;
                 window.SrishtiApp.publicKeyBase64 = foundNode.publicKey || '';
                 
-                // Reinitialize network with the correct node ID
-                // (We'll keep using the temp keys for now since we don't have the real private key)
-                // In a production system, we'd need to store encrypted private keys or use deterministic key derivation
+                // Reinitialize network with the correct node ID and key pair
+                if (keyRestored && restoredKeyPair) {
+                    // We have the real private key, so we can properly initialize the network
+                    console.log('🔄 Reinitializing network with restored keys...');
+                    
+                    // Update app's key pair immediately
+                    window.SrishtiApp.keyPair = restoredKeyPair;
+                    
+                    // Reload keys from localStorage to ensure consistency
+                    try {
+                        const reloadedPrivateKey = await window.SrishtiKeys.importPrivateKey(restoredPrivateKeyBase64);
+                        const reloadedPublicKey = await window.SrishtiKeys.importPublicKey(foundNode.publicKey);
+                        window.SrishtiApp.keyPair = {
+                            privateKey: reloadedPrivateKey,
+                            publicKey: reloadedPublicKey
+                        };
+                        console.log('✅ Key pair reloaded and verified');
+                    } catch (error) {
+                        console.error('⚠️ Error reloading key pair:', error);
+                    }
+                    
+                    // The network will use the keys from localStorage when it reconnects
+                    // If network is already initialized, it should pick up the new keys on next operation
+                } else {
+                    // Keep using temp keys (read-only mode)
+                    console.log('⚠️ Network will use temporary keys (read-only mode)');
+                }
                 
                 hideOnboardingModal();
                 
@@ -5147,7 +5210,13 @@
                 }
                 
                 console.log('✅ Recovered node:', foundNode.name, foundNode.id);
-                console.warn('⚠️ Note: Private key not restored. Some features may be limited.');
+                if (keyRestored) {
+                    console.log('✅ Private key fully restored! All features available.');
+                } else {
+                    console.warn('⚠️ Note: Private key not restored. Some features may be limited.');
+                    console.warn('   This node was created with the old recovery system.');
+                    console.warn('   You can view the blockchain but cannot sign transactions.');
+                }
             } catch (error) {
                 console.error('Recovery failed:', error);
                 const loadingMsg = document.getElementById('recovery-loading');

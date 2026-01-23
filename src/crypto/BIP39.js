@@ -380,10 +380,9 @@ class BIP39 {
         // Use @noble/ed25519 for deterministic key generation
         if (typeof ed25519 !== 'undefined' && ed25519.getPublicKey) {
             try {
-                // Generate private key from seed (deterministic)
-                const privateKeyBytes = ed25519.utils.randomPrivateKey();
-                // Actually, we need to use the seed directly
-                // @noble/ed25519 uses the seed as the private key after hashing
+                // For Ed25519, we need to hash the seed to get a valid private key
+                // Ed25519 private keys must be 32 bytes and properly formatted
+                // We use SHA-512 hash of the seed, then take first 32 bytes
                 const privateKeyRaw = await crypto.subtle.digest('SHA-512', privateKeySeed);
                 const privateKey32 = new Uint8Array(privateKeyRaw).slice(0, 32);
                 
@@ -405,7 +404,7 @@ class BIP39 {
             }
         }
         
-        // Fallback: Use HKDF to derive key material
+        // Fallback: Use HKDF to derive key material deterministically
         const keyMaterial = await crypto.subtle.importKey(
             'raw',
             seed,
@@ -425,7 +424,7 @@ class BIP39 {
             256
         );
         
-        const privateKeyBytes = new Uint8Array(derivedPrivate);
+        const privateKeyBytes = new Uint8Array(derivedPrivate).slice(0, 32);
         const pkcs8Key = this.constructPKCS8(privateKeyBytes);
         
         const privateKey = await crypto.subtle.importKey(
@@ -439,7 +438,26 @@ class BIP39 {
             ['sign']
         );
         
-        // Get public key by exporting and re-importing
+        // Derive public key from private key
+        // Export the private key to get the raw bytes, then derive public key
+        const exportedPrivate = await crypto.subtle.exportKey('pkcs8', privateKey);
+        const privateKeyRaw = new Uint8Array(exportedPrivate).slice(-32); // Last 32 bytes are the key
+        
+        // Use @noble/ed25519 if available to get public key
+        if (typeof ed25519 !== 'undefined' && ed25519.getPublicKey) {
+            try {
+                const publicKeyBytes = ed25519.getPublicKey(privateKeyRaw);
+                const publicKey = await window.SrishtiKeys.importPublicKey(
+                    this.bytesToBase64(publicKeyBytes)
+                );
+                return { publicKey, privateKey };
+            } catch (error) {
+                console.error('Error deriving public key:', error);
+            }
+        }
+        
+        // Last resort: generate a new key pair (shouldn't happen)
+        console.warn('⚠️ Could not derive key pair deterministically, generating new key');
         const keyPair = await crypto.subtle.generateKey(
             {
                 name: 'Ed25519',
