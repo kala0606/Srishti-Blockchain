@@ -19,13 +19,17 @@ if (typeof window !== 'undefined') {
     console.log('🔧 Srishti SDK loaded');
     console.log('   Available: SrishtiSDK, SrishtiAppDataStore, SrishtiAttendanceApp');
     
-    // Quick start helper
-    window.SrishtiSDK.quickStart = async function() {
-        const sdk = new window.SrishtiSDK();
-        await sdk.connect();
-        console.log('✅ SDK connected:', sdk.nodeId);
-        return sdk;
-    };
+    // Quick start helper (only if SrishtiSDK is loaded)
+    if (window.SrishtiSDK) {
+        window.SrishtiSDK.quickStart = async function() {
+            const sdk = new window.SrishtiSDK();
+            await sdk.connect();
+            console.log('✅ SDK connected:', sdk.nodeId);
+            return sdk;
+        };
+    } else {
+        console.warn('⚠️ SrishtiSDK not loaded yet. Make sure sdk/SrishtiSDK.js is loaded before sdk/index.js');
+    }
 }
 
 // Node.js: Export all components
