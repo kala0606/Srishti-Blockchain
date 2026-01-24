@@ -613,15 +613,8 @@ class GenerativeArtAppUI {
                 const userCode = new Function('p', 'params', 'THREE', `
                     // p5.js instance is available as 'p'
                     // three.js is available as 'THREE' (if loaded)
-                    // params is available for seed-based generation
                     // All p5.js functions are available through 'p' (p.background, p.fill, etc.)
                     // We'll also make them available as globals for convenience
-                    
-                    // Store params in a way that setup() and draw() can access it
-                    // Make params available globally
-                    if (typeof params !== 'undefined') {
-                        // params is already in scope from Function parameters
-                    }
                     
                     // Expose p5.js functions globally for user code
                     const background = p.background.bind(p);
@@ -650,86 +643,32 @@ class GenerativeArtAppUI {
                     const text = p.text.bind(p);
                     const textSize = p.textSize.bind(p);
                     const textAlign = p.textAlign.bind(p);
-                    // WEBGL 3D functions
-                    const rotateX = p.rotateX ? p.rotateX.bind(p) : () => {};
-                    const rotateY = p.rotateY ? p.rotateY.bind(p) : () => {};
-                    const rotateZ = p.rotateZ ? p.rotateZ.bind(p) : () => {};
-                    const box = p.box ? p.box.bind(p) : () => {};
-                    const sphere = p.sphere ? p.sphere.bind(p) : () => {};
-                    const cylinder = p.cylinder ? p.cylinder.bind(p) : () => {};
-                    const cone = p.cone ? p.cone.bind(p) : () => {};
-                    const plane = p.plane ? p.plane.bind(p) : () => {};
-                    const torus = p.torus ? p.torus.bind(p) : () => {};
-                    // Math functions
-                    const floor = Math.floor;
-                    const ceil = Math.ceil;
-                    const round = Math.round;
-                    const sin = Math.sin;
-                    const cos = Math.cos;
-                    const tan = Math.tan;
-                    const abs = Math.abs;
-                    const sqrt = Math.sqrt;
-                    const pow = Math.pow;
-                    const min = Math.min;
-                    const max = Math.max;
-                    // p5.js utility functions
-                    const noiseSeed = p.noiseSeed ? p.noiseSeed.bind(p) : () => {};
-                    const strokeWeight = p.strokeWeight ? p.strokeWeight.bind(p) : () => {};
-                    const rectMode = p.rectMode ? p.rectMode.bind(p) : () => {};
-                    const lerpColor = p.lerpColor ? p.lerpColor.bind(p) : () => {};
-                    // Constants
                     const width = p.width;
                     const height = p.height;
                     const TWO_PI = p.TWO_PI;
                     const PI = p.PI;
-                    const WEBGL = p.WEBGL || 'webgl';
-                    const P2D = p.P2D || 'p2d';
-                    
-                    // Make params available as a variable (not just parameter) so setup()/draw() can access it
-                    // params is passed as Function parameter, but we need to make sure it's accessible
-                    // Store it in a way that persists for setup() and draw() calls
-                    var params = params; // This makes params available in the closure
                     
                     ${code}
+                    
+                    // If code defines generate function, call it
+                    if (typeof generate === 'function') {
+                        const result = generate(params);
+                        // If result is a canvas, draw it
+                        if (result && result.nodeName === 'CANVAS') {
+                            p.image(result, 0, 0, p.width, p.height);
+                        }
+                        // If result is a p5.Graphics, draw it
+                        if (result && result.canvas) {
+                            p.image(result, 0, 0, p.width, p.height);
+                        }
+                    }
                 `);
                 
                 p.setup = () => {
-                    // Create canvas - user can recreate it in WEBGL if needed
                     p.createCanvas(400, 400);
                     
                     try {
-                        // Execute user code - this defines setup(), draw(), generate(), etc.
-                        // Pass params so it's available in the code scope
                         userCode(p, params, typeof THREE !== 'undefined' ? THREE : null);
-                        
-                        // If user defined setup(), call it
-                        // setup() should have access to params from the Function closure
-                        if (typeof setup === 'function') {
-                            try {
-                                setup();
-                            } catch (setupError) {
-                                console.error('Error in setup():', setupError);
-                            }
-                        }
-                        
-                        // If code defines generate function, call it for static generation
-                        if (typeof generate === 'function') {
-                            const result = generate(params);
-                            // If result is a canvas, draw it
-                            if (result && result.nodeName === 'CANVAS') {
-                                p.image(result, 0, 0, p.width, p.height);
-                            }
-                            // If result is a p5.Graphics, draw it
-                            if (result && result.canvas) {
-                                p.image(result, 0, 0, p.width, p.height);
-                            }
-                            // If result is a data URL string, load and draw it
-                            if (typeof result === 'string' && result.startsWith('data:image')) {
-                                p.loadImage(result, (img) => {
-                                    p.image(img, 0, 0, p.width, p.height);
-                                });
-                            }
-                        }
                     } catch (error) {
                         console.error('Error executing user code:', error);
                         p.background(20);
@@ -739,14 +678,8 @@ class GenerativeArtAppUI {
                 };
                 
                 p.draw = () => {
-                    // If user defined draw(), call it for live rendering
-                    if (typeof draw === 'function') {
-                        try {
-                            draw();
-                        } catch (error) {
-                            console.error('Error in draw():', error);
-                        }
-                    }
+                    // Only draw once for static thumbnails
+                    // User code already executed in setup
                 };
             };
             
