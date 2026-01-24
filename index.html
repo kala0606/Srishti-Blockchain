@@ -10,6 +10,7 @@
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
     
     <!-- QR Code Libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -114,6 +115,7 @@
     <script src="src/discovery/QRCode.js"></script>
     <script src="src/ui/BlockchainAdapter.js"></script>
     <script src="src/ui/GlowCalculator.js"></script>
+    <script src="src/ui/AudioEngine.js"></script>
     
     <!-- Authentication System for dApps -->
     <script src="src/auth/SessionAuth.js"></script>
@@ -2432,6 +2434,94 @@
             background: rgba(239, 68, 68, 0.25);
         }
         
+        /* Audio Controls */
+        #audio-controls {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 8px 12px;
+            transition: all 0.3s ease;
+        }
+        
+        #audio-controls:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.15);
+        }
+        
+        #audio-mute-btn {
+            background: none;
+            border: none;
+            color: rgba(255, 255, 255, 0.7);
+            cursor: pointer;
+            padding: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 6px;
+            transition: all 0.2s ease;
+            width: 32px;
+            height: 32px;
+        }
+        
+        #audio-mute-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: rgba(255, 255, 255, 1);
+        }
+        
+        #audio-mute-btn.muted {
+            color: rgba(239, 68, 68, 0.8);
+        }
+        
+        #audio-volume-slider {
+            width: 80px;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+            outline: none;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+        
+        #audio-volume-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 12px;
+            height: 12px;
+            background: rgba(255, 255, 255, 0.8);
+            border-radius: 50%;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        #audio-volume-slider::-webkit-slider-thumb:hover {
+            background: rgba(255, 255, 255, 1);
+            transform: scale(1.2);
+        }
+        
+        #audio-volume-slider::-moz-range-thumb {
+            width: 12px;
+            height: 12px;
+            background: rgba(255, 255, 255, 0.8);
+            border-radius: 50%;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s ease;
+        }
+        
+        #audio-volume-slider::-moz-range-thumb:hover {
+            background: rgba(255, 255, 255, 1);
+            transform: scale(1.2);
+        }
+        
         /* Responsive */
         @media (max-width: 480px) {
             #dashboard-panel {
@@ -2450,6 +2540,17 @@
             
             .stat-card-value {
                 font-size: 1.6em;
+            }
+            
+            #audio-controls {
+                top: 10px;
+                right: 10px;
+                padding: 6px 8px;
+                gap: 8px;
+            }
+            
+            #audio-volume-slider {
+                width: 60px;
             }
         }
     </style>
@@ -2705,6 +2806,17 @@
             <span class="stat-value" id="online-nodes">0</span>
             <span class="stat-label">online</span>
         </div>
+    </div>
+
+    <!-- Audio Controls -->
+    <div id="audio-controls">
+        <button id="audio-mute-btn" title="Toggle audio">
+            <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M11 5L6 9H2v6h4l5 4V5z"></path>
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+            </svg>
+        </button>
+        <input type="range" id="audio-volume-slider" min="0" max="100" value="30" title="Volume">
     </div>
 
     <!-- Chain Status Indicator (behind/syncing) -->
@@ -3232,6 +3344,7 @@
         let nodeMeshes = [];
         let nodeDataMap = new Map();
         let unsubscribeNodes = null;
+        let audioEngine = null;
 
         // ============================================
         // Three.js Setup
@@ -3849,7 +3962,25 @@
                             d.mesh.material.emissiveIntensity = glow.emissive * pulse;
                         }
                     }
+                    
+                    // Update audio engine with node position
+                    if (audioEngine && d.data && d.data.id) {
+                        audioEngine.updateNodePosition(d.data.id, {
+                            x: d.x || 0,
+                            y: d.y || 0,
+                            z: d.z || 0
+                        });
+                    }
                 });
+                
+                // Update audio engine listener position (camera position)
+                if (audioEngine && camera) {
+                    audioEngine.updateListenerPosition({
+                        x: camera.position.x,
+                        y: camera.position.y,
+                        z: camera.position.z
+                    });
+                }
             }
             
             // Update links
@@ -6558,6 +6689,89 @@
             
             updateLoadingStatus('Building visualization...', 'Preparing 3D environment');
             
+            // Initialize audio engine
+            if (window.SrishtiAudioEngine) {
+                audioEngine = new window.SrishtiAudioEngine({
+                    enabled: true,
+                    masterVolume: 0.6, // Increased from 0.3 to 0.6
+                    baseOctave: 4,
+                    scale: 'raga' // Use Raga Yaman scale
+                });
+                
+                // Start audio context on first user interaction (required by browsers)
+                const startAudioOnInteraction = async () => {
+                    if (audioEngine && !audioEngine.audioContextStarted) {
+                        await audioEngine.startAudioContext();
+                    }
+                };
+                
+                // Try to start on any user interaction
+                document.addEventListener('click', startAudioOnInteraction, { once: true });
+                document.addEventListener('touchstart', startAudioOnInteraction, { once: true });
+                document.addEventListener('keydown', startAudioOnInteraction, { once: true });
+                
+                // Set up audio controls
+                const muteBtn = document.getElementById('audio-mute-btn');
+                const volumeSlider = document.getElementById('audio-volume-slider');
+                
+                if (muteBtn) {
+                    muteBtn.addEventListener('click', async () => {
+                        if (audioEngine) {
+                            // Start audio context on first click (browser requirement)
+                            if (!audioEngine.audioContextStarted) {
+                                await audioEngine.startAudioContext();
+                            }
+                            
+                            const isMuted = !audioEngine.enabled;
+                            audioEngine.setEnabled(!isMuted);
+                            muteBtn.classList.toggle('muted', isMuted);
+                            
+                            // Update icon
+                            const icon = muteBtn.querySelector('svg');
+                            if (icon) {
+                                if (isMuted) {
+                                    // Muted icon
+                                    icon.innerHTML = '<path d="M11 5L6 9H2v6h4l5 4V5z"></path><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line>';
+                                } else {
+                                    // Unmuted icon
+                                    icon.innerHTML = '<path d="M11 5L6 9H2v6h4l5 4V5z"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>';
+                                }
+                            }
+                            
+                            // Trigger update to start sounds if unmuting
+                            if (!isMuted && window.srishtiNodes) {
+                                const nodePositions = {};
+                                window.srishtiNodes.forEach(d => {
+                                    if (d.data && d.data.id && !d.data.isVirtualRoot) {
+                                        nodePositions[d.data.id] = {
+                                            x: d.x || 0,
+                                            y: d.y || 0,
+                                            z: d.z || 0
+                                        };
+                                    }
+                                });
+                                audioEngine.updateNodes(nodesData, nodePositions);
+                            }
+                        }
+                    });
+                }
+                
+                if (volumeSlider) {
+                    volumeSlider.addEventListener('input', (e) => {
+                        if (audioEngine) {
+                            const volume = parseInt(e.target.value) / 100;
+                            audioEngine.setMasterVolume(volume);
+                        }
+                    });
+                }
+            } else {
+                // Hide audio controls if engine not available
+                const audioControls = document.getElementById('audio-controls');
+                if (audioControls) {
+                    audioControls.style.display = 'none';
+                }
+            }
+            
             // Subscribe to nodes from blockchain
             unsubscribeNodes = window.SrishtiApp.subscribeToNodes((nodes) => {
                 nodesData = nodes;
@@ -6569,6 +6783,26 @@
                 
                 // Update glows (this is lightweight and can run every time)
                 updateNodeGlows();
+                
+                // Update audio engine with node data
+                if (audioEngine && window.srishtiNodes) {
+                    // Build node positions map from Three.js visualization
+                    const nodePositions = {};
+                    window.srishtiNodes.forEach(d => {
+                        if (d.data && d.data.id && !d.data.isVirtualRoot) {
+                            nodePositions[d.data.id] = {
+                                x: d.x || 0,
+                                y: d.y || 0,
+                                z: d.z || 0
+                            };
+                        }
+                    });
+                    
+                    // Update audio engine (only if audio context is started)
+                    if (audioEngine.audioContextStarted) {
+                        audioEngine.updateNodes(nodesData, nodePositions);
+                    }
+                }
                 
                 // Update dashboard if open
                 if (document.getElementById('dashboard-panel').classList.contains('open')) {
