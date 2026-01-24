@@ -269,7 +269,7 @@ class GenerativeArtAppUI {
             const gallery = galleryEl.querySelector('.gallery');
 
             for (const piece of pieces) {
-                const card = this.createArtCard(piece);
+                const card = await this.createArtCard(piece);
                 gallery.appendChild(card);
             }
         } catch (error) {
@@ -303,7 +303,7 @@ class GenerativeArtAppUI {
             const gallery = marketplaceEl.querySelector('.gallery');
 
             for (const piece of pieces) {
-                const card = this.createArtCard(piece, true);
+                const card = await this.createArtCard(piece, true);
                 gallery.appendChild(card);
             }
         } catch (error) {
@@ -335,7 +335,7 @@ class GenerativeArtAppUI {
             const gallery = collectionEl.querySelector('.gallery');
 
             for (const piece of pieces) {
-                const card = this.createArtCard(piece, false, true);
+                const card = await this.createArtCard(piece, false, true);
                 gallery.appendChild(card);
             }
         } catch (error) {
@@ -463,16 +463,19 @@ class GenerativeArtAppUI {
         }
     }
 
-    createArtCard(piece, showPurchase = false, showActions = false) {
+    async createArtCard(piece, showPurchase = false, showActions = false) {
         const card = document.createElement('div');
         card.className = 'art-card';
+        card.dataset.pieceId = piece.id;
         
-        const imageUrl = piece.imageUrl || null;
         const emoji = this.getArtEmoji(piece.seed || piece.id);
         
+        // Use live canvas container instead of static image
         card.innerHTML = `
-            <div class="art-image">
-                ${imageUrl ? `<img src="${imageUrl}" alt="${piece.projectTitle}">` : `<div>${emoji}</div>`}
+            <div class="art-image" style="position: relative; overflow: hidden;">
+                <div class="live-canvas-container" data-piece-id="${piece.id}" style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #1a1a1a;">
+                    <div style="color: rgba(255,255,255,0.5); font-size: 0.8em;">Loading...</div>
+                </div>
             </div>
             <div class="art-info">
                 <div class="art-title">${piece.projectTitle || 'Untitled'}</div>
@@ -480,13 +483,51 @@ class GenerativeArtAppUI {
                 ${piece.price ? `<div class="art-price">${piece.price} KARMA</div>` : ''}
                 ${piece.status === 'LISTED' ? '<span class="art-status listed">For Sale</span>' : ''}
                 ${showActions && piece.ownerId === this.srishtiApp.nodeId ? '<span class="art-status owned">Owned</span>' : ''}
-                ${imageUrl ? `<button class="btn" style="margin-top: 8px; width: 100%; font-size: 0.85em; padding: 6px;" onclick="event.stopPropagation(); artAppUI.viewFullRender('${piece.id}')">View Full</button>` : ''}
+                <button class="btn" style="margin-top: 8px; width: 100%; font-size: 0.85em; padding: 6px;" onclick="event.stopPropagation(); artAppUI.viewFullRender('${piece.id}')">View Full</button>
             </div>
         `;
 
         card.addEventListener('click', () => {
             this.showPieceModal(piece, showPurchase, showActions);
         });
+
+        // Render live canvas - get project code from piece
+        if (piece.projectId) {
+            setTimeout(async () => {
+                try {
+                    const project = await this.artApp.getProject(piece.projectId);
+                    if (project && project.code) {
+                        const container = card.querySelector('.live-canvas-container');
+                        if (container) {
+                            // Use piece seed for unique rendering
+                            const params = {
+                                seed: piece.seed || piece.id,
+                                ...(project.parameters || {})
+                            };
+                            await this.renderLiveCanvas(piece.projectId, project.code, params, container);
+                        }
+                    } else {
+                        // Fallback to emoji if no project code
+                        const container = card.querySelector('.live-canvas-container');
+                        if (container) {
+                            container.innerHTML = `<div style="font-size: 2em;">${emoji}</div>`;
+                        }
+                    }
+                } catch (error) {
+                    console.error('Failed to render live canvas for piece:', piece.id, error);
+                    const container = card.querySelector('.live-canvas-container');
+                    if (container) {
+                        container.innerHTML = `<div style="font-size: 2em;">${emoji}</div>`;
+                    }
+                }
+            }, 100);
+        } else {
+            // No project ID - show emoji
+            const container = card.querySelector('.live-canvas-container');
+            if (container) {
+                container.innerHTML = `<div style="font-size: 2em;">${emoji}</div>`;
+            }
+        }
 
         return card;
     }

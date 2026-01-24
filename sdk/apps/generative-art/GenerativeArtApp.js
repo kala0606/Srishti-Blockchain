@@ -90,9 +90,18 @@ class GenerativeArtApp {
             GenerativeArtApp.ACTIONS.PROJECT_CREATE
         );
         
-        // Ensure all projects exist locally
+        // Group events by project ID and get the latest event for each project
+        const projectEventMap = new Map();
         for (const event of projectEvents) {
             const projectId = event.payload.ref;
+            const existing = projectEventMap.get(projectId);
+            if (!existing || event.timestamp > existing.timestamp) {
+                projectEventMap.set(projectId, event);
+            }
+        }
+        
+        // Ensure all projects exist locally
+        for (const [projectId, event] of projectEventMap) {
             const existing = await this.store.get(projectId);
             
             // Extract code and parameters from on-chain metadata
@@ -109,6 +118,12 @@ class GenerativeArtApp {
                 console.warn('Failed to parse parameters from chain:', e);
             }
             
+            // Extract status from latest event metadata (releases update the status in metadata)
+            const statusFromChain = event.payload.metadata?.status || 'DRAFT';
+            const projectStatus = statusFromChain === 'RELEASED' || statusFromChain === GenerativeArtApp.PROJECT_STATUS.RELEASED
+                ? GenerativeArtApp.PROJECT_STATUS.RELEASED
+                : GenerativeArtApp.PROJECT_STATUS.DRAFT;
+            
             if (!existing) {
                 // Project exists on-chain but not locally - reconstruct from chain
                 const project = {
@@ -124,7 +139,7 @@ class GenerativeArtApp {
                     artistName: event.payload.metadata?.artistName || 'Unknown',
                     createdAt: event.timestamp,
                     pieceCount: 0,
-                    status: GenerativeArtApp.PROJECT_STATUS.DRAFT, // Default to DRAFT when reconstructing
+                    status: projectStatus, // Use status from latest event
                     thumbnailUrl: null // Will be generated below if code exists
                 };
                 
@@ -147,8 +162,15 @@ class GenerativeArtApp {
                 
                 await this.store.put(projectId, project);
             } else {
-                // Update existing project: ensure code and parameters are synced from chain
+                // Update existing project: ensure code, parameters, and status are synced from chain
                 let needsUpdate = false;
+                
+                // Update status from chain (important for releases!)
+                if (existing.status !== projectStatus) {
+                    existing.status = projectStatus;
+                    needsUpdate = true;
+                    console.log(`🔄 Updated project status from chain: ${projectId} -> ${projectStatus}`);
+                }
                 
                 // Update code from chain if missing locally
                 if (!existing.code && codeFromChain) {
