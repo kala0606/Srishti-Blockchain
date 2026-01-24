@@ -120,9 +120,13 @@ class GenerativeArtApp {
             
             // Extract status from latest event metadata (releases update the status in metadata)
             const statusFromChain = event.payload.metadata?.status || 'DRAFT';
-            const projectStatus = statusFromChain === 'RELEASED' || statusFromChain === GenerativeArtApp.PROJECT_STATUS.RELEASED
+            const projectStatus = (statusFromChain === 'RELEASED' || 
+                                  statusFromChain === GenerativeArtApp.PROJECT_STATUS.RELEASED ||
+                                  String(statusFromChain).toUpperCase() === 'RELEASED')
                 ? GenerativeArtApp.PROJECT_STATUS.RELEASED
                 : GenerativeArtApp.PROJECT_STATUS.DRAFT;
+            
+            console.log(`📋 Project ${projectId} status from chain:`, statusFromChain, '->', projectStatus);
             
             if (!existing) {
                 // Project exists on-chain but not locally - reconstruct from chain
@@ -1066,6 +1070,7 @@ class GenerativeArtApp {
             id: p.id, 
             status: p.status, 
             statusType: typeof p.status,
+            title: p.title,
             isReleasedConstant: p.status === GenerativeArtApp.PROJECT_STATUS.RELEASED,
             isReleasedString: p.status === 'RELEASED',
             constantValue: GenerativeArtApp.PROJECT_STATUS.RELEASED
@@ -1074,13 +1079,19 @@ class GenerativeArtApp {
         // Filter for released projects (check both constant and string)
         const released = allProjects.filter(p => {
             const status = p.status || 'DRAFT';
+            // Check multiple ways the status might be stored
             const isReleased = status === GenerativeArtApp.PROJECT_STATUS.RELEASED || 
                               status === 'RELEASED' ||
-                              status === GenerativeArtApp.PROJECT_STATUS.RELEASED.toString();
+                              status === GenerativeArtApp.PROJECT_STATUS.RELEASED.toString() ||
+                              String(status).toUpperCase() === 'RELEASED';
+            
+            if (isReleased) {
+                console.log('✅ Found released project:', p.id, 'status:', status, 'type:', typeof status);
+            }
             return isReleased;
         });
         
-        console.log('✅ Released projects:', released.length, released.map(p => ({ id: p.id, status: p.status })));
+        console.log('✅ Released projects:', released.length, released.map(p => ({ id: p.id, status: p.status, title: p.title })));
         return released;
     }
     
@@ -1504,11 +1515,31 @@ class GenerativeArtApp {
                             const result = generate(params);
                             // If result is a canvas, draw it
                             if (result && result.nodeName === 'CANVAS') {
-                                p.image(result, 0, 0, p.width, p.height);
+                                try {
+                                    p.image(result, 0, 0, p.width, p.height);
+                                } catch (e) {
+                                    console.warn('Failed to draw canvas result:', e);
+                                }
                             }
                             // If result is a p5.Graphics, draw it
-                            if (result && result.canvas) {
-                                p.image(result, 0, 0, p.width, p.height);
+                            else if (result && result.canvas && typeof result.canvas !== 'undefined') {
+                                try {
+                                    p.image(result, 0, 0, p.width, p.height);
+                                } catch (e) {
+                                    console.warn('Failed to draw p5.Graphics result:', e);
+                                }
+                            }
+                            // If result is a data URL, try to load it
+                            else if (typeof result === 'string' && result.startsWith('data:image')) {
+                                try {
+                                    const img = p.loadImage(result, (img) => {
+                                        p.image(img, 0, 0, p.width, p.height);
+                                    }, (err) => {
+                                        console.warn('Failed to load image from data URL:', err);
+                                    });
+                                } catch (e) {
+                                    console.warn('Failed to load image:', e);
+                                }
                             }
                         }
                     `);
