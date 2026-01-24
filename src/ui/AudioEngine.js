@@ -30,6 +30,12 @@ class SrishtiAudioEngine {
         // Track active node sounds
         this.nodeSounds = new Map(); // nodeId -> { synth, panner, gain, note, isPlaying }
         
+        // Hover sound (subtle interaction)
+        this.hoverSynth = null;
+        this.hoverGain = null;
+        this.lastHoveredNodeId = null;
+        this.hoverCooldown = 0; // Prevent rapid hover sounds
+        
         // 3D listener position (camera position)
         this.listenerPosition = { x: 0, y: 0, z: 0 };
         this.lastListenerPosition = { x: 0, y: 0, z: 0 };
@@ -76,6 +82,26 @@ class SrishtiAudioEngine {
             
             // Set up 3D panner context
             Tone.Destination.channelCount = 2; // Stereo output
+            
+            // Create hover sound synth (subtle, quick chime)
+            this.hoverSynth = new Tone.Synth({
+                oscillator: {
+                    type: 'sine'
+                },
+                envelope: {
+                    attack: 0.01,  // Very quick attack
+                    decay: 0.1,
+                    sustain: 0,
+                    release: 0.2   // Short release
+                }
+            });
+            
+            // Create gain for hover sound (make it subtle)
+            this.hoverGain = new Tone.Gain(0.3); // 30% volume for subtlety
+            
+            // Connect: hoverSynth -> hoverGain -> master gain
+            this.hoverSynth.connect(this.hoverGain);
+            this.hoverGain.connect(this.masterGain);
         } catch (error) {
             console.error('❌ Audio engine init failed:', error);
             this.enabled = false;
@@ -467,6 +493,46 @@ class SrishtiAudioEngine {
     }
     
     /**
+     * Play a subtle hover sound when mouse over a node
+     */
+    playHoverSound(nodeId, position = { x: 0, y: 0, z: 0 }) {
+        if (!this.enabled || !this.hoverSynth || !this.masterGain) return;
+        
+        // Cooldown to prevent rapid sounds
+        const now = Date.now();
+        if (this.hoverCooldown > now) return;
+        this.hoverCooldown = now + 200; // 200ms cooldown
+        
+        // Don't play if hovering the same node
+        if (this.lastHoveredNodeId === nodeId) return;
+        this.lastHoveredNodeId = nodeId;
+        
+        // Get the node's note and play it an octave higher for a subtle "tingle"
+        const baseNote = this.getNoteForNode(nodeId);
+        if (!baseNote) return;
+        
+        // Play note one octave higher, very briefly
+        const hoverNote = baseNote.replace(/\d+/, (match) => {
+            return String(parseInt(match) + 1); // One octave higher
+        });
+        
+        try {
+            // Play a very short, subtle note
+            const time = Tone.now();
+            this.hoverSynth.triggerAttackRelease(hoverNote, 0.12, time); // 0.12s duration
+        } catch (error) {
+            // Ignore hover sound errors
+        }
+    }
+    
+    /**
+     * Reset hover state (when mouse leaves node)
+     */
+    resetHoverState() {
+        this.lastHoveredNodeId = null;
+    }
+    
+    /**
      * Clean up all resources
      */
     dispose() {
@@ -477,6 +543,12 @@ class SrishtiAudioEngine {
         }
         if (this.masterVolumeNode) {
             this.masterVolumeNode.dispose();
+        }
+        if (this.hoverSynth) {
+            this.hoverSynth.dispose();
+        }
+        if (this.hoverGain) {
+            this.hoverGain.dispose();
         }
         
         this.nodeSounds.clear();

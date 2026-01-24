@@ -4029,6 +4029,17 @@
                     if (nodeData) {
                         updateLabelText(hoverLabel, nodeData.name || 'Unknown');
                         hoverLabel.visible = true;
+                        
+                        // Play subtle hover sound
+                        if (audioEngine && audioEngine.audioContextStarted) {
+                            const worldPos = new THREE.Vector3();
+                            mesh.getWorldPosition(worldPos);
+                            audioEngine.playHoverSound(nodeData.id, {
+                                x: worldPos.x,
+                                y: worldPos.y,
+                                z: worldPos.z
+                            });
+                        }
                     }
                     document.body.style.cursor = 'pointer';
                 }
@@ -4037,6 +4048,11 @@
                 mesh.getWorldPosition(worldPos);
                 hoverLabel.position.copy(worldPos);
                 hoverLabel.position.y += 35;
+            } else {
+                // Reset hover state when mouse leaves
+                if (audioEngine) {
+                    audioEngine.resetHoverState();
+                }
             }
             
             stars.rotation.y += 0.0001;
