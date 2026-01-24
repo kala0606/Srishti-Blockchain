@@ -514,7 +514,8 @@ class AttendanceAppUI {
                         <p><strong>Attendees:</strong> ${stats.total} (${stats.verified} verified, ${stats.pending} pending)</p>
                         <p><strong>Created:</strong> ${new Date(session.createdAt).toLocaleString()}</p>
                         <div class="actions">
-                            <button onclick="attendanceApp.viewSession('${session.id}')">View</button>
+                            <button onclick="attendanceApp.viewSession('${session.id}')">📊 View Table</button>
+                            <button onclick="attendanceApp.exportToCSV('${session.id}', this)" style="background: rgba(255, 255, 255, 0.06); color: var(--text-primary); border: 1px solid rgba(255, 255, 255, 0.12);">📥 Export CSV</button>
                             ${isActive ? `<button onclick="attendanceApp.showQRCode('${session.id}')">📱 Show QR Code</button>` : ''}
                             ${isActive ? `<button class="btn-secondary" onclick="attendanceApp.endSession('${session.id}')">End</button>` : ''}
                             <button class="btn-secondary" onclick="attendanceApp.bulkVerify('${session.id}')">Verify All</button>
@@ -1061,25 +1062,341 @@ class AttendanceAppUI {
     }
 
     async viewSession(sessionId) {
+        try {
         const session = await this.attendance.getSession(sessionId);
         const attendees = await this.attendance.getSessionAttendees(sessionId);
 
-        let html = `<h3>${session.title}</h3>`;
-        html += `<p>${session.description || ''}</p>`;
-        html += `<h4>Attendees (${attendees.length})</h4>`;
-        html += '<ul>';
-
-        for (const attendee of attendees) {
-            const displayName = attendee.nodeName || attendee.walletAddress || 'Unknown';
-            const studentIdDisplay = attendee.studentId && attendee.studentId !== attendee.walletAddress 
-                ? ` (${attendee.studentId})` 
-                : '';
-            html += `<li>${displayName}${studentIdDisplay} - <span class="badge ${attendee.status.toLowerCase()}">${attendee.status}</span></li>`;
+            this.showAttendanceTableModal(session, attendees);
+        } catch (error) {
+            alert(`Error: ${error.message}`);
         }
+    }
 
-        html += '</ul>';
+    showAttendanceTableModal(session, attendees) {
+        // Create modal
+        const modal = document.createElement('div');
+        modal.className = 'attendance-modal';
+        modal.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(5, 5, 16, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            padding: 20px;
+            overflow-y: auto;
+        `;
+        
+        const content = document.createElement('div');
+        content.className = 'attendance-modal-content';
+        content.style.cssText = `
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.03) 100%);
+            backdrop-filter: blur(40px);
+            -webkit-backdrop-filter: blur(40px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 32px;
+            padding: 40px;
+            max-width: 900px;
+            width: 100%;
+            max-height: 90vh;
+            overflow-y: auto;
+            color: var(--text-primary);
+            position: relative;
+            box-shadow: 
+                0 24px 80px rgba(0, 0, 0, 0.5),
+                inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        `;
+        
+        // Header
+        const header = document.createElement('div');
+        header.style.cssText = 'margin-bottom: 24px;';
+        header.innerHTML = `
+            <h2 style="font-family: 'Syne', sans-serif; font-size: 2em; font-weight: 700; margin-bottom: 8px; color: var(--text-primary);">${session.title}</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 16px;">${session.description || 'No description'}</p>
+            <div style="display: flex; gap: 16px; flex-wrap: wrap; align-items: center;">
+                <span style="color: var(--text-secondary);">Total Attendees: <strong style="color: var(--text-primary);">${attendees.length}</strong></span>
+                <span style="color: var(--text-secondary);">Verified: <strong style="color: #10b981;">${attendees.filter(a => a.status === 'VERIFIED').length}</strong></span>
+                <span style="color: var(--text-secondary);">Pending: <strong style="color: #fbbf24;">${attendees.filter(a => a.status === 'PENDING').length}</strong></span>
+            </div>
+        `;
+        content.appendChild(header);
+        
+        // Close button
+        const closeBtn = document.createElement('button');
+        closeBtn.innerHTML = '×';
+        closeBtn.style.cssText = `
+            position: absolute;
+            top: 18px;
+            right: 22px;
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 32px;
+            font-weight: 300;
+            cursor: pointer;
+            background: none;
+            border: none;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+        `;
+        closeBtn.onmouseenter = () => {
+            closeBtn.style.color = 'var(--text-primary)';
+            closeBtn.style.background = 'rgba(255, 255, 255, 0.1)';
+            closeBtn.style.transform = 'rotate(90deg)';
+        };
+        closeBtn.onmouseleave = () => {
+            closeBtn.style.color = 'rgba(255, 255, 255, 0.6)';
+            closeBtn.style.background = 'none';
+            closeBtn.style.transform = 'rotate(0deg)';
+        };
+        closeBtn.onclick = () => {
+            document.body.removeChild(modal);
+        };
+        content.appendChild(closeBtn);
+        
+        // Export buttons
+        const exportButtons = document.createElement('div');
+        exportButtons.style.cssText = 'display: flex; gap: 12px; margin-bottom: 24px; flex-wrap: wrap;';
+        const exportBtn = document.createElement('button');
+        exportBtn.textContent = '📥 Export CSV';
+        exportBtn.style.cssText = `
+            background: rgba(255, 255, 255, 0.06);
+            color: var(--text-primary);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            padding: 12px 24px;
+            border-radius: 50px;
+            cursor: pointer;
+            font-weight: 500;
+            font-family: 'Outfit', sans-serif;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        `;
+        exportBtn.onclick = () => {
+            this.exportToCSV(session.id, exportBtn);
+        };
+        exportButtons.appendChild(exportBtn);
+        content.appendChild(exportButtons);
+        
+        // Table container
+        const tableContainer = document.createElement('div');
+        tableContainer.style.cssText = 'overflow-x: auto;';
+        
+        // Create table
+        const table = document.createElement('table');
+        table.className = 'attendance-table';
+        table.style.cssText = `
+            width: 100%;
+            border-collapse: collapse;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 16px;
+            overflow: hidden;
+        `;
+        
+        // Table header
+        const thead = document.createElement('thead');
+        thead.innerHTML = `
+            <tr style="background: rgba(255, 255, 255, 0.05);">
+                <th style="padding: 16px; text-align: left; font-weight: 600; color: var(--text-primary); border-bottom: 1px solid rgba(255, 255, 255, 0.1);">#</th>
+                <th style="padding: 16px; text-align: left; font-weight: 600; color: var(--text-primary); border-bottom: 1px solid rgba(255, 255, 255, 0.1);">Student ID</th>
+                <th style="padding: 16px; text-align: left; font-weight: 600; color: var(--text-primary); border-bottom: 1px solid rgba(255, 255, 255, 0.1);">Name</th>
+                <th style="padding: 16px; text-align: left; font-weight: 600; color: var(--text-primary); border-bottom: 1px solid rgba(255, 255, 255, 0.1);">Wallet Address</th>
+                <th style="padding: 16px; text-align: left; font-weight: 600; color: var(--text-primary); border-bottom: 1px solid rgba(255, 255, 255, 0.1);">Status</th>
+                <th style="padding: 16px; text-align: left; font-weight: 600; color: var(--text-primary); border-bottom: 1px solid rgba(255, 255, 255, 0.1);">Marked At</th>
+                <th style="padding: 16px; text-align: left; font-weight: 600; color: var(--text-primary); border-bottom: 1px solid rgba(255, 255, 255, 0.1);">Verified At</th>
+            </tr>
+        `;
+        table.appendChild(thead);
+        
+        // Table body
+        const tbody = document.createElement('tbody');
+        
+        if (attendees.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="7" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                        No attendees yet
+                    </td>
+                </tr>
+            `;
+        } else {
+            attendees.forEach((attendee, index) => {
+                const row = document.createElement('tr');
+                row.style.cssText = `
+                    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+                    transition: background 0.2s ease;
+                `;
+                row.onmouseenter = () => {
+                    row.style.background = 'rgba(255, 255, 255, 0.05)';
+                };
+                row.onmouseleave = () => {
+                    row.style.background = 'transparent';
+                };
+                
+                const studentId = attendee.studentId && attendee.studentId !== attendee.walletAddress 
+                    ? attendee.studentId 
+                    : 'N/A';
+                const displayName = attendee.nodeName || 'Unknown';
+                const walletAddress = attendee.walletAddress || attendee.owner || 'N/A';
+                const status = attendee.status || 'PENDING';
+                const markedAt = attendee.timestamp 
+                    ? new Date(attendee.timestamp).toLocaleString() 
+                    : 'N/A';
+                const verifiedAt = attendee.verifiedAt 
+                    ? new Date(attendee.verifiedAt).toLocaleString() 
+                    : '-';
+                
+                const statusBadgeClass = status.toLowerCase();
+                const statusColor = status === 'VERIFIED' ? '#10b981' : 
+                                   status === 'PENDING' ? '#fbbf24' : 
+                                   '#ef4444';
+                
+                row.innerHTML = `
+                    <td style="padding: 16px; color: var(--text-secondary);">${index + 1}</td>
+                    <td style="padding: 16px; color: var(--text-primary); font-weight: 500;">${studentId}</td>
+                    <td style="padding: 16px; color: var(--text-primary);">${displayName}</td>
+                    <td style="padding: 16px; color: var(--text-secondary); font-family: monospace; font-size: 0.85em; word-break: break-all;">${walletAddress.substring(0, 20)}...</td>
+                    <td style="padding: 16px;">
+                        <span class="badge ${statusBadgeClass}" style="
+                            display: inline-block;
+                            padding: 6px 12px;
+                            border-radius: 12px;
+                            font-size: 0.75em;
+                            font-weight: 600;
+                            text-transform: uppercase;
+                            letter-spacing: 0.5px;
+                            background: ${status === 'VERIFIED' ? 'rgba(16, 185, 129, 0.2)' : 
+                                        status === 'PENDING' ? 'rgba(251, 191, 36, 0.2)' : 
+                                        'rgba(239, 68, 68, 0.2)'};
+                            color: ${statusColor};
+                            border: 1px solid ${status === 'VERIFIED' ? 'rgba(16, 185, 129, 0.3)' : 
+                                            status === 'PENDING' ? 'rgba(251, 191, 36, 0.3)' : 
+                                            'rgba(239, 68, 68, 0.3)'};
+                        ">${status}</span>
+                    </td>
+                    <td style="padding: 16px; color: var(--text-secondary); font-size: 0.9em;">${markedAt}</td>
+                    <td style="padding: 16px; color: var(--text-secondary); font-size: 0.9em;">${verifiedAt}</td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+        
+        table.appendChild(tbody);
+        tableContainer.appendChild(table);
+        content.appendChild(tableContainer);
+        
+        modal.appendChild(content);
+        document.body.appendChild(modal);
+        
+        // Store session data for export
+        modal.dataset.sessionId = session.id;
+        modal.dataset.sessionTitle = session.title;
+    }
 
-        alert(html.replace(/<[^>]*>/g, '\n')); // Simple alert, could be a modal
+    async exportToCSV(sessionId, buttonElement = null) {
+        try {
+            const session = await this.attendance.getSession(sessionId);
+            const attendees = await this.attendance.getSessionAttendees(sessionId);
+            
+            // Prepare CSV data
+            const headers = [
+                'Student ID',
+                'Name',
+                'Wallet Address',
+                'Status',
+                'Marked At',
+                'Verified At',
+                'Location Provided',
+                'Distance From Venue (m)'
+            ];
+            
+            const rows = attendees.map(attendee => {
+                const studentId = attendee.studentId && attendee.studentId !== attendee.walletAddress 
+                    ? attendee.studentId 
+                    : 'N/A';
+                const displayName = attendee.nodeName || 'Unknown';
+                const walletAddress = attendee.walletAddress || attendee.owner || 'N/A';
+                const status = attendee.status || 'PENDING';
+                const markedAt = attendee.timestamp 
+                    ? new Date(attendee.timestamp).toISOString() 
+                    : 'N/A';
+                const verifiedAt = attendee.verifiedAt 
+                    ? new Date(attendee.verifiedAt).toISOString() 
+                    : '';
+                const locationProvided = attendee.location ? 'Yes' : 'No';
+                const distance = attendee.distanceFromVenue 
+                    ? (attendee.distanceFromVenue.toFixed(2) + ' m') 
+                    : 'N/A';
+                
+                return [
+                    studentId,
+                    displayName,
+                    walletAddress,
+                    status,
+                    markedAt,
+                    verifiedAt,
+                    locationProvided,
+                    distance
+                ];
+            });
+            
+            // Create CSV content
+            const csvContent = [
+                headers.join(','),
+                ...rows.map(row => row.map(cell => {
+                    // Escape commas and quotes in CSV
+                    const cellStr = String(cell || '');
+                    if (cellStr.includes(',') || cellStr.includes('"') || cellStr.includes('\n')) {
+                        return `"${cellStr.replace(/"/g, '""')}"`;
+                    }
+                    return cellStr;
+                }).join(','))
+            ].join('\n');
+            
+            // Create download
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            
+            // Sanitize filename
+            const sanitizedTitle = session.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+            const timestamp = new Date().toISOString().split('T')[0];
+            link.download = `attendance_${sanitizedTitle}_${timestamp}.csv`;
+            
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+            
+            // Show success message
+            if (buttonElement) {
+                const originalText = buttonElement.textContent;
+                buttonElement.textContent = '✅ Exported!';
+                buttonElement.style.background = 'rgba(16, 185, 129, 0.2)';
+                buttonElement.style.borderColor = 'rgba(16, 185, 129, 0.3)';
+                buttonElement.style.color = '#10b981';
+                setTimeout(() => {
+                    buttonElement.textContent = originalText;
+                    buttonElement.style.background = '';
+                    buttonElement.style.borderColor = '';
+                    buttonElement.style.color = '';
+                }, 2000);
+            }
+        } catch (error) {
+            console.error('Export error:', error);
+            alert(`Error exporting CSV: ${error.message}`);
+        }
     }
 }
 

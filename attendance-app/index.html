@@ -535,6 +535,64 @@
                 font-size: 0.9em;
             }
         }
+
+        /* Attendance Table Styles */
+        .attendance-table {
+            font-size: 0.9em;
+        }
+
+        .attendance-table th,
+        .attendance-table td {
+            white-space: nowrap;
+        }
+
+        .attendance-table td:last-child,
+        .attendance-table th:last-child {
+            white-space: normal;
+        }
+
+        @media (max-width: 768px) {
+            .attendance-modal-content {
+                padding: 24px 20px !important;
+                max-height: 95vh !important;
+            }
+
+            .attendance-table {
+                font-size: 0.8em;
+            }
+
+            .attendance-table th,
+            .attendance-table td {
+                padding: 12px 8px !important;
+            }
+
+            .attendance-table th:nth-child(4),
+            .attendance-table td:nth-child(4),
+            .attendance-table th:nth-child(6),
+            .attendance-table td:nth-child(6),
+            .attendance-table th:nth-child(7),
+            .attendance-table td:nth-child(7) {
+                display: none;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .attendance-table {
+                font-size: 0.75em;
+            }
+
+            .attendance-table th,
+            .attendance-table td {
+                padding: 10px 6px !important;
+            }
+
+            .attendance-table th:nth-child(3),
+            .attendance-table td:nth-child(3) {
+                max-width: 100px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+        }
     </style>
 </head>
 
