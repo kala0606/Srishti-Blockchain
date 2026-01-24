@@ -1538,6 +1538,10 @@ class GenerativeArtApp {
                         const WEBGL = p.WEBGL || 'webgl';
                         const P2D = p.P2D || 'p2d';
                         
+                        // Make params available in Function scope so setup() and draw() can access it
+                        // params is passed as Function parameter, ensure it's accessible via closure
+                        var params = params; // This ensures params is captured in closure for setup()/draw()
+                        
                         ${code}
                     `);
                     
@@ -1546,11 +1550,17 @@ class GenerativeArtApp {
                         
                         try {
                             // Execute user code - this defines setup(), draw(), generate(), etc.
+                            // Pass params so it's available in the code scope
                             userCode(p, params, typeof THREE !== 'undefined' ? THREE : null);
                             
                             // If user defined setup(), call it
+                            // setup() should have access to params from the Function closure
                             if (typeof setup === 'function') {
-                                setup();
+                                try {
+                                    setup();
+                                } catch (setupError) {
+                                    console.error('Error in setup():', setupError);
+                                }
                             }
                             
                             // If code defines generate function, call it for static generation

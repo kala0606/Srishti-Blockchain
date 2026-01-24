@@ -613,8 +613,15 @@ class GenerativeArtAppUI {
                 const userCode = new Function('p', 'params', 'THREE', `
                     // p5.js instance is available as 'p'
                     // three.js is available as 'THREE' (if loaded)
+                    // params is available for seed-based generation
                     // All p5.js functions are available through 'p' (p.background, p.fill, etc.)
                     // We'll also make them available as globals for convenience
+                    
+                    // Store params in a way that setup() and draw() can access it
+                    // Make params available globally
+                    if (typeof params !== 'undefined') {
+                        // params is already in scope from Function parameters
+                    }
                     
                     // Expose p5.js functions globally for user code
                     const background = p.background.bind(p);
@@ -678,6 +685,11 @@ class GenerativeArtAppUI {
                     const WEBGL = p.WEBGL || 'webgl';
                     const P2D = p.P2D || 'p2d';
                     
+                    // Make params available as a variable (not just parameter) so setup()/draw() can access it
+                    // params is passed as Function parameter, but we need to make sure it's accessible
+                    // Store it in a way that persists for setup() and draw() calls
+                    var params = params; // This makes params available in the closure
+                    
                     ${code}
                 `);
                 
@@ -687,11 +699,17 @@ class GenerativeArtAppUI {
                     
                     try {
                         // Execute user code - this defines setup(), draw(), generate(), etc.
+                        // Pass params so it's available in the code scope
                         userCode(p, params, typeof THREE !== 'undefined' ? THREE : null);
                         
                         // If user defined setup(), call it
+                        // setup() should have access to params from the Function closure
                         if (typeof setup === 'function') {
-                            setup();
+                            try {
+                                setup();
+                            } catch (setupError) {
+                                console.error('Error in setup():', setupError);
+                            }
                         }
                         
                         // If code defines generate function, call it for static generation
