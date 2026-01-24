@@ -354,14 +354,33 @@ class GenerativeArtAppUI {
             console.log('✅ Found released projects:', projects.length, projects.map(p => ({ id: p.id, status: p.status, hasCode: !!p.code, hasThumbnail: !!p.thumbnailUrl })));
             
             if (projects.length === 0) {
-                releasesEl.innerHTML = `
-                    <div class="empty-state">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-                        </svg>
-                        <p>No released projects yet. Check back soon!</p>
-                    </div>
-                `;
+                // Check if there are any projects at all
+                const allProjects = await this.artApp.getAllProjects();
+                const draftProjects = allProjects.filter(p => (p.status || 'DRAFT') === 'DRAFT');
+                
+                if (draftProjects.length > 0) {
+                    releasesEl.innerHTML = `
+                        <div class="empty-state">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+                            </svg>
+                            <p>No released projects yet.</p>
+                            <p style="font-size: 0.9em; color: var(--text-secondary); margin-top: 8px;">
+                                There are ${draftProjects.length} project${draftProjects.length > 1 ? 's' : ''} that need to be released first.
+                                <br>Go to "My Projects" to release them.
+                            </p>
+                        </div>
+                    `;
+                } else {
+                    releasesEl.innerHTML = `
+                        <div class="empty-state">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+                            </svg>
+                            <p>No released projects yet. Check back soon!</p>
+                        </div>
+                    `;
+                }
                 return;
             }
 
@@ -380,16 +399,14 @@ class GenerativeArtAppUI {
                     console.log('🎨 Generating thumbnail for project:', project.id);
                     this.artApp.getProject(project.id, true).then(updatedProject => {
                         if (updatedProject && updatedProject.thumbnailUrl) {
-                            console.log('✅ Thumbnail generated for project:', project.id);
-                            // Update the card with the new thumbnail
-                            const img = card.querySelector('.art-image img');
-                            if (img) {
-                                img.src = updatedProject.thumbnailUrl;
-                            } else {
-                                // Replace emoji with image
-                                const artImage = card.querySelector('.art-image');
+                            console.log('✅ Thumbnail generated for project:', project.id, 'URL length:', updatedProject.thumbnailUrl.length);
+                            // Find the card by project ID
+                            const cardToUpdate = gallery.querySelector(`[data-project-id="${project.id}"]`);
+                            if (cardToUpdate) {
+                                const artImage = cardToUpdate.querySelector('.art-image');
                                 if (artImage) {
-                                    artImage.innerHTML = `<img src="${updatedProject.thumbnailUrl}" alt="${updatedProject.title}" style="width: 100%; height: 100%; object-fit: cover;">`;
+                                    artImage.innerHTML = `<img src="${updatedProject.thumbnailUrl}" alt="${updatedProject.title}" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.parentElement.innerHTML='<div>🎨</div>';">`;
+                                    console.log('✅ Thumbnail updated in UI for project:', project.id);
                                 }
                             }
                         } else {
@@ -400,6 +417,8 @@ class GenerativeArtAppUI {
                     });
                 } else if (!project.code) {
                     console.warn('⚠️ Project has no code:', project.id);
+                } else if (project.thumbnailUrl) {
+                    console.log('✅ Project already has thumbnail:', project.id);
                 }
             }
         } catch (error) {
@@ -494,11 +513,12 @@ class GenerativeArtAppUI {
     createReleaseCard(project) {
         const card = document.createElement('div');
         card.className = 'art-card';
+        card.dataset.projectId = project.id; // Store project ID for thumbnail updates
         
-        // Use thumbnail if available, otherwise show emoji
+        // Use thumbnail if available, otherwise show emoji with loading indicator
         const thumbnail = project.thumbnailUrl ? 
-            `<img src="${project.thumbnailUrl}" alt="${project.title}" style="width: 100%; height: 100%; object-fit: cover;">` :
-            `<div>🎨</div>`;
+            `<img src="${project.thumbnailUrl}" alt="${project.title}" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.parentElement.innerHTML='<div>🎨</div>';">` :
+            `<div style="display: flex; align-items: center; justify-content: center; height: 100%;">🎨<span style="font-size: 0.7em; margin-left: 4px; opacity: 0.6;">Loading...</span></div>`;
         
         const canMint = !project.maxSupply || (project.pieceCount || 0) < project.maxSupply;
         

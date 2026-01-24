@@ -1040,15 +1040,25 @@ class GenerativeArtApp {
         await this._syncWithChain();
         
         const allProjects = await this.getAllProjects();
-        console.log('🔍 All projects:', allProjects.length, allProjects.map(p => ({ id: p.id, status: p.status })));
+        console.log('🔍 All projects:', allProjects.length, allProjects.map(p => ({ 
+            id: p.id, 
+            status: p.status, 
+            statusType: typeof p.status,
+            isReleasedConstant: p.status === GenerativeArtApp.PROJECT_STATUS.RELEASED,
+            isReleasedString: p.status === 'RELEASED',
+            constantValue: GenerativeArtApp.PROJECT_STATUS.RELEASED
+        })));
         
         // Filter for released projects (check both constant and string)
         const released = allProjects.filter(p => {
-            const isReleased = p.status === GenerativeArtApp.PROJECT_STATUS.RELEASED || p.status === 'RELEASED';
+            const status = p.status || 'DRAFT';
+            const isReleased = status === GenerativeArtApp.PROJECT_STATUS.RELEASED || 
+                              status === 'RELEASED' ||
+                              status === GenerativeArtApp.PROJECT_STATUS.RELEASED.toString();
             return isReleased;
         });
         
-        console.log('✅ Released projects:', released.length);
+        console.log('✅ Released projects:', released.length, released.map(p => ({ id: p.id, status: p.status })));
         return released;
     }
     
