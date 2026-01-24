@@ -643,10 +643,40 @@ class GenerativeArtAppUI {
                     const text = p.text.bind(p);
                     const textSize = p.textSize.bind(p);
                     const textAlign = p.textAlign.bind(p);
+                    // WEBGL 3D functions
+                    const rotateX = p.rotateX ? p.rotateX.bind(p) : () => {};
+                    const rotateY = p.rotateY ? p.rotateY.bind(p) : () => {};
+                    const rotateZ = p.rotateZ ? p.rotateZ.bind(p) : () => {};
+                    const box = p.box ? p.box.bind(p) : () => {};
+                    const sphere = p.sphere ? p.sphere.bind(p) : () => {};
+                    const cylinder = p.cylinder ? p.cylinder.bind(p) : () => {};
+                    const cone = p.cone ? p.cone.bind(p) : () => {};
+                    const plane = p.plane ? p.plane.bind(p) : () => {};
+                    const torus = p.torus ? p.torus.bind(p) : () => {};
+                    // Math functions
+                    const floor = Math.floor;
+                    const ceil = Math.ceil;
+                    const round = Math.round;
+                    const sin = Math.sin;
+                    const cos = Math.cos;
+                    const tan = Math.tan;
+                    const abs = Math.abs;
+                    const sqrt = Math.sqrt;
+                    const pow = Math.pow;
+                    const min = Math.min;
+                    const max = Math.max;
+                    // p5.js utility functions
+                    const noiseSeed = p.noiseSeed ? p.noiseSeed.bind(p) : () => {};
+                    const strokeWeight = p.strokeWeight ? p.strokeWeight.bind(p) : () => {};
+                    const rectMode = p.rectMode ? p.rectMode.bind(p) : () => {};
+                    const lerpColor = p.lerpColor ? p.lerpColor.bind(p) : () => {};
+                    // Constants
                     const width = p.width;
                     const height = p.height;
                     const TWO_PI = p.TWO_PI;
                     const PI = p.PI;
+                    const WEBGL = p.WEBGL || 'webgl';
+                    const P2D = p.P2D || 'p2d';
                     
                     ${code}
                     
