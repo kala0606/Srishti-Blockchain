@@ -4,18 +4,17 @@
  * A 3D generative art piece with audio reactivity.
  * Features:
  * - Audio-reactive visualization using microphone input
- * - 3D structure built on load using seed (different for each hash)
+ * - 3D structure built on load using seed (different for each hash/transaction)
  * - Real-time rendering with WEBGL
  * 
  * This code works with the Srishti Generative Art platform.
- * It uses p5.js WEBGL for 3D rendering.
+ * It receives params.seed from the transaction/mint to generate unique pieces.
  * 
  * Copy and paste this into the "Generative Code" field when creating a project.
  */
 
-// Global variables - initialize with defaults to prevent NaN errors
-let y = 200, y2 = 200;
-let a = 100, b = 100, c = 50, d = 1500, e = 750, f = 30, g = 500, h = 500;
+// Global variables - initialized with defaults
+let y, y2, a, b, c, d, e, f, g, h;
 let mic;
 let cumulativefft = 0;
 
@@ -48,25 +47,9 @@ function seededRandom(seed) {
 }
 
 function setup() {
-    // Get WEBGL constant - p5.js WEBGL is typically the string 'webgl' or a constant
-    // Access through p if available (platform wraps code with p as parameter)
-    let webglMode = 'webgl'; // Default fallback
-    
-    // Try to get actual WEBGL constant
-    if (typeof p !== 'undefined') {
-        // p is the p5 instance passed by the platform
-        if (p.WEBGL !== undefined) {
-            webglMode = p.WEBGL;
-        } else if (p.constructor && p.constructor.WEBGL) {
-            webglMode = p.constructor.WEBGL;
-        }
-    }
-    if (typeof WEBGL !== 'undefined') {
-        webglMode = WEBGL;
-    }
-    
-    // Recreate canvas in WEBGL mode (platform creates 400x400 without WEBGL)
-    // Calling createCanvas again will replace the existing canvas
+    // Recreate canvas in WEBGL mode (platform creates canvas without WEBGL)
+    // Use WEBGL constant if available, otherwise use string
+    const webglMode = typeof WEBGL !== 'undefined' ? WEBGL : 'webgl';
     createCanvas(400, 400, webglMode);
     
     background(255);
@@ -81,17 +64,19 @@ function setup() {
         // Audio not available, continue without it
     }
 
-    // Get seed from params or generate one
+    // Get seed from params - this comes from the transaction/mint
+    // Each mint gets a unique seed, generating a unique structure
     const seed = params?.seed || Date.now().toString();
     const seedHash = hashString(seed);
     
-    // Initialize noise seed
+    // Initialize noise seed for deterministic noise
     noiseSeed(seedHash);
     
-    // Initialize seeded random
+    // Initialize seeded random for deterministic generation
     const rng = seededRandom(seedHash);
     
     // Initialize parameters deterministically from seed
+    // Each seed will produce a different structure
     y = height / 2;
     y2 = height / 2;
     rectMode(CENTER);
@@ -133,11 +118,6 @@ function setColourTables() {
 }
 
 function draw() {
-    // Ensure variables are initialized (safety check)
-    if (typeof f === 'undefined' || isNaN(f) || f <= 0) {
-        return; // Wait for setup to complete
-    }
-    
     // Get audio level
     let amp = 0;
     if (mic && typeof mic.getLevel === 'function') {
@@ -217,3 +197,6 @@ function draw() {
     pop();
 }
 
+function windowResized() {
+    resizeCanvas(windowWidth, windowHeight);
+}

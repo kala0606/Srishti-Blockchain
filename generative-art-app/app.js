@@ -679,26 +679,39 @@ class GenerativeArtAppUI {
                     const P2D = p.P2D || 'p2d';
                     
                     ${code}
-                    
-                    // If code defines generate function, call it
-                    if (typeof generate === 'function') {
-                        const result = generate(params);
-                        // If result is a canvas, draw it
-                        if (result && result.nodeName === 'CANVAS') {
-                            p.image(result, 0, 0, p.width, p.height);
-                        }
-                        // If result is a p5.Graphics, draw it
-                        if (result && result.canvas) {
-                            p.image(result, 0, 0, p.width, p.height);
-                        }
-                    }
                 `);
                 
                 p.setup = () => {
+                    // Create canvas - user can recreate it in WEBGL if needed
                     p.createCanvas(400, 400);
                     
                     try {
+                        // Execute user code - this defines setup(), draw(), generate(), etc.
                         userCode(p, params, typeof THREE !== 'undefined' ? THREE : null);
+                        
+                        // If user defined setup(), call it
+                        if (typeof setup === 'function') {
+                            setup();
+                        }
+                        
+                        // If code defines generate function, call it for static generation
+                        if (typeof generate === 'function') {
+                            const result = generate(params);
+                            // If result is a canvas, draw it
+                            if (result && result.nodeName === 'CANVAS') {
+                                p.image(result, 0, 0, p.width, p.height);
+                            }
+                            // If result is a p5.Graphics, draw it
+                            if (result && result.canvas) {
+                                p.image(result, 0, 0, p.width, p.height);
+                            }
+                            // If result is a data URL string, load and draw it
+                            if (typeof result === 'string' && result.startsWith('data:image')) {
+                                p.loadImage(result, (img) => {
+                                    p.image(img, 0, 0, p.width, p.height);
+                                });
+                            }
+                        }
                     } catch (error) {
                         console.error('Error executing user code:', error);
                         p.background(20);
@@ -708,8 +721,14 @@ class GenerativeArtAppUI {
                 };
                 
                 p.draw = () => {
-                    // Only draw once for static thumbnails
-                    // User code already executed in setup
+                    // If user defined draw(), call it for live rendering
+                    if (typeof draw === 'function') {
+                        try {
+                            draw();
+                        } catch (error) {
+                            console.error('Error in draw():', error);
+                        }
+                    }
                 };
             };
             

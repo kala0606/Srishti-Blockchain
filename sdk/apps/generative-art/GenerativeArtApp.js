@@ -1539,46 +1539,52 @@ class GenerativeArtApp {
                         const P2D = p.P2D || 'p2d';
                         
                         ${code}
-                        
-                        // If code defines generate function, call it
-                        if (typeof generate === 'function') {
-                            const result = generate(params);
-                            // If result is a canvas, draw it
-                            if (result && result.nodeName === 'CANVAS') {
-                                try {
-                                    p.image(result, 0, 0, p.width, p.height);
-                                } catch (e) {
-                                    console.warn('Failed to draw canvas result:', e);
-                                }
-                            }
-                            // If result is a p5.Graphics, draw it
-                            else if (result && result.canvas && typeof result.canvas !== 'undefined') {
-                                try {
-                                    p.image(result, 0, 0, p.width, p.height);
-                                } catch (e) {
-                                    console.warn('Failed to draw p5.Graphics result:', e);
-                                }
-                            }
-                            // If result is a data URL, try to load it
-                            else if (typeof result === 'string' && result.startsWith('data:image')) {
-                                try {
-                                    const img = p.loadImage(result, (img) => {
-                                        p.image(img, 0, 0, p.width, p.height);
-                                    }, (err) => {
-                                        console.warn('Failed to load image from data URL:', err);
-                                    });
-                                } catch (e) {
-                                    console.warn('Failed to load image:', e);
-                                }
-                            }
-                        }
                     `);
                     
                     p.setup = () => {
                         p.createCanvas(512, 512);
                         
                         try {
+                            // Execute user code - this defines setup(), draw(), generate(), etc.
                             userCode(p, params, typeof THREE !== 'undefined' ? THREE : null);
+                            
+                            // If user defined setup(), call it
+                            if (typeof setup === 'function') {
+                                setup();
+                            }
+                            
+                            // If code defines generate function, call it for static generation
+                            if (typeof generate === 'function') {
+                                const result = generate(params);
+                                // If result is a canvas, draw it
+                                if (result && result.nodeName === 'CANVAS') {
+                                    try {
+                                        p.image(result, 0, 0, p.width, p.height);
+                                    } catch (e) {
+                                        console.warn('Failed to draw canvas result:', e);
+                                    }
+                                }
+                                // If result is a p5.Graphics, draw it
+                                else if (result && result.canvas && typeof result.canvas !== 'undefined') {
+                                    try {
+                                        p.image(result, 0, 0, p.width, p.height);
+                                    } catch (e) {
+                                        console.warn('Failed to draw p5.Graphics result:', e);
+                                    }
+                                }
+                                // If result is a data URL, try to load it
+                                else if (typeof result === 'string' && result.startsWith('data:image')) {
+                                    try {
+                                        const img = p.loadImage(result, (img) => {
+                                            p.image(img, 0, 0, p.width, p.height);
+                                        }, (err) => {
+                                            console.warn('Failed to load image from data URL:', err);
+                                        });
+                                    } catch (e) {
+                                        console.warn('Failed to load image:', e);
+                                    }
+                                }
+                            }
                         } catch (error) {
                             console.error('Error in user code:', error);
                             p.background(20);
@@ -1588,7 +1594,16 @@ class GenerativeArtApp {
                     };
                     
                     p.draw = () => {
-                        // Only draw once for static generation
+                        // If user defined draw(), call it for live rendering
+                        if (typeof draw === 'function') {
+                            try {
+                                draw();
+                            } catch (error) {
+                                console.error('Error in draw():', error);
+                            }
+                        }
+                        
+                        // For static generation, capture after first frame
                         if (p.frameCount === 1 && !resolved) {
                             // Get the canvas after first frame
                             setTimeout(() => {
