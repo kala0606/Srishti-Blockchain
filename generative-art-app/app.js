@@ -538,9 +538,124 @@ class GenerativeArtAppUI {
     }
     
     /**
-     * Render live canvas from code
+     * Render live canvas from code using p5.js and three.js
      */
     async renderLiveCanvas(projectId, code, parameters, container) {
+        if (!container) return;
+        
+        try {
+            console.log('🎨 Rendering live canvas for project:', projectId);
+            
+            // Check if p5.js and three.js are loaded
+            if (typeof p5 === 'undefined') {
+                throw new Error('p5.js library not loaded. Please refresh the page.');
+            }
+            
+            // Create a container div for p5.js
+            const p5Container = document.createElement('div');
+            p5Container.style.width = '100%';
+            p5Container.style.height = '100%';
+            p5Container.style.position = 'relative';
+            container.innerHTML = '';
+            container.appendChild(p5Container);
+            
+            // Prepare parameters
+            const params = {
+                seed: `preview_${projectId}`,
+                ...parameters
+            };
+            
+            // Use p5.js instance mode to execute the code
+            const sketch = (p) => {
+                // Execute user code with p5.js and three.js available
+                // Make p5.js functions available as globals for the user code
+                const userCode = new Function('p', 'params', 'THREE', `
+                    // p5.js instance is available as 'p'
+                    // three.js is available as 'THREE' (if loaded)
+                    // All p5.js functions are available through 'p' (p.background, p.fill, etc.)
+                    // We'll also make them available as globals for convenience
+                    
+                    // Expose p5.js functions globally for user code
+                    const background = p.background.bind(p);
+                    const fill = p.fill.bind(p);
+                    const stroke = p.stroke.bind(p);
+                    const noStroke = p.noStroke.bind(p);
+                    const noFill = p.noFill.bind(p);
+                    const ellipse = p.ellipse.bind(p);
+                    const rect = p.rect.bind(p);
+                    const line = p.line.bind(p);
+                    const point = p.point.bind(p);
+                    const triangle = p.triangle.bind(p);
+                    const translate = p.translate.bind(p);
+                    const rotate = p.rotate.bind(p);
+                    const scale = p.scale.bind(p);
+                    const push = p.push.bind(p);
+                    const pop = p.pop.bind(p);
+                    const map = p.map.bind(p);
+                    const lerp = p.lerp.bind(p);
+                    const random = p.random.bind(p);
+                    const noise = p.noise.bind(p);
+                    const color = p.color.bind(p);
+                    const createCanvas = p.createCanvas.bind(p);
+                    const createGraphics = p.createGraphics.bind(p);
+                    const image = p.image.bind(p);
+                    const text = p.text.bind(p);
+                    const textSize = p.textSize.bind(p);
+                    const textAlign = p.textAlign.bind(p);
+                    const width = p.width;
+                    const height = p.height;
+                    const TWO_PI = p.TWO_PI;
+                    const PI = p.PI;
+                    
+                    ${code}
+                    
+                    // If code defines generate function, call it
+                    if (typeof generate === 'function') {
+                        const result = generate(params);
+                        // If result is a canvas, draw it
+                        if (result && result.nodeName === 'CANVAS') {
+                            p.image(result, 0, 0, p.width, p.height);
+                        }
+                        // If result is a p5.Graphics, draw it
+                        if (result && result.canvas) {
+                            p.image(result, 0, 0, p.width, p.height);
+                        }
+                    }
+                `);
+                
+                p.setup = () => {
+                    p.createCanvas(400, 400);
+                    
+                    try {
+                        userCode(p, params, typeof THREE !== 'undefined' ? THREE : null);
+                    } catch (error) {
+                        console.error('Error executing user code:', error);
+                        p.background(20);
+                        p.fill(255, 0, 0);
+                        p.text('Code Error: ' + error.message, 10, 20);
+                    }
+                };
+                
+                p.draw = () => {
+                    // Only draw once for static thumbnails
+                    // User code already executed in setup
+                };
+            };
+            
+            // Create p5 instance
+            new p5(sketch, p5Container);
+            
+            console.log('✅ Live canvas rendered with p5.js for project:', projectId);
+        } catch (error) {
+            console.error('❌ Failed to render live canvas:', projectId, error);
+            container.innerHTML = '<div style="color: rgba(255,255,255,0.5); font-size: 0.8em;">Render Error: ' + error.message + '</div>';
+        }
+    }
+    
+    /**
+     * OLD METHOD - Render live canvas from code (fallback)
+     */
+    async renderLiveCanvasOld(projectId, code, parameters, container) {
         if (!container) return;
         
         try {
@@ -562,7 +677,7 @@ class GenerativeArtAppUI {
                 ...parameters
             };
             
-            // Execute code in safe context
+            // Execute code in safe context with p5.js-like functions
             const generateFunction = new Function('params', 'canvas', 'ctx', `
                 // Helper functions
                 function hash(str) {
@@ -574,8 +689,115 @@ class GenerativeArtAppUI {
                     return Math.abs(h);
                 }
                 
+                // Canvas dimensions (p5.js width/height)
                 const width = canvas.width;
                 const height = canvas.height;
+                
+                // p5.js color() function
+                function color(r, g, b, a = 255) {
+                    if (arguments.length === 1) return r;
+                    if (arguments.length === 3) return \`rgb(\${r}, \${g}, \${b})\`;
+                    return \`rgba(\${r}, \${g}, \${b}, \${a / 255})\`;
+                }
+                
+                // p5.js background()
+                function background(...args) {
+                    ctx.fillStyle = args.length === 1 ? args[0] : color(...args);
+                    ctx.fillRect(0, 0, width, height);
+                }
+                
+                // p5.js fill()
+                function fill(...args) {
+                    ctx.fillStyle = args.length === 1 ? args[0] : color(...args);
+                }
+                
+                // p5.js stroke()
+                function stroke(...args) {
+                    ctx.strokeStyle = args.length === 1 ? args[0] : color(...args);
+                }
+                
+                // p5.js noStroke()
+                function noStroke() {
+                    ctx.strokeStyle = 'transparent';
+                }
+                
+                // p5.js noFill()
+                function noFill() {
+                    ctx.fillStyle = 'transparent';
+                }
+                
+                // p5.js strokeWeight()
+                function strokeWeight(w) {
+                    ctx.lineWidth = w;
+                }
+                
+                // p5.js ellipse()
+                function ellipse(x, y, w, h) {
+                    ctx.beginPath();
+                    ctx.ellipse(x, y, w / 2, h / 2, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                    if (ctx.strokeStyle !== 'transparent') ctx.stroke();
+                }
+                
+                // p5.js rect()
+                function rect(x, y, w, h) {
+                    ctx.fillRect(x, y, w, h);
+                    if (ctx.strokeStyle !== 'transparent') ctx.strokeRect(x, y, w, h);
+                }
+                
+                // p5.js line()
+                function line(x1, y1, x2, y2) {
+                    ctx.beginPath();
+                    ctx.moveTo(x1, y1);
+                    ctx.lineTo(x2, y2);
+                    ctx.stroke();
+                }
+                
+                // p5.js point()
+                function point(x, y) {
+                    ctx.fillRect(x, y, 1, 1);
+                }
+                
+                // p5.js triangle()
+                function triangle(x1, y1, x2, y2, x3, y3) {
+                    ctx.beginPath();
+                    ctx.moveTo(x1, y1);
+                    ctx.lineTo(x2, y2);
+                    ctx.lineTo(x3, y3);
+                    ctx.closePath();
+                    ctx.fill();
+                    if (ctx.strokeStyle !== 'transparent') ctx.stroke();
+                }
+                
+                // p5.js map()
+                function map(value, start1, stop1, start2, stop2) {
+                    return start2 + (stop2 - start2) * ((value - start1) / (stop1 - start1));
+                }
+                
+                // p5.js lerp()
+                function lerp(start, stop, amt) {
+                    return start + (stop - start) * amt;
+                }
+                
+                // p5.js constrain()
+                function constrain(n, low, high) {
+                    return Math.max(Math.min(n, high), low);
+                }
+                
+                // p5.js transformations
+                function push() { ctx.save(); }
+                function pop() { ctx.restore(); }
+                function translate(x, y) { ctx.translate(x, y); }
+                function rotate(angle) { ctx.rotate(angle); }
+                function scale(x, y = x) { ctx.scale(x, y); }
+                
+                // Seeded random
+                let rngSeed = hash(params.seed || 'default');
+                function random(min = 0, max = 1) {
+                    rngSeed = (rngSeed * 1103515245 + 12345) & 0x7fffffff;
+                    const val = rngSeed / 0x7fffffff;
+                    return min + val * (max - min);
+                }
                 
                 ${code}
                 

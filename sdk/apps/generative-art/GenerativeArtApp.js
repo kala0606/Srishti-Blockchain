@@ -1217,15 +1217,21 @@ class GenerativeArtApp {
         try {
             console.log('🎨 Executing generative code with params:', params);
             
+            // Check if p5.js is available
+            if (typeof p5 !== 'undefined') {
+                return await this._executeCodeWithP5(code, params);
+            }
+            
+            // Fallback to canvas-based execution
             // Create a canvas element for rendering
             const canvas = document.createElement('canvas');
             canvas.width = 512;
             canvas.height = 512;
             const ctx = canvas.getContext('2d');
             
-            // Create a safe execution context with all necessary functions and canvas
+            // Create a safe execution context with p5.js-like functions
             const generateFunction = new Function('params', 'canvas', 'ctx', `
-                // Helper functions that might be needed
+                // Helper functions
                 function hash(str) {
                     let h = 0;
                     for (let i = 0; i < str.length; i++) {
@@ -1235,9 +1241,115 @@ class GenerativeArtApp {
                     return Math.abs(h);
                 }
                 
-                // Canvas helpers
+                // Canvas dimensions (p5.js width/height)
                 const width = canvas.width;
                 const height = canvas.height;
+                
+                // p5.js color() function
+                function color(r, g, b, a = 255) {
+                    if (arguments.length === 1) return r;
+                    if (arguments.length === 3) return \`rgb(\${r}, \${g}, \${b})\`;
+                    return \`rgba(\${r}, \${g}, \${b}, \${a / 255})\`;
+                }
+                
+                // p5.js background()
+                function background(...args) {
+                    ctx.fillStyle = args.length === 1 ? args[0] : color(...args);
+                    ctx.fillRect(0, 0, width, height);
+                }
+                
+                // p5.js fill()
+                function fill(...args) {
+                    ctx.fillStyle = args.length === 1 ? args[0] : color(...args);
+                }
+                
+                // p5.js stroke()
+                function stroke(...args) {
+                    ctx.strokeStyle = args.length === 1 ? args[0] : color(...args);
+                }
+                
+                // p5.js noStroke()
+                function noStroke() {
+                    ctx.strokeStyle = 'transparent';
+                }
+                
+                // p5.js noFill()
+                function noFill() {
+                    ctx.fillStyle = 'transparent';
+                }
+                
+                // p5.js strokeWeight()
+                function strokeWeight(w) {
+                    ctx.lineWidth = w;
+                }
+                
+                // p5.js ellipse()
+                function ellipse(x, y, w, h) {
+                    ctx.beginPath();
+                    ctx.ellipse(x, y, w / 2, h / 2, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                    if (ctx.strokeStyle !== 'transparent') ctx.stroke();
+                }
+                
+                // p5.js rect()
+                function rect(x, y, w, h) {
+                    ctx.fillRect(x, y, w, h);
+                    if (ctx.strokeStyle !== 'transparent') ctx.strokeRect(x, y, w, h);
+                }
+                
+                // p5.js line()
+                function line(x1, y1, x2, y2) {
+                    ctx.beginPath();
+                    ctx.moveTo(x1, y1);
+                    ctx.lineTo(x2, y2);
+                    ctx.stroke();
+                }
+                
+                // p5.js point()
+                function point(x, y) {
+                    ctx.fillRect(x, y, 1, 1);
+                }
+                
+                // p5.js triangle()
+                function triangle(x1, y1, x2, y2, x3, y3) {
+                    ctx.beginPath();
+                    ctx.moveTo(x1, y1);
+                    ctx.lineTo(x2, y2);
+                    ctx.lineTo(x3, y3);
+                    ctx.closePath();
+                    ctx.fill();
+                    if (ctx.strokeStyle !== 'transparent') ctx.stroke();
+                }
+                
+                // p5.js map()
+                function map(value, start1, stop1, start2, stop2) {
+                    return start2 + (stop2 - start2) * ((value - start1) / (stop1 - start1));
+                }
+                
+                // p5.js lerp()
+                function lerp(start, stop, amt) {
+                    return start + (stop - start) * amt;
+                }
+                
+                // p5.js constrain()
+                function constrain(n, low, high) {
+                    return Math.max(Math.min(n, high), low);
+                }
+                
+                // p5.js transformations
+                function push() { ctx.save(); }
+                function pop() { ctx.restore(); }
+                function translate(x, y) { ctx.translate(x, y); }
+                function rotate(angle) { ctx.rotate(angle); }
+                function scale(x, y = x) { ctx.scale(x, y); }
+                
+                // Seeded random (will be set up below)
+                let rngSeed = hash(params.seed || 'default');
+                function random(min = 0, max = 1) {
+                    rngSeed = (rngSeed * 1103515245 + 12345) & 0x7fffffff;
+                    const val = rngSeed / 0x7fffffff;
+                    return min + val * (max - min);
+                }
                 
                 ${code}
                 
@@ -1300,6 +1412,146 @@ class GenerativeArtApp {
             console.error('   Params:', params);
             throw new Error(`Code execution failed: ${error.message}`);
         }
+    }
+    
+    /**
+     * Execute code using p5.js library (when available)
+     * @private
+     */
+    async _executeCodeWithP5(code, params) {
+        return new Promise((resolve, reject) => {
+            try {
+                // Create a hidden container for p5.js
+                const container = document.createElement('div');
+                container.style.position = 'absolute';
+                container.style.left = '-9999px';
+                container.style.width = '512px';
+                container.style.height = '512px';
+                document.body.appendChild(container);
+                
+                let p5Instance = null;
+                let resultCanvas = null;
+                let resolved = false;
+                
+                const sketch = (p) => {
+                    p5Instance = p;
+                    
+                    // Execute user code with p5.js and three.js available
+                    const userCode = new Function('p', 'params', 'THREE', `
+                        // p5.js instance is available as 'p'
+                        // three.js is available as 'THREE' (if loaded)
+                        // All p5.js functions are available through 'p' (p.background, p.fill, etc.)
+                        // We'll also make them available as globals for convenience
+                        
+                        // Expose p5.js functions globally for user code
+                        const background = p.background.bind(p);
+                        const fill = p.fill.bind(p);
+                        const stroke = p.stroke.bind(p);
+                        const noStroke = p.noStroke.bind(p);
+                        const noFill = p.noFill.bind(p);
+                        const ellipse = p.ellipse.bind(p);
+                        const rect = p.rect.bind(p);
+                        const line = p.line.bind(p);
+                        const point = p.point.bind(p);
+                        const triangle = p.triangle.bind(p);
+                        const translate = p.translate.bind(p);
+                        const rotate = p.rotate.bind(p);
+                        const scale = p.scale.bind(p);
+                        const push = p.push.bind(p);
+                        const pop = p.pop.bind(p);
+                        const map = p.map.bind(p);
+                        const lerp = p.lerp.bind(p);
+                        const random = p.random.bind(p);
+                        const noise = p.noise.bind(p);
+                        const color = p.color.bind(p);
+                        const createCanvas = p.createCanvas.bind(p);
+                        const createGraphics = p.createGraphics.bind(p);
+                        const image = p.image.bind(p);
+                        const text = p.text.bind(p);
+                        const textSize = p.textSize.bind(p);
+                        const textAlign = p.textAlign.bind(p);
+                        const width = p.width;
+                        const height = p.height;
+                        const TWO_PI = p.TWO_PI;
+                        const PI = p.PI;
+                        
+                        ${code}
+                        
+                        // If code defines generate function, call it
+                        if (typeof generate === 'function') {
+                            const result = generate(params);
+                            // If result is a canvas, draw it
+                            if (result && result.nodeName === 'CANVAS') {
+                                p.image(result, 0, 0, p.width, p.height);
+                            }
+                            // If result is a p5.Graphics, draw it
+                            if (result && result.canvas) {
+                                p.image(result, 0, 0, p.width, p.height);
+                            }
+                        }
+                    `);
+                    
+                    p.setup = () => {
+                        p.createCanvas(512, 512);
+                        
+                        try {
+                            userCode(p, params, typeof THREE !== 'undefined' ? THREE : null);
+                        } catch (error) {
+                            console.error('Error in user code:', error);
+                            p.background(20);
+                            p.fill(255, 0, 0);
+                            p.text('Error: ' + error.message, 10, 20);
+                        }
+                    };
+                    
+                    p.draw = () => {
+                        // Only draw once for static generation
+                        if (p.frameCount === 1 && !resolved) {
+                            // Get the canvas after first frame
+                            setTimeout(() => {
+                                if (p5Instance && p5Instance.canvas && !resolved) {
+                                    resolved = true;
+                                    resultCanvas = p5Instance.canvas;
+                                    const dataUrl = resultCanvas.toDataURL('image/png');
+                                    if (container.parentNode) {
+                                        document.body.removeChild(container);
+                                    }
+                                    p.remove(); // Clean up p5 instance
+                                    resolve(dataUrl);
+                                }
+                            }, 100);
+                        }
+                    };
+                };
+                
+                // Create p5 instance
+                new p5(sketch, container);
+                
+                // Timeout fallback
+                setTimeout(() => {
+                    if (!resolved && p5Instance && p5Instance.canvas) {
+                        resolved = true;
+                        resultCanvas = p5Instance.canvas;
+                        const dataUrl = resultCanvas.toDataURL('image/png');
+                        if (container.parentNode) {
+                            document.body.removeChild(container);
+                        }
+                        p5Instance.remove(); // Clean up p5 instance
+                        resolve(dataUrl);
+                    } else if (!resolved) {
+                        resolved = true;
+                        if (container.parentNode) {
+                            document.body.removeChild(container);
+                        }
+                        reject(new Error('p5.js execution timeout'));
+                    }
+                }, 3000);
+                
+            } catch (error) {
+                console.error('Error executing code with p5.js:', error);
+                reject(error);
+            }
+        });
     }
     
     /**
