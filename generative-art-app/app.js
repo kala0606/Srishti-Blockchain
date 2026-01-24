@@ -450,31 +450,12 @@ class GenerativeArtAppUI {
             projectsEl.innerHTML = '<div class="gallery"></div>';
             const gallery = projectsEl.querySelector('.gallery');
 
-            // Generate thumbnails for projects that don't have them
+            // Render live canvases for all projects
             for (const project of projects) {
                 const card = this.createProjectCard(project);
                 gallery.appendChild(card);
                 
-                // Generate thumbnail in background if missing
-                if (!project.thumbnailUrl && project.code) {
-                    this.artApp.getProject(project.id, true).then(updatedProject => {
-                        if (updatedProject && updatedProject.thumbnailUrl) {
-                            // Update the card with the new thumbnail
-                            const img = card.querySelector('.art-image img');
-                            if (img) {
-                                img.src = updatedProject.thumbnailUrl;
-                            } else {
-                                // Replace emoji with image
-                                const artImage = card.querySelector('.art-image');
-                                if (artImage) {
-                                    artImage.innerHTML = `<img src="${updatedProject.thumbnailUrl}" alt="${updatedProject.title}" style="width: 100%; height: 100%; object-fit: cover;">`;
-                                }
-                            }
-                        }
-                    }).catch(err => 
-                        console.warn('Failed to generate thumbnail for project:', project.id, err)
-                    );
-                }
+                // Live canvas rendering happens in createProjectCard
             }
         } catch (error) {
             console.error('Failed to load projects:', error);
@@ -515,16 +496,13 @@ class GenerativeArtAppUI {
         card.className = 'art-card';
         card.dataset.projectId = project.id; // Store project ID for thumbnail updates
         
-        // Use thumbnail if available, otherwise show emoji with loading indicator
-        const thumbnail = project.thumbnailUrl ? 
-            `<img src="${project.thumbnailUrl}" alt="${project.title}" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.parentElement.innerHTML='<div>🎨</div>';">` :
-            `<div style="display: flex; align-items: center; justify-content: center; height: 100%;">🎨<span style="font-size: 0.7em; margin-left: 4px; opacity: 0.6;">Loading...</span></div>`;
-        
         const canMint = !project.maxSupply || (project.pieceCount || 0) < project.maxSupply;
         
         card.innerHTML = `
-            <div class="art-image">
-                ${thumbnail}
+            <div class="art-image" style="position: relative; overflow: hidden;">
+                <div class="live-canvas-container" data-project-id="${project.id}" style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #1a1a1a;">
+                    <div style="color: rgba(255,255,255,0.5); font-size: 0.8em;">Loading...</div>
+                </div>
             </div>
             <div class="art-info">
                 <div class="art-title">${project.title}</div>
@@ -546,21 +524,102 @@ class GenerativeArtAppUI {
             this.showProjectModal(project);
         });
 
+        // Render live canvas after card is added to DOM
+        if (project.code) {
+            setTimeout(() => {
+                const container = card.querySelector('.live-canvas-container');
+                if (container) {
+                    this.renderLiveCanvas(project.id, project.code, project.parameters || {}, container);
+                }
+            }, 100);
+        }
+
         return card;
+    }
+    
+    /**
+     * Render live canvas from code
+     */
+    async renderLiveCanvas(projectId, code, parameters, container) {
+        if (!container) return;
+        
+        try {
+            console.log('🎨 Rendering live canvas for project:', projectId);
+            
+            // Create canvas element
+            const canvas = document.createElement('canvas');
+            canvas.width = 400; // Thumbnail size
+            canvas.height = 400;
+            canvas.style.width = '100%';
+            canvas.style.height = '100%';
+            canvas.style.objectFit = 'cover';
+            
+            const ctx = canvas.getContext('2d');
+            
+            // Prepare parameters
+            const params = {
+                seed: `preview_${projectId}`,
+                ...parameters
+            };
+            
+            // Execute code in safe context
+            const generateFunction = new Function('params', 'canvas', 'ctx', `
+                // Helper functions
+                function hash(str) {
+                    let h = 0;
+                    for (let i = 0; i < str.length; i++) {
+                        h = ((h << 5) - h) + str.charCodeAt(i);
+                        h = h & h;
+                    }
+                    return Math.abs(h);
+                }
+                
+                const width = canvas.width;
+                const height = canvas.height;
+                
+                ${code}
+                
+                // Call generate function if it exists
+                if (typeof generate === 'function') {
+                    const result = generate(params);
+                    // If result is a canvas, copy it to our canvas
+                    if (result && result.nodeName === 'CANVAS') {
+                        ctx.drawImage(result, 0, 0, canvas.width, canvas.height);
+                        return;
+                    }
+                    // If result is a canvas-like object
+                    if (result && typeof result.toDataURL === 'function' && typeof result.getContext === 'function') {
+                        ctx.drawImage(result, 0, 0, canvas.width, canvas.height);
+                        return;
+                    }
+                    // If result is null/undefined, code may have drawn directly to ctx
+                }
+            `);
+            
+            // Execute the code
+            generateFunction(params, canvas, ctx);
+            
+            // Clear container and add canvas
+            container.innerHTML = '';
+            container.appendChild(canvas);
+            
+            console.log('✅ Live canvas rendered for project:', projectId);
+        } catch (error) {
+            console.error('❌ Failed to render live canvas:', projectId, error);
+            container.innerHTML = '<div style="color: rgba(255,255,255,0.5); font-size: 0.8em;">Render Error</div>';
+        }
     }
 
     createProjectCard(project) {
         const card = document.createElement('div');
         card.className = 'art-card';
-        
-        // Use thumbnail if available, otherwise show emoji
-        const thumbnail = project.thumbnailUrl ? 
-            `<img src="${project.thumbnailUrl}" alt="${project.title}" style="width: 100%; height: 100%; object-fit: cover;">` :
-            `<div>🎨</div>`;
+        card.dataset.projectId = project.id;
         
         card.innerHTML = `
-            <div class="art-image">
-                ${thumbnail}
+            <div class="art-image" style="position: relative; overflow: hidden;">
+                <div class="live-canvas-container" data-project-id="${project.id}" style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #1a1a1a;">
+                    <div style="color: rgba(255,255,255,0.5); font-size: 0.8em;">Loading...</div>
+                </div>
             </div>
             <div class="art-info">
                 <div class="art-title">${project.title}</div>
@@ -578,6 +637,16 @@ class GenerativeArtAppUI {
         card.addEventListener('click', () => {
             this.showProjectModal(project);
         });
+
+        // Render live canvas after card is added to DOM
+        if (project.code) {
+            setTimeout(() => {
+                const container = card.querySelector('.live-canvas-container');
+                if (container) {
+                    this.renderLiveCanvas(project.id, project.code, project.parameters || {}, container);
+                }
+            }, 100);
+        }
 
         return card;
     }
