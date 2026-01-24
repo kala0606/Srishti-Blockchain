@@ -2606,7 +2606,7 @@
                     <option value="">Select a node...</option>
                 </select>
                 <p style="margin-top: 10px; font-size: 0.85em; opacity: 0.6;">
-                    💡 Tip: Scan someone's QR code to join directly under them
+                    💡 You can join as a root node (no parent) or join under an existing node. Scan a QR code to join directly under someone.
                 </p>
             </div>
             
@@ -5048,7 +5048,7 @@
                 selectParentSection.style.display = 'block';
                 
                 // Populate parent select dropdown
-                parentSelect.innerHTML = '<option value="">Select a node to join under...</option>';
+                parentSelect.innerHTML = '<option value="">👑 Join as a root node (no parent)</option>';
                 
                 // Sort nodes: ROOT first, then by name
                 const sortedNodes = [...existingNodes].sort((a, b) => {
@@ -5064,40 +5064,32 @@
                     const roleLabel = role === 'ROOT' ? ' 👑 (Root)' : role === 'INSTITUTION' ? ' 🏛️' : '';
                     const option = document.createElement('option');
                     option.value = node.id;
-                    option.textContent = `${node.name || 'Unknown'}${roleLabel}`;
+                    option.textContent = `Join under: ${node.name || 'Unknown'}${roleLabel}`;
                     parentSelect.appendChild(option);
                 });
                 
-                // Auto-select root node if exists
-                const rootNode = sortedNodes.find(n => 
-                    window.SrishtiApp?.chain?.state?.nodeRoles?.[n.id] === 'ROOT'
-                );
-                if (rootNode) {
-                    parentSelect.value = rootNode.id;
-                    modal.dataset.parentId = rootNode.id;
-                } else {
-                    modal.dataset.parentId = '';
-                }
+                // Don't auto-select - let user choose (default is root node)
+                modal.dataset.parentId = '';
                 
                 // Update parentId when selection changes
                 parentSelect.onchange = () => {
-                    modal.dataset.parentId = parentSelect.value;
+                    modal.dataset.parentId = parentSelect.value || '';
                     updateJoinButtonState();
                 };
             } else {
-                // No nodes at all - this will be the first/genesis node
+                // No nodes at all - this will be the first/genesis node (becomes root)
                 joinInfo.style.display = 'none';
                 selectParentSection.style.display = 'none';
                 modal.dataset.parentId = '';
             }
             
-            // Enable/disable button based on input AND parent selection
+            // Enable/disable button based on input (parent is optional now)
             nameInput.value = '';
             
             const updateJoinButtonState = () => {
                 const nameValid = nameInput.value.trim().length >= 2;
-                const parentValid = !hasExistingNodes || modal.dataset.parentId;
-                joinBtn.disabled = !nameValid || !parentValid;
+                // Parent selection is now optional - can join as root node
+                joinBtn.disabled = !nameValid;
             };
             
             updateJoinButtonState();
@@ -5108,11 +5100,8 @@
                 const name = nameInput.value.trim();
                 if (name.length < 2) return;
                 
-                // Validate parent selection if nodes exist
-                if (hasExistingNodes && !modal.dataset.parentId) {
-                    alert('Please select a node to join under, or scan a QR code.');
-                    return;
-                }
+                // Parent is optional - empty string means join as root node
+                // No validation needed - user can join as root or under a parent
                 
                 joinBtn.disabled = true;
                 joinBtn.innerHTML = `

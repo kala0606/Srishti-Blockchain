@@ -288,7 +288,7 @@ class Chain {
     }
 
     /**
-     * Handle NODE_JOIN - assign roles (first node gets ROOT)
+     * Handle NODE_JOIN - assign roles (nodes without parentId become ROOT)
      * @param {Object} tx - Transaction object
      * @param {Block} block - Block containing the transaction
      */
@@ -301,7 +301,8 @@ class Chain {
             nodeName: tx.name,
             blockIndex: block.index,
             existingRole: this.state.nodeRoles[nodeId],
-            currentRoles: Object.keys(this.state.nodeRoles).length
+            currentRoles: Object.keys(this.state.nodeRoles).length,
+            parentId: tx.parentId
         });
 
         // Check if node already has a role (prevent duplicate processing)
@@ -310,21 +311,23 @@ class Chain {
             return; // Don't process again
         }
 
-        // First non-genesis node join gets ROOT role
-        // Check if ANY ROOT already exists (prevent multiple ROOT nodes)
-        const existingRoles = Object.values(this.state.nodeRoles);
-        const hasRoot = existingRoles.includes('ROOT');
-
-        // Only assign ROOT if no ROOT exists yet
-        if (!hasRoot) {
-            // This is the first node to join - assign ROOT role
+        // ═══════════════════════════════════════════════════════════════════════════
+        // NEW ARCHITECTURE: Multiple ROOT nodes allowed
+        // - Nodes without parentId become ROOT nodes (standalone roots)
+        // - Nodes with parentId become USER nodes (can join under any node, including ROOT)
+        // - ROOT nodes can later become children of other nodes (including other ROOT nodes)
+        // ═══════════════════════════════════════════════════════════════════════════
+        const hasParent = tx.parentId && tx.parentId !== null && tx.parentId !== '';
+        
+        if (!hasParent) {
+            // Node joining without a parent becomes a ROOT node
             this.state.nodeRoles[nodeId] = 'ROOT';
-            console.log(`👑 ROOT role assigned to first node: ${nodeId} (block ${block.index})`);
+            console.log(`👑 ROOT role assigned to standalone node: ${nodeId} (block ${block.index})`);
             console.log('🔍 [Chain.handleNodeJoin] Role assignment complete:', this.state.nodeRoles);
         } else {
-            // New node that doesn't have a role yet - assign USER
+            // Node joining with a parent becomes a USER node
             this.state.nodeRoles[nodeId] = 'USER';
-            console.log(`👤 USER role assigned to: ${nodeId} (block ${block.index})`);
+            console.log(`👤 USER role assigned to: ${nodeId} (block ${block.index}) - parent: ${tx.parentId}`);
             console.log('🔍 [Chain.handleNodeJoin] Role assignment complete:', this.state.nodeRoles);
         }
 
