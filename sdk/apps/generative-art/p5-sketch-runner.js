@@ -7,6 +7,11 @@
  *
  * hashData: { seed, ...params, isExport, isPreview, random() } — always available.
  * Use hashData.seed for deterministic art; hashData.random() for seeded 0–1.
+ *
+ * Injected into user sketch: createCanvas, rect, ellipse, fill, stroke, translate,
+ * push, pop, noise, random (overridden by hashData.random when seeded), noLoop,
+ * loop, rectMode, ellipseMode, frameRate, WEBGL, P2D, CORNER, CENTER, TWO_PI, PI,
+ * width, height, and other common p5 bindings.
  */
 
 (function (global) {
@@ -85,6 +90,13 @@
             noLoop: p.noLoop.bind(p),
             loop: p.loop.bind(p),
             resizeCanvas: p.resizeCanvas.bind(p),
+            rectMode: p.rectMode && p.rectMode.bind(p),
+            ellipseMode: p.ellipseMode && p.ellipseMode.bind(p),
+            frameRate: p.frameRate && p.frameRate.bind(p),
+            WEBGL: typeof p.WEBGL !== 'undefined' ? p.WEBGL : 'webgl',
+            P2D: typeof p.P2D !== 'undefined' ? p.P2D : '2d',
+            CORNER: typeof p.CORNER !== 'undefined' ? p.CORNER : 'corner',
+            CENTER: typeof p.CENTER !== 'undefined' ? p.CENTER : 'center',
             width: 0,
             height: 0,
             TWO_PI: p.TWO_PI,
@@ -128,8 +140,10 @@
                         random = bindings.random, noise = bindings.noise, color = bindings.color,
                         createCanvas = bindings.createCanvas, createGraphics = bindings.createGraphics,
                         image = bindings.image, text = bindings.text, textSize = bindings.textSize, textAlign = bindings.textAlign,
-                        strokeWeight = bindings.strokeWeight;
-                    var width = bindings.width, height = bindings.height, TWO_PI = bindings.TWO_PI, PI = bindings.PI;
+                        strokeWeight = bindings.strokeWeight, noLoop = bindings.noLoop, loop = bindings.loop, resizeCanvas = bindings.resizeCanvas,
+                        rectMode = bindings.rectMode, ellipseMode = bindings.ellipseMode, frameRate = bindings.frameRate;
+                    var width = bindings.width, height = bindings.height, TWO_PI = bindings.TWO_PI, PI = bindings.PI,
+                        WEBGL = bindings.WEBGL, P2D = bindings.P2D, CORNER = bindings.CORNER, CENTER = bindings.CENTER;
                     if (hashData.random) random = function(a,b){ return hashData.random(a,b); };
                     ${code}
                     if (typeof generate === 'function') {
@@ -187,8 +201,10 @@
                     random = bindings.random, noise = bindings.noise, color = bindings.color,
                     createCanvas = bindings.createCanvas, createGraphics = bindings.createGraphics,
                     image = bindings.image, text = bindings.text, textSize = bindings.textSize, textAlign = bindings.textAlign,
-                    strokeWeight = bindings.strokeWeight, noLoop = bindings.noLoop, loop = bindings.loop, resizeCanvas = bindings.resizeCanvas;
-                var width = bindings.width, height = bindings.height, TWO_PI = bindings.TWO_PI, PI = bindings.PI;
+                    strokeWeight = bindings.strokeWeight, noLoop = bindings.noLoop, loop = bindings.loop, resizeCanvas = bindings.resizeCanvas,
+                    rectMode = bindings.rectMode, ellipseMode = bindings.ellipseMode, frameRate = bindings.frameRate;
+                var width = bindings.width, height = bindings.height, TWO_PI = bindings.TWO_PI, PI = bindings.PI,
+                    WEBGL = bindings.WEBGL, P2D = bindings.P2D, CORNER = bindings.CORNER, CENTER = bindings.CENTER;
                 if (hashData.random) random = function(a,b){ return hashData.random(a,b); };
                 ${code}
                 if (typeof setup === 'function') fns.setup = setup;
@@ -282,8 +298,10 @@
                         random = bindings.random, noise = bindings.noise, color = bindings.color,
                         createCanvas = bindings.createCanvas, createGraphics = bindings.createGraphics,
                         image = bindings.image, text = bindings.text, textSize = bindings.textSize, textAlign = bindings.textAlign,
-                        strokeWeight = bindings.strokeWeight;
-                    var width = bindings.width, height = bindings.height, TWO_PI = bindings.TWO_PI, PI = bindings.PI;
+                        strokeWeight = bindings.strokeWeight, noLoop = bindings.noLoop, loop = bindings.loop, resizeCanvas = bindings.resizeCanvas,
+                        rectMode = bindings.rectMode, ellipseMode = bindings.ellipseMode, frameRate = bindings.frameRate;
+                    var width = bindings.width, height = bindings.height, TWO_PI = bindings.TWO_PI, PI = bindings.PI,
+                        WEBGL = bindings.WEBGL, P2D = bindings.P2D, CORNER = bindings.CORNER, CENTER = bindings.CENTER;
                     if (hashData.random) random = function(a,b){ return hashData.random(a,b); };
                     ${code}
                     if (typeof generate === 'function') {
@@ -345,8 +363,10 @@
                     random = bindings.random, noise = bindings.noise, color = bindings.color,
                     createCanvas = bindings.createCanvas, createGraphics = bindings.createGraphics,
                     image = bindings.image, text = bindings.text, textSize = bindings.textSize, textAlign = bindings.textAlign,
-                    strokeWeight = bindings.strokeWeight, noLoop = bindings.noLoop, loop = bindings.loop, resizeCanvas = bindings.resizeCanvas;
-                var width = bindings.width, height = bindings.height, TWO_PI = bindings.TWO_PI, PI = bindings.PI;
+                    strokeWeight = bindings.strokeWeight, noLoop = bindings.noLoop, loop = bindings.loop, resizeCanvas = bindings.resizeCanvas,
+                    rectMode = bindings.rectMode, ellipseMode = bindings.ellipseMode, frameRate = bindings.frameRate;
+                var width = bindings.width, height = bindings.height, TWO_PI = bindings.TWO_PI, PI = bindings.PI,
+                    WEBGL = bindings.WEBGL, P2D = bindings.P2D, CORNER = bindings.CORNER, CENTER = bindings.CENTER;
                 if (hashData.random) random = function(a,b){ return hashData.random(a,b); };
                 ${code}
                 if (typeof setup === 'function') fns.setup = setup;
