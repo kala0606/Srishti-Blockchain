@@ -504,7 +504,8 @@
                 </div>
                 <div class="form-group">
                     <label>Generative Code (JavaScript)</label>
-                    <textarea id="projectCode" placeholder="function generate(params) { /* your code */ }" style="font-family: 'Courier New', monospace; min-height: 200px;"></textarea>
+                    <textarea id="projectCode" placeholder="// Pure p5: setup() + draw(). hashData (seed, etc.) is global.&#10;function setup() { createCanvas(400, 400); }&#10;function draw() { background(0); ellipse(200, 200, 50, 50); }&#10;// Or: function generate(hashData) { ... return canvas; }" style="font-family: 'Courier New', monospace; min-height: 200px;"></textarea>
+                    <small style="color: var(--text-secondary); display: block; margin-top: 6px;">Use <code>setup()</code> + <code>draw()</code> (standard p5), or <code>generate(hashData)</code>. <code>hashData</code> has <code>seed</code>, <code>hashData.random()</code>; canvas is responsive.</small>
                 </div>
                 <button type="submit" class="btn btn-primary">Create Project</button>
             </form>
@@ -630,8 +631,9 @@
                     await new Promise(resolve => setTimeout(resolve, 2000));
                 }
 
-                // Load generative art app SDK from main blockchain repo
+                // Load p5 sketch runner then generative art app SDK (from main blockchain repo)
                 try {
+                    await loadScript('sdk/apps/generative-art/p5-sketch-runner.js');
                     await loadScript('sdk/apps/generative-art/GenerativeArtApp.js');
                     
                     // Wait a bit for the script to execute

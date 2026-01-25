@@ -579,7 +579,8 @@ class GenerativeArtAppUI {
     }
     
     /**
-     * Render live canvas from code using p5.js and three.js
+     * Render live canvas from code using p5.js.
+     * Uses SrishtiP5SketchRunner when present (setup/draw + hashData, responsive).
      */
     async renderLiveCanvas(projectId, code, parameters, container) {
         if (!container) return;
@@ -587,12 +588,21 @@ class GenerativeArtAppUI {
         try {
             console.log('🎨 Rendering live canvas for project:', projectId);
             
-            // Check if p5.js and three.js are loaded
+            const params = {
+                seed: `preview_${projectId}`,
+                ...parameters
+            };
+            
+            if (typeof window !== 'undefined' && window.SrishtiP5SketchRunner && typeof window.SrishtiP5SketchRunner.runLive === 'function') {
+                await window.SrishtiP5SketchRunner.runLive(code, params, container);
+                console.log('✅ Live canvas rendered (runner) for project:', projectId);
+                return;
+            }
+            
             if (typeof p5 === 'undefined') {
                 throw new Error('p5.js library not loaded. Please refresh the page.');
             }
             
-            // Create a container div for p5.js
             const p5Container = document.createElement('div');
             p5Container.style.width = '100%';
             p5Container.style.height = '100%';
@@ -600,93 +610,39 @@ class GenerativeArtAppUI {
             container.innerHTML = '';
             container.appendChild(p5Container);
             
-            // Prepare parameters
-            const params = {
-                seed: `preview_${projectId}`,
-                ...parameters
-            };
+            const userCode = new Function('p', 'params', 'THREE', `
+                const background = p.background.bind(p), fill = p.fill.bind(p), stroke = p.stroke.bind(p),
+                    noStroke = p.noStroke.bind(p), noFill = p.noFill.bind(p), ellipse = p.ellipse.bind(p),
+                    rect = p.rect.bind(p), line = p.line.bind(p), translate = p.translate.bind(p),
+                    rotate = p.rotate.bind(p), scale = p.scale.bind(p), push = p.push.bind(p), pop = p.pop.bind(p),
+                    map = p.map.bind(p), lerp = p.lerp.bind(p), random = p.random.bind(p), noise = p.noise.bind(p),
+                    color = p.color.bind(p), createCanvas = p.createCanvas.bind(p), createGraphics = p.createGraphics.bind(p),
+                    image = p.image.bind(p), text = p.text.bind(p), textSize = p.textSize.bind(p), textAlign = p.textAlign.bind(p);
+                const width = p.width, height = p.height, TWO_PI = p.TWO_PI, PI = p.PI;
+                const hashData = { seed: params && params.seed, ...params };
+                ${code}
+                if (typeof generate === 'function') {
+                    const result = generate(hashData);
+                    if (result && result.nodeName === 'CANVAS') p.image(result, 0, 0, p.width, p.height);
+                    else if (result && result.canvas) p.image(result, 0, 0, p.width, p.height);
+                }
+            `);
             
-            // Use p5.js instance mode to execute the code
             const sketch = (p) => {
-                // Execute user code with p5.js and three.js available
-                // Make p5.js functions available as globals for the user code
-                const userCode = new Function('p', 'params', 'THREE', `
-                    // p5.js instance is available as 'p'
-                    // three.js is available as 'THREE' (if loaded)
-                    // All p5.js functions are available through 'p' (p.background, p.fill, etc.)
-                    // We'll also make them available as globals for convenience
-                    
-                    // Expose p5.js functions globally for user code
-                    const background = p.background.bind(p);
-                    const fill = p.fill.bind(p);
-                    const stroke = p.stroke.bind(p);
-                    const noStroke = p.noStroke.bind(p);
-                    const noFill = p.noFill.bind(p);
-                    const ellipse = p.ellipse.bind(p);
-                    const rect = p.rect.bind(p);
-                    const line = p.line.bind(p);
-                    const point = p.point.bind(p);
-                    const triangle = p.triangle.bind(p);
-                    const translate = p.translate.bind(p);
-                    const rotate = p.rotate.bind(p);
-                    const scale = p.scale.bind(p);
-                    const push = p.push.bind(p);
-                    const pop = p.pop.bind(p);
-                    const map = p.map.bind(p);
-                    const lerp = p.lerp.bind(p);
-                    const random = p.random.bind(p);
-                    const noise = p.noise.bind(p);
-                    const color = p.color.bind(p);
-                    const createCanvas = p.createCanvas.bind(p);
-                    const createGraphics = p.createGraphics.bind(p);
-                    const image = p.image.bind(p);
-                    const text = p.text.bind(p);
-                    const textSize = p.textSize.bind(p);
-                    const textAlign = p.textAlign.bind(p);
-                    const width = p.width;
-                    const height = p.height;
-                    const TWO_PI = p.TWO_PI;
-                    const PI = p.PI;
-                    
-                    ${code}
-                    
-                    // If code defines generate function, call it
-                    if (typeof generate === 'function') {
-                        const result = generate(params);
-                        // If result is a canvas, draw it
-                        if (result && result.nodeName === 'CANVAS') {
-                            p.image(result, 0, 0, p.width, p.height);
-                        }
-                        // If result is a p5.Graphics, draw it
-                        if (result && result.canvas) {
-                            p.image(result, 0, 0, p.width, p.height);
-                        }
-                    }
-                `);
-                
                 p.setup = () => {
-                    p.createCanvas(400, 400);
-                    
+                    p.createCanvas(Math.max(100, p5Container.clientWidth || 400), Math.max(100, p5Container.clientHeight || 400));
                     try {
                         userCode(p, params, typeof THREE !== 'undefined' ? THREE : null);
-                    } catch (error) {
-                        console.error('Error executing user code:', error);
+                    } catch (e) {
                         p.background(20);
                         p.fill(255, 0, 0);
-                        p.text('Code Error: ' + error.message, 10, 20);
+                        p.text('Error: ' + e.message, 10, 20);
                     }
                 };
-                
-                p.draw = () => {
-                    // Only draw once for static thumbnails
-                    // User code already executed in setup
-                };
+                p.draw = () => {};
             };
-            
-            // Create p5 instance
             new p5(sketch, p5Container);
-            
-            console.log('✅ Live canvas rendered with p5.js for project:', projectId);
+            console.log('✅ Live canvas rendered (fallback) for project:', projectId);
         } catch (error) {
             console.error('❌ Failed to render live canvas:', projectId, error);
             container.innerHTML = '<div style="color: rgba(255,255,255,0.5); font-size: 0.8em;">Render Error: ' + error.message + '</div>';

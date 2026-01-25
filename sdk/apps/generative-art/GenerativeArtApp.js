@@ -1448,161 +1448,93 @@ class GenerativeArtApp {
     }
     
     /**
-     * Execute code using p5.js library (when available)
+     * Execute code using p5.js library (when available).
+     * Uses SrishtiP5SketchRunner when present (setup/draw + hashData, or generate).
      * @private
      */
     async _executeCodeWithP5(code, params) {
+        if (typeof window !== 'undefined' && window.SrishtiP5SketchRunner && typeof window.SrishtiP5SketchRunner.runExport === 'function') {
+            try {
+                const dataUrl = await window.SrishtiP5SketchRunner.runExport(code, params);
+                return dataUrl || null;
+            } catch (error) {
+                console.error('SrishtiP5SketchRunner.runExport failed:', error);
+                throw new Error(`Code execution failed: ${error.message}`);
+            }
+        }
+        return this._executeCodeWithP5Legacy(code, params);
+    }
+    
+    /**
+     * Legacy p5 execution (generate-only). Used when runner not loaded.
+     * @private
+     */
+    async _executeCodeWithP5Legacy(code, params) {
         return new Promise((resolve, reject) => {
             try {
-                // Create a hidden container for p5.js
                 const container = document.createElement('div');
                 container.style.position = 'absolute';
                 container.style.left = '-9999px';
                 container.style.width = '512px';
                 container.style.height = '512px';
                 document.body.appendChild(container);
-                
                 let p5Instance = null;
-                let resultCanvas = null;
                 let resolved = false;
-                
                 const sketch = (p) => {
                     p5Instance = p;
-                    
-                    // Execute user code with p5.js and three.js available
                     const userCode = new Function('p', 'params', 'THREE', `
-                        // p5.js instance is available as 'p'
-                        // three.js is available as 'THREE' (if loaded)
-                        // All p5.js functions are available through 'p' (p.background, p.fill, etc.)
-                        // We'll also make them available as globals for convenience
-                        
-                        // Expose p5.js functions globally for user code
-                        const background = p.background.bind(p);
-                        const fill = p.fill.bind(p);
-                        const stroke = p.stroke.bind(p);
-                        const noStroke = p.noStroke.bind(p);
-                        const noFill = p.noFill.bind(p);
-                        const ellipse = p.ellipse.bind(p);
-                        const rect = p.rect.bind(p);
-                        const line = p.line.bind(p);
-                        const point = p.point.bind(p);
-                        const triangle = p.triangle.bind(p);
-                        const translate = p.translate.bind(p);
-                        const rotate = p.rotate.bind(p);
-                        const scale = p.scale.bind(p);
-                        const push = p.push.bind(p);
-                        const pop = p.pop.bind(p);
-                        const map = p.map.bind(p);
-                        const lerp = p.lerp.bind(p);
-                        const random = p.random.bind(p);
-                        const noise = p.noise.bind(p);
-                        const color = p.color.bind(p);
-                        const createCanvas = p.createCanvas.bind(p);
-                        const createGraphics = p.createGraphics.bind(p);
-                        const image = p.image.bind(p);
-                        const text = p.text.bind(p);
-                        const textSize = p.textSize.bind(p);
-                        const textAlign = p.textAlign.bind(p);
-                        const width = p.width;
-                        const height = p.height;
-                        const TWO_PI = p.TWO_PI;
-                        const PI = p.PI;
-                        
+                        const background = p.background.bind(p), fill = p.fill.bind(p), stroke = p.stroke.bind(p),
+                            noStroke = p.noStroke.bind(p), noFill = p.noFill.bind(p), ellipse = p.ellipse.bind(p),
+                            rect = p.rect.bind(p), line = p.line.bind(p), translate = p.translate.bind(p),
+                            rotate = p.rotate.bind(p), scale = p.scale.bind(p), push = p.push.bind(p), pop = p.pop.bind(p),
+                            map = p.map.bind(p), lerp = p.lerp.bind(p), random = p.random.bind(p), noise = p.noise.bind(p),
+                            color = p.color.bind(p), createCanvas = p.createCanvas.bind(p), createGraphics = p.createGraphics.bind(p),
+                            image = p.image.bind(p), text = p.text.bind(p), textSize = p.textSize.bind(p), textAlign = p.textAlign.bind(p);
+                        const width = p.width, height = p.height, TWO_PI = p.TWO_PI, PI = p.PI;
+                        const hashData = { seed: params && params.seed, ...params };
                         ${code}
-                        
-                        // If code defines generate function, call it
                         if (typeof generate === 'function') {
-                            const result = generate(params);
-                            // If result is a canvas, draw it
-                            if (result && result.nodeName === 'CANVAS') {
-                                try {
-                                    p.image(result, 0, 0, p.width, p.height);
-                                } catch (e) {
-                                    console.warn('Failed to draw canvas result:', e);
-                                }
-                            }
-                            // If result is a p5.Graphics, draw it
-                            else if (result && result.canvas && typeof result.canvas !== 'undefined') {
-                                try {
-                                    p.image(result, 0, 0, p.width, p.height);
-                                } catch (e) {
-                                    console.warn('Failed to draw p5.Graphics result:', e);
-                                }
-                            }
-                            // If result is a data URL, try to load it
-                            else if (typeof result === 'string' && result.startsWith('data:image')) {
-                                try {
-                                    const img = p.loadImage(result, (img) => {
-                                        p.image(img, 0, 0, p.width, p.height);
-                                    }, (err) => {
-                                        console.warn('Failed to load image from data URL:', err);
-                                    });
-                                } catch (e) {
-                                    console.warn('Failed to load image:', e);
-                                }
-                            }
+                            const result = generate(hashData);
+                            if (result && result.nodeName === 'CANVAS') p.image(result, 0, 0, p.width, p.height);
+                            else if (result && result.canvas) p.image(result, 0, 0, p.width, p.height);
                         }
                     `);
-                    
                     p.setup = () => {
                         p.createCanvas(512, 512);
-                        
                         try {
                             userCode(p, params, typeof THREE !== 'undefined' ? THREE : null);
-                        } catch (error) {
-                            console.error('Error in user code:', error);
+                        } catch (e) {
                             p.background(20);
                             p.fill(255, 0, 0);
-                            p.text('Error: ' + error.message, 10, 20);
+                            p.text('Error: ' + e.message, 10, 20);
                         }
                     };
-                    
                     p.draw = () => {
-                        // Only draw once for static generation
-                        if (p.frameCount === 1 && !resolved) {
-                            // Get the canvas after first frame
-                            setTimeout(() => {
-                                if (p5Instance && p5Instance.canvas && !resolved) {
-                                    resolved = true;
-                                    resultCanvas = p5Instance.canvas;
-                                    const dataUrl = resultCanvas.toDataURL('image/png');
-                                    if (container.parentNode) {
-                                        document.body.removeChild(container);
-                                    }
-                                    p.remove(); // Clean up p5 instance
-                                    resolve(dataUrl);
-                                }
-                            }, 100);
+                        if (p.frameCount === 1 && !resolved && p5Instance && p5Instance.canvas) {
+                            resolved = true;
+                            const dataUrl = p5Instance.canvas.toDataURL('image/png');
+                            if (container.parentNode) container.parentNode.removeChild(container);
+                            p.remove();
+                            resolve(dataUrl);
                         }
                     };
                 };
-                
-                // Create p5 instance
                 new p5(sketch, container);
-                
-                // Timeout fallback
                 setTimeout(() => {
                     if (!resolved && p5Instance && p5Instance.canvas) {
                         resolved = true;
-                        resultCanvas = p5Instance.canvas;
-                        const dataUrl = resultCanvas.toDataURL('image/png');
-                        if (container.parentNode) {
-                            document.body.removeChild(container);
-                        }
-                        p5Instance.remove(); // Clean up p5 instance
+                        const dataUrl = p5Instance.canvas.toDataURL('image/png');
+                        if (container.parentNode) container.parentNode.removeChild(container);
+                        p5Instance.remove();
                         resolve(dataUrl);
                     } else if (!resolved) {
                         resolved = true;
-                        if (container.parentNode) {
-                            document.body.removeChild(container);
-                        }
+                        if (container.parentNode) container.parentNode.removeChild(container);
                         reject(new Error('p5.js execution timeout'));
                     }
                 }, 3000);
-                
-            } catch (error) {
-                console.error('Error executing code with p5.js:', error);
-                reject(error);
+            } catch (e) {
+                reject(e);
             }
         });
     }
