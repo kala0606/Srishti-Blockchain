@@ -516,18 +516,13 @@ class GenerativeArtAppUI {
         `;
 
         card.addEventListener('click', (e) => {
-            if (e.target.closest('.art-thumbnail-click')) return;
+            if (e.target.closest('button')) return;
+            if (e.target.closest('.art-thumbnail-click') && piece.projectId) {
+                this.viewFullScreenForPiece(piece.id);
+                return;
+            }
             this.showPieceModal(piece, showPurchase, showActions);
         });
-
-        // Thumbnail click → full-screen viewer
-        const thumb = card.querySelector('.art-thumbnail-click');
-        if (thumb && piece.projectId) {
-            thumb.addEventListener('click', (e) => {
-                e.stopPropagation();
-                this.viewFullScreenForPiece(piece.id);
-            });
-        }
 
         // Render live canvas - get project code from piece
         if (piece.projectId) {
@@ -588,17 +583,13 @@ class GenerativeArtAppUI {
         `;
 
         card.addEventListener('click', (e) => {
-            if (e.target.closest('.art-thumbnail-click')) return;
+            if (e.target.closest('button')) return;
+            if (e.target.closest('.art-thumbnail-click') && project.code) {
+                this.viewFullScreenForProject(project.id);
+                return;
+            }
             this.showProjectModal(project);
         });
-
-        const thumb = card.querySelector('.art-thumbnail-click');
-        if (thumb && project.code) {
-            thumb.addEventListener('click', (e) => {
-                e.stopPropagation();
-                this.viewFullScreenForProject(project.id);
-            });
-        }
 
         // Render live canvas after card is added to DOM
         if (project.code) {
@@ -888,16 +879,12 @@ class GenerativeArtAppUI {
             </div>
         `;
 
-        const projThumb = card.querySelector('.art-thumbnail-click');
-        if (projThumb && project.code) {
-            projThumb.addEventListener('click', (e) => {
-                e.stopPropagation();
-                this.viewFullScreenForProject(project.id);
-            });
-        }
-
         card.addEventListener('click', (e) => {
-            if (e.target.closest('.art-thumbnail-click')) return;
+            if (e.target.closest('button')) return;
+            if (e.target.closest('.art-thumbnail-click') && project.code) {
+                this.viewFullScreenForProject(project.id);
+                return;
+            }
             this.showProjectModal(project);
         });
 
