@@ -426,6 +426,61 @@
             color: var(--text-primary);
         }
 
+        .full-screen-viewer {
+            position: fixed;
+            inset: 0;
+            z-index: 2000;
+            background: #0a0a0f;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .full-screen-viewer.active {
+            display: flex;
+        }
+
+        .full-screen-sketch {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        .full-screen-toolbar {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            z-index: 1;
+            display: flex;
+            gap: 8px;
+        }
+
+        .full-screen-btn {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            border: 1px solid var(--glass-border);
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text-primary);
+            font-size: 1.25em;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s, border-color 0.2s;
+        }
+
+        .full-screen-btn:hover {
+            background: rgba(255, 255, 255, 0.15);
+            border-color: rgba(255, 255, 255, 0.25);
+        }
+
+        .full-screen-close {
+            font-size: 1.5em;
+            line-height: 1;
+        }
+
         .karma-balance {
             display: inline-block;
             padding: 8px 16px;
@@ -435,6 +490,47 @@
             font-weight: 600;
             color: #10b981;
             margin-left: 16px;
+        }
+
+        .create-preview-section {
+            margin-top: 24px;
+            padding-top: 24px;
+            border-top: 1px solid var(--glass-border);
+        }
+
+        .create-preview-row {
+            display: flex;
+            gap: 24px;
+            align-items: flex-start;
+            flex-wrap: wrap;
+        }
+
+        .create-preview-box {
+            width: 280px;
+            height: 280px;
+            min-width: 280px;
+            min-height: 280px;
+            background: #1a1a1a;
+            border: 1px solid var(--glass-border);
+            border-radius: 16px;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-secondary);
+            font-size: 0.9em;
+        }
+
+        .create-preview-actions {
+            flex: 1;
+            min-width: 200px;
+        }
+
+        .create-preview-hint {
+            margin-top: 12px;
+            color: var(--text-secondary);
+            font-size: 0.9em;
+            line-height: 1.4;
         }
     </style>
 </head>
@@ -485,6 +581,9 @@
         <!-- Create Project Tab -->
         <div id="create" class="tab-content">
             <h2>Create Generative Art Project</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 20px; font-size: 0.95em;">
+                1. Fill the form and add your code → 2. <strong>Preview</strong> to see the thumbnail → 3. <strong>Create Project</strong> (saved as draft) → 4. Later, <strong>Release</strong> from My Projects.
+            </p>
             <form id="createProjectForm">
                 <div class="form-group">
                     <label>Project Title *</label>
@@ -507,6 +606,16 @@
                     <textarea id="projectCode" placeholder="// Pure p5: setup() + draw(). hashData (seed, etc.) is global.&#10;function setup() { createCanvas(400, 400); }&#10;function draw() { background(0); ellipse(200, 200, 50, 50); }&#10;// Or: function generate(hashData) { ... return canvas; }" style="font-family: 'Courier New', monospace; min-height: 200px;"></textarea>
                     <small style="color: var(--text-secondary); display: block; margin-top: 6px;">Use <code>setup()</code> + <code>draw()</code> (standard p5), or <code>generate(hashData)</code>. <code>hashData</code> has <code>seed</code>, <code>hashData.random()</code>; canvas is responsive.</small>
                 </div>
+                <div class="form-group create-preview-section">
+                    <label>Thumbnail preview</label>
+                    <div class="create-preview-row">
+                        <div id="createPreviewContainer" class="create-preview-box" aria-label="Preview thumbnail">Click Preview to see thumbnail</div>
+                        <div class="create-preview-actions">
+                            <button type="button" class="btn" id="createPreviewBtn">Preview</button>
+                            <p class="create-preview-hint">Run your code to see how the thumbnail will look. Create the project only when it looks correct.</p>
+                        </div>
+                    </div>
+                </div>
                 <button type="submit" class="btn btn-primary">Create Project</button>
             </form>
         </div>
@@ -526,6 +635,15 @@
                 <button class="modal-close" onclick="closeModal()">&times;</button>
             </div>
             <div id="modalBody"></div>
+        </div>
+    </div>
+
+    <!-- Full-screen viewer (minimal UI) -->
+    <div id="fullScreenViewer" class="full-screen-viewer">
+        <div id="fullScreenSketchContainer" class="full-screen-sketch"></div>
+        <div class="full-screen-toolbar">
+            <button type="button" class="full-screen-btn" id="fullScreenDownload" title="Download">↓</button>
+            <button type="button" class="full-screen-btn full-screen-close" onclick="artAppUI.closeFullScreenViewer()" title="Close">×</button>
         </div>
     </div>
 

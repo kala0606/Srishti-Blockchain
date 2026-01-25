@@ -10,6 +10,7 @@ class GenerativeArtAppUI {
         this.artApp = null;
         this.srishtiApp = null;
         this.initialized = false;
+        this._fullScreenViewer = { projectId: null, title: null };
     }
 
     async init() {
@@ -167,7 +168,6 @@ class GenerativeArtAppUI {
     }
 
     setupEventListeners() {
-        // Create project form
         const createForm = document.getElementById('createProjectForm');
         if (createForm) {
             createForm.addEventListener('submit', async (e) => {
@@ -175,6 +175,45 @@ class GenerativeArtAppUI {
                 await this.createProject();
             });
         }
+        const createPreviewBtn = document.getElementById('createPreviewBtn');
+        if (createPreviewBtn) {
+            createPreviewBtn.addEventListener('click', () => this.previewCreateProject());
+        }
+        const fullScreenDownload = document.getElementById('fullScreenDownload');
+        if (fullScreenDownload) {
+            fullScreenDownload.addEventListener('click', () => this.downloadFromFullScreen());
+        }
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && document.getElementById('fullScreenViewer')?.classList.contains('active')) {
+                this.closeFullScreenViewer();
+            }
+        });
+    }
+
+    async previewCreateProject() {
+        const container = document.getElementById('createPreviewContainer');
+        const codeEl = document.getElementById('projectCode');
+        if (!container || !codeEl) return;
+        const code = (codeEl.value || '').trim();
+        if (!code) {
+            container.innerHTML = '<span>Add code above, then click Preview</span>';
+            return;
+        }
+        container.innerHTML = '<span>Loading…</span>';
+        const btn = document.getElementById('createPreviewBtn');
+        if (btn) btn.disabled = true;
+        try {
+            const params = { seed: `preview_draft_${Date.now()}` };
+            if (window.SrishtiP5SketchRunner && typeof window.SrishtiP5SketchRunner.runLive === 'function') {
+                await window.SrishtiP5SketchRunner.runLive(code, params, container);
+            } else {
+                await this.renderLiveCanvas('create-preview', code, params, container);
+            }
+        } catch (e) {
+            container.innerHTML = `<span style="color:#ef4444;">${e.message || 'Preview failed'}</span>`;
+            console.error('Preview error:', e);
+        }
+        if (btn) btn.disabled = false;
     }
 
     async createProject() {
@@ -191,12 +230,11 @@ class GenerativeArtAppUI {
                 return;
             }
 
-            // Show loading state
             const submitBtn = document.querySelector('#createProjectForm button[type="submit"]');
             const originalText = submitBtn?.textContent;
             if (submitBtn) {
                 submitBtn.disabled = true;
-                submitBtn.textContent = 'Creating project & generating thumbnail...';
+                submitBtn.textContent = 'Creating project & generating thumbnail…';
             }
 
             const projectId = await this.artApp.createProject({
@@ -207,40 +245,30 @@ class GenerativeArtAppUI {
                 mintPrice
             });
 
-            // Get the created project to check thumbnail
             const project = await this.artApp.getProject(projectId);
-            
             if (submitBtn) {
                 submitBtn.disabled = false;
                 submitBtn.textContent = originalText || 'Create Project';
             }
 
             if (project.thumbnailUrl) {
-                alert(`✅ Project created: ${projectId}\n\nThumbnail generated successfully!`);
+                alert(`✅ Project created (draft): ${projectId}\n\nThumbnail generated. Go to My Projects → open project → Release when ready.`);
             } else {
-                alert(`✅ Project created: ${projectId}\n\n⚠️ Note: Thumbnail could not be generated. Make sure your code has a \`generate(params)\` function that returns a canvas or data URL.`);
+                alert(`✅ Project created (draft): ${projectId}\n\n⚠️ Thumbnail could not be generated. Release from My Projects when ready.`);
             }
-            
-            // Reset form
+
             document.getElementById('createProjectForm').reset();
-            
-            // Reload projects
+            const previewContainer = document.getElementById('createPreviewContainer');
+            if (previewContainer) previewContainer.innerHTML = 'Click Preview to see thumbnail';
+
             await this.loadProjects();
-            
-            // Switch to projects tab
             const projectsTab = document.querySelector('.tab[onclick*="projects"]');
-            if (projectsTab) {
-                projectsTab.click();
-            }
+            if (projectsTab) projectsTab.click();
         } catch (error) {
             console.error('Failed to create project:', error);
             alert(`Failed to create project: ${error.message}`);
-            
-            // Re-enable button
             const submitBtn = document.querySelector('#createProjectForm button[type="submit"]');
-            if (submitBtn) {
-                submitBtn.disabled = false;
-            }
+            if (submitBtn) submitBtn.disabled = false;
         }
     }
 
@@ -472,7 +500,7 @@ class GenerativeArtAppUI {
         
         // Use live canvas container instead of static image
         card.innerHTML = `
-            <div class="art-image" style="position: relative; overflow: hidden;">
+            <div class="art-image art-thumbnail-click" style="position: relative; overflow: hidden; cursor: pointer;">
                 <div class="live-canvas-container" data-piece-id="${piece.id}" style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #1a1a1a;">
                     <div style="color: rgba(255,255,255,0.5); font-size: 0.8em;">Loading...</div>
                 </div>
@@ -483,13 +511,23 @@ class GenerativeArtAppUI {
                 ${piece.price ? `<div class="art-price">${piece.price} KARMA</div>` : ''}
                 ${piece.status === 'LISTED' ? '<span class="art-status listed">For Sale</span>' : ''}
                 ${showActions && piece.ownerId === this.srishtiApp.nodeId ? '<span class="art-status owned">Owned</span>' : ''}
-                <button class="btn" style="margin-top: 8px; width: 100%; font-size: 0.85em; padding: 6px;" onclick="event.stopPropagation(); artAppUI.viewFullRender('${piece.id}')">View Full</button>
+                <button class="btn" style="margin-top: 8px; width: 100%; font-size: 0.85em; padding: 6px;" onclick="event.stopPropagation(); artAppUI.viewFullScreenForPiece('${piece.id}')">View Full Screen</button>
             </div>
         `;
 
-        card.addEventListener('click', () => {
+        card.addEventListener('click', (e) => {
+            if (e.target.closest('.art-thumbnail-click')) return;
             this.showPieceModal(piece, showPurchase, showActions);
         });
+
+        // Thumbnail click → full-screen viewer
+        const thumb = card.querySelector('.art-thumbnail-click');
+        if (thumb && piece.projectId) {
+            thumb.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.viewFullScreenForPiece(piece.id);
+            });
+        }
 
         // Render live canvas - get project code from piece
         if (piece.projectId) {
@@ -499,34 +537,22 @@ class GenerativeArtAppUI {
                     if (project && project.code) {
                         const container = card.querySelector('.live-canvas-container');
                         if (container) {
-                            // Use piece seed for unique rendering
-                            const params = {
-                                seed: piece.seed || piece.id,
-                                ...(project.parameters || {})
-                            };
+                            const params = { seed: piece.seed || piece.id, ...(project.parameters || {}) };
                             await this.renderLiveCanvas(piece.projectId, project.code, params, container);
                         }
                     } else {
-                        // Fallback to emoji if no project code
                         const container = card.querySelector('.live-canvas-container');
-                        if (container) {
-                            container.innerHTML = `<div style="font-size: 2em;">${emoji}</div>`;
-                        }
+                        if (container) container.innerHTML = `<div style="font-size: 2em;">${emoji}</div>`;
                     }
                 } catch (error) {
                     console.error('Failed to render live canvas for piece:', piece.id, error);
                     const container = card.querySelector('.live-canvas-container');
-                    if (container) {
-                        container.innerHTML = `<div style="font-size: 2em;">${emoji}</div>`;
-                    }
+                    if (container) container.innerHTML = `<div style="font-size: 2em;">${emoji}</div>`;
                 }
             }, 100);
         } else {
-            // No project ID - show emoji
             const container = card.querySelector('.live-canvas-container');
-            if (container) {
-                container.innerHTML = `<div style="font-size: 2em;">${emoji}</div>`;
-            }
+            if (container) container.innerHTML = `<div style="font-size: 2em;">${emoji}</div>`;
         }
 
         return card;
@@ -540,7 +566,7 @@ class GenerativeArtAppUI {
         const canMint = !project.maxSupply || (project.pieceCount || 0) < project.maxSupply;
         
         card.innerHTML = `
-            <div class="art-image" style="position: relative; overflow: hidden;">
+            <div class="art-image art-thumbnail-click" style="position: relative; overflow: hidden; cursor: pointer;">
                 <div class="live-canvas-container" data-project-id="${project.id}" style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #1a1a1a;">
                     <div style="color: rgba(255,255,255,0.5); font-size: 0.8em;">Loading...</div>
                 </div>
@@ -556,14 +582,23 @@ class GenerativeArtAppUI {
                 <span class="art-status" style="background: rgba(16, 185, 129, 0.2); color: #10b981; margin-top: 8px; display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 0.75em;">RELEASED</span>
                 <div style="display: flex; gap: 8px; margin-top: 12px;">
                     <button class="btn btn-primary" style="flex: 1; font-size: 0.85em; padding: 8px;" onclick="event.stopPropagation(); artAppUI.mintFromProject('${project.id}')" ${!canMint ? 'disabled' : ''}>${canMint ? 'Mint' : 'Sold Out'}</button>
-                    <button class="btn" style="flex: 1; font-size: 0.85em; padding: 8px;" onclick="event.stopPropagation(); artAppUI.viewProjectFull('${project.id}')">View</button>
+                    <button class="btn" style="flex: 1; font-size: 0.85em; padding: 8px;" onclick="event.stopPropagation(); artAppUI.viewFullScreenForProject('${project.id}')">View Full Screen</button>
                 </div>
             </div>
         `;
 
-        card.addEventListener('click', () => {
+        card.addEventListener('click', (e) => {
+            if (e.target.closest('.art-thumbnail-click')) return;
             this.showProjectModal(project);
         });
+
+        const thumb = card.querySelector('.art-thumbnail-click');
+        if (thumb && project.code) {
+            thumb.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.viewFullScreenForProject(project.id);
+            });
+        }
 
         // Render live canvas after card is added to DOM
         if (project.code) {
@@ -835,7 +870,7 @@ class GenerativeArtAppUI {
         card.dataset.projectId = project.id;
         
         card.innerHTML = `
-            <div class="art-image" style="position: relative; overflow: hidden;">
+            <div class="art-image art-thumbnail-click" style="position: relative; overflow: hidden; cursor: pointer;">
                 <div class="live-canvas-container" data-project-id="${project.id}" style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #1a1a1a;">
                     <div style="color: rgba(255,255,255,0.5); font-size: 0.8em;">Loading...</div>
                 </div>
@@ -849,11 +884,20 @@ class GenerativeArtAppUI {
                 </div>
                 ${project.mintPrice > 0 ? `<div style="font-size: 0.9em; color: var(--text-secondary); margin-top: 4px;">Mint: ${project.mintPrice} KARMA</div>` : ''}
                 ${(project.status || 'DRAFT') === 'DRAFT' ? '<span class="art-status" style="background: rgba(255, 193, 7, 0.2); color: #ffc107; margin-top: 8px; display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 0.75em;">DRAFT</span>' : '<span class="art-status" style="background: rgba(16, 185, 129, 0.2); color: #10b981; margin-top: 8px; display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 0.75em;">RELEASED</span>'}
-                <button class="btn" style="margin-top: 12px; width: 100%; font-size: 0.85em; padding: 8px;" onclick="event.stopPropagation(); artAppUI.viewProjectFull('${project.id}')">View Full Render</button>
+                <button class="btn" style="margin-top: 12px; width: 100%; font-size: 0.85em; padding: 8px;" onclick="event.stopPropagation(); artAppUI.viewFullScreenForProject('${project.id}')">View Full Screen</button>
             </div>
         `;
 
-        card.addEventListener('click', () => {
+        const projThumb = card.querySelector('.art-thumbnail-click');
+        if (projThumb && project.code) {
+            projThumb.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.viewFullScreenForProject(project.id);
+            });
+        }
+
+        card.addEventListener('click', (e) => {
+            if (e.target.closest('.art-thumbnail-click')) return;
             this.showProjectModal(project);
         });
 
@@ -908,7 +952,7 @@ class GenerativeArtAppUI {
             ${isListed ? `<div style="font-size: 1.5em; font-weight: 700; color: #10b981; margin-bottom: 16px;">${piece.price} KARMA</div>` : ''}
             <div style="display: flex; gap: 12px; flex-wrap: wrap;">
                 ${piece.imageUrl || (project && project.code) ? 
-                    `<button class="btn btn-primary" onclick="artAppUI.viewFullRender('${piece.id}')">View Full Render</button>` : ''}
+                    `<button class="btn btn-primary" onclick="artAppUI.viewFullScreenForPiece('${piece.id}')">View Full Screen</button>` : ''}
                 ${showPurchase && isListed && !isOwner ? 
                     `<button class="btn btn-primary" onclick="artAppUI.purchasePiece('${piece.id}')">Purchase</button>` : ''}
                 ${showActions && isOwner && !isListed ? 
@@ -1090,127 +1134,92 @@ class GenerativeArtAppUI {
         }
     }
     
-    async viewFullRender(pieceId) {
+    async viewFullScreenForPiece(pieceId) {
         try {
             const piece = await this.artApp.getPiece(pieceId);
-            if (!piece) {
-                throw new Error('Piece not found');
-            }
-            
-            // If piece has image, show it
-            if (piece.imageUrl) {
-                this.showFullRenderModal(piece.imageUrl, piece.projectTitle || 'Art Piece');
-                return;
-            }
-            
-            // Otherwise, generate from project code
+            if (!piece) throw new Error('Piece not found');
             const project = await this.artApp.getProject(piece.projectId);
-            if (!project || !project.code) {
-                throw new Error('Cannot generate render: project code not available');
-            }
-            
-            // Show loading
-            this.showFullRenderModal(null, piece.projectTitle || 'Art Piece', true);
-            
-            // Generate render - use _executeCode directly if generatePreview doesn't exist
-            let imageUrl;
-            if (typeof this.artApp.generatePreview === 'function') {
-                imageUrl = await this.artApp.generatePreview(piece.projectId, piece.seed);
-            } else {
-                // Fallback: execute code directly
-                const params = {
-                    seed: piece.seed || `piece_${piece.id}_${Date.now()}`,
-                    ...project.parameters
-                };
-                
-                const generateFunction = new Function('params', `
-                    ${project.code}
-                    return typeof generate === 'function' ? generate(params) : null;
-                `);
-                
-                const result = generateFunction(params);
-                
-                if (typeof result === 'string' && result.startsWith('data:image')) {
-                    imageUrl = result;
-                } else if (result && result.nodeName === 'CANVAS') {
-                    imageUrl = result.toDataURL('image/png');
-                } else {
-                    throw new Error('Code did not return a valid image');
-                }
-            }
-            
-            if (imageUrl) {
-                // Update piece with generated image
-                piece.imageUrl = imageUrl;
-                await this.artApp.store.put(pieceId, piece);
-                
-                // Show the render
-                this.showFullRenderModal(imageUrl, piece.projectTitle || 'Art Piece');
-            } else {
-                throw new Error('Failed to generate render');
-            }
-        } catch (error) {
-            console.error('Failed to view render:', error);
-            alert(`Failed to generate render: ${error.message}`);
+            if (!project || !project.code) throw new Error('Project code not available');
             closeModal();
+            await this.showFullScreenViewer(project.id, {
+                seed: piece.seed || piece.id,
+                title: piece.projectTitle || 'Art Piece'
+            });
+        } catch (error) {
+            console.error('Failed to open full screen:', error);
+            alert(`Failed to open full screen: ${error.message}`);
         }
     }
-    
-    async viewProjectFull(projectId) {
+
+    async viewFullScreenForProject(projectId) {
         try {
             const project = await this.artApp.getProject(projectId);
-            if (!project || !project.code) {
-                throw new Error('Project code not available');
-            }
-            
-            // Show loading
-            this.showFullRenderModal(null, project.title, true);
-            
-            // Generate fresh render - use _executeCode directly if generatePreview doesn't exist
-            let imageUrl;
-            console.log('🔍 Checking generatePreview method:', typeof this.artApp.generatePreview);
-            console.log('🔍 ArtApp methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(this.artApp)));
-            
-            if (typeof this.artApp.generatePreview === 'function') {
-                console.log('✅ Using generatePreview method');
-                imageUrl = await this.artApp.generatePreview(projectId);
-            } else {
-                console.log('⚠️ generatePreview not found, using fallback');
-                // Fallback: execute code directly
-                const params = {
-                    seed: `preview_${projectId}_${Date.now()}`,
-                    ...project.parameters
-                };
-                
-                // Use the internal _executeCode method
-                const generateFunction = new Function('params', `
-                    ${project.code}
-                    return typeof generate === 'function' ? generate(params) : null;
-                `);
-                
-                const result = generateFunction(params);
-                
-                if (typeof result === 'string' && result.startsWith('data:image')) {
-                    imageUrl = result;
-                } else if (result && result.nodeName === 'CANVAS') {
-                    imageUrl = result.toDataURL('image/png');
-                } else {
-                    throw new Error('Code did not return a valid image');
-                }
-            }
-            
-            if (imageUrl) {
-                this.showFullRenderModal(imageUrl, project.title);
-            } else {
-                throw new Error('Failed to generate render');
-            }
-        } catch (error) {
-            console.error('Failed to view project render:', error);
-            alert(`Failed to generate render: ${error.message}`);
+            if (!project || !project.code) throw new Error('Project code not available');
             closeModal();
+            await this.showFullScreenViewer(project.id, { title: project.title });
+        } catch (error) {
+            console.error('Failed to open full screen:', error);
+            alert(`Failed to open full screen: ${error.message}`);
         }
     }
-    
+
+    async showFullScreenViewer(projectId, opts = {}) {
+        const el = document.getElementById('fullScreenViewer');
+        const container = document.getElementById('fullScreenSketchContainer');
+        if (!el || !container) return;
+        try {
+            const project = await this.artApp.getProject(projectId);
+            if (!project || !project.code) throw new Error('Project code not available');
+            const params = {
+                seed: opts.seed != null ? opts.seed : `preview_${projectId}`,
+                ...(project.parameters || {})
+            };
+            const title = opts.title || project.title;
+            this._fullScreenViewer = { projectId, title };
+            container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;width:100%;height:100%;color:var(--text-secondary);">Loading…</div>';
+            el.classList.add('active');
+            await new Promise((r) => requestAnimationFrame(r));
+            await new Promise((r) => setTimeout(r, 80));
+            if (window.SrishtiP5SketchRunner && typeof window.SrishtiP5SketchRunner.runLive === 'function') {
+                await window.SrishtiP5SketchRunner.runLive(project.code, params, container);
+            } else {
+                await this.renderLiveCanvas(projectId, project.code, params, container);
+            }
+        } catch (error) {
+            console.error('Full-screen viewer error:', error);
+            container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;width:100%;height:100%;color:#ef4444;">${error.message}</div>`;
+        }
+    }
+
+    closeFullScreenViewer() {
+        const el = document.getElementById('fullScreenViewer');
+        const container = document.getElementById('fullScreenSketchContainer');
+        if (el) el.classList.remove('active');
+        if (container) container.innerHTML = '';
+        this._fullScreenViewer = { projectId: null, title: null };
+    }
+
+    downloadFromFullScreen() {
+        const container = document.getElementById('fullScreenSketchContainer');
+        const canvas = container?.querySelector('canvas');
+        if (!canvas) {
+            alert('No canvas to download.');
+            return;
+        }
+        try {
+            const dataUrl = canvas.toDataURL('image/png');
+            const title = (this._fullScreenViewer?.title || 'art').replace(/[^a-z0-9]/gi, '_');
+            const link = document.createElement('a');
+            link.href = dataUrl;
+            link.download = `${title}.png`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        } catch (e) {
+            alert('Download failed: ' + (e.message || 'unknown error'));
+        }
+    }
+
     showFullRenderModal(imageUrl, title, loading = false) {
         const modal = document.getElementById('pieceModal');
         const modalTitle = document.getElementById('modalTitle');
