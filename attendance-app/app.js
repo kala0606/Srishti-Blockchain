@@ -610,30 +610,24 @@ class AttendanceAppUI {
             }
             
             const scanner = window.SrishtiScanner;
+            const ui = this;
             
-            // Store original methods to restore later
-            const originalOnQRCodeScanned = scanner.onQRCodeScanned.bind(scanner);
-            const originalClose = scanner.close.bind(scanner);
-            
-            // Override onQRCodeScanned to handle attendance QR codes
-            scanner.onQRCodeScanned = async (decodedText) => {
+            // Use raw scan callback so we reliably receive every scan (attendance QR format)
+            scanner.setRawScanCallback(async function handleAttendanceQR(decodedText) {
                 try {
                     console.log('📷 QR Code scanned for attendance:', decodedText);
                     
-                    // Stop scanning first
                     await scanner.stopScanning();
                     scanner.showSuccess();
                     
                     // Parse QR data - try as JSON first (attendance QR format)
                     let qrCodeData = null;
                     try {
-                        // Try parsing as JSON (attendance QR code format)
                         const parsed = JSON.parse(decodedText);
                         if (parsed && parsed.sessionId && parsed.timestamp && parsed.signature) {
                             qrCodeData = parsed;
                         }
                     } catch (e) {
-                        // Not JSON, try using AttendanceQRCode parser
                         if (window.SrishtiAttendanceQRCode) {
                             qrCodeData = window.SrishtiAttendanceQRCode.parseQR(decodedText);
                         }
@@ -641,46 +635,28 @@ class AttendanceAppUI {
                     
                     if (!qrCodeData) {
                         scanner.showError('Invalid attendance QR code format');
-                        // Restart scanning after error
                         setTimeout(() => scanner.startScanning(), 2000);
-                        return;
+                        return false; // Let scanner show error and restart
                     }
                     
-                    // Verify it's for the correct session
                     if (qrCodeData.sessionId !== sessionId) {
                         scanner.showError('QR code is for a different session');
                         setTimeout(() => scanner.startScanning(), 2000);
-                        return;
+                        return false;
                     }
                     
-                    // Mark attendance with QR code
-                    await this.markAttendance(sessionId, qrCodeData);
+                    await ui.markAttendance(sessionId, qrCodeData);
                     
-                    // Close scanner and restore original handlers
-                    setTimeout(() => {
-                        scanner.onQRCodeScanned = originalOnQRCodeScanned;
-                        scanner.close = originalClose;
-                        scanner.close();
-                    }, 1000);
+                    setTimeout(() => scanner.close(), 1000);
+                    return true; // Handled
                 } catch (error) {
                     console.error('Error processing attendance QR code:', error);
-                    scanner.showError(`Error: ${error.message}`);
-                    // Restart scanning after error
-                    setTimeout(() => {
-                        scanner.startScanning();
-                    }, 2000);
+                    scanner.showError(error.message || 'Failed to mark attendance');
+                    setTimeout(() => scanner.startScanning(), 2000);
+                    return false;
                 }
-            };
+            });
             
-            // Also restore handler if scanner is closed manually (before opening)
-            const restoreAndClose = () => {
-                scanner.onQRCodeScanned = originalOnQRCodeScanned;
-                scanner.close = originalClose;
-                originalClose();
-            };
-            scanner.close = restoreAndClose;
-            
-            // Open scanner
             await scanner.open();
         } catch (error) {
             console.error('QR scanner error:', error);

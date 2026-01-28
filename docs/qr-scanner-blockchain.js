@@ -10,6 +10,8 @@ class QRScanner {
         this.scanner = null;
         this.isScanning = false;
         this.onScanCallback = null;
+        /** Optional: when set, every scan is passed to this callback with raw decodedText; if it returns true, default handling is skipped */
+        this.onRawScanCallback = null;
         this.scannerContainerId = 'qr-scanner-container';
     }
     
@@ -19,6 +21,20 @@ class QRScanner {
      */
     init(onScan) {
         this.onScanCallback = onScan;
+    }
+    
+    /**
+     * Set a one-time callback for raw scan data (e.g. attendance QR). When a QR is scanned,
+     * this callback receives (decodedText). If it returns true (or a Promise that resolves to true),
+     * the default blockchain-join handling is skipped.
+     * @param {Function} callback - (decodedText) => boolean|Promise<boolean>
+     */
+    setRawScanCallback(callback) {
+        this.onRawScanCallback = callback;
+    }
+    
+    clearRawScanCallback() {
+        this.onRawScanCallback = null;
     }
     
     /**
@@ -243,6 +259,7 @@ class QRScanner {
      */
     close() {
         this.stopScanning();
+        this.clearRawScanCallback();
         
         const modal = document.getElementById('qr-scanner-modal');
         if (modal) {
@@ -311,6 +328,21 @@ class QRScanner {
      */
     async onQRCodeScanned(decodedText) {
         console.log('🎯 QR Code scanned:', decodedText);
+        
+        // If a raw scan callback is set (e.g. for attendance QR), it handles this scan entirely
+        if (this.onRawScanCallback) {
+            const rawCallback = this.onRawScanCallback;
+            this.clearRawScanCallback();
+            try {
+                await Promise.resolve(rawCallback(decodedText));
+                return; // Callback handled success or error; don't run default logic
+            } catch (err) {
+                console.error('Raw scan callback error:', err);
+                this.showError(err.message || 'Scan failed');
+                setTimeout(() => this.startScanning(), 2000);
+                return;
+            }
+        }
         
         this.showSuccess();
         await this.stopScanning();
