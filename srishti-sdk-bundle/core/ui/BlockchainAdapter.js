@@ -65,6 +65,21 @@ class BlockchainAdapter {
                 lastSeen: isCurrentUser ? Date.now() : (presence.lastSeen || node.createdAt)
             };
         }
+        
+        // Include relay peers we have presence for but aren't in chain yet (so online status syncs)
+        for (const nodeId in this.presenceCache) {
+            if (!this.nodeCache[nodeId]) {
+                const p = this.presenceCache[nodeId];
+                this.nodeCache[nodeId] = {
+                    id: nodeId,
+                    name: nodeId.length > 12 ? nodeId.substring(0, 8) + '...' : nodeId,
+                    isOnline: p.isOnline || false,
+                    lastSeen: p.lastSeen || Date.now(),
+                    parentIds: [],
+                    parentId: null
+                };
+            }
+        }
     }
     
     /**
@@ -239,16 +254,10 @@ class BlockchainAdapter {
             ...presenceData
         };
         
-        // Update node cache
-        if (this.nodeCache[nodeId]) {
-            this.nodeCache[nodeId] = {
-                ...this.nodeCache[nodeId],
-                isOnline: presenceData.isOnline !== undefined ? presenceData.isOnline : this.nodeCache[nodeId].isOnline,
-                lastSeen: presenceData.lastSeen || this.nodeCache[nodeId].lastSeen
-            };
-        }
+        // Rebuild node cache from chain + presence so online status stays in sync
+        this.updateNodeCache();
         
-        // Notify listeners
+        // Notify listeners so UI (dashboard, node list, glows) updates
         this.notifyListeners();
     }
     
