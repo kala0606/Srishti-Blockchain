@@ -1,15 +1,15 @@
 /**
  * Srishti SDK - Entry Point
- * 
+ *
  * Load this file to get access to all SDK components.
- * 
+ *
  * In Browser:
  *   <script src="sdk/index.js"></script>
- *   // Then: window.SrishtiSDK, window.SrishtiAppDataStore, window.SrishtiAttendanceApp
- * 
+ *   // Then: SrishtiSDK, AppDataStore, SrishtiAttendanceApp, SrishtiAttendanceQRCode
+ *
  * In Node.js:
- *   const { SrishtiSDK, AppDataStore, AttendanceApp } = require('./sdk');
- * 
+ *   const { SrishtiSDK, AppDataStore, AttendanceApp, AttendanceQRCode } = require('./sdk');
+ *
  * @version 1.0.0
  */
 
@@ -17,7 +17,7 @@
 if (typeof window !== 'undefined') {
     // Core SDK files should be loaded via script tags before this
     console.log('🔧 Srishti SDK loaded');
-    console.log('   Available: SrishtiSDK, SrishtiAppDataStore, SrishtiAttendanceApp');
+    console.log('   Available: SrishtiSDK, AppDataStore, SrishtiAttendanceApp, SrishtiAttendanceQRCode');
     
     // Quick start helper (only if SrishtiSDK is loaded)
     if (window.SrishtiSDK) {
@@ -37,6 +37,7 @@ if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         SrishtiSDK: require('./SrishtiSDK'),
         AppDataStore: require('./AppDataStore'),
-        AttendanceApp: require('./apps/attendance/AttendanceApp')
+        AttendanceApp: require('./apps/attendance/AttendanceApp'),
+        AttendanceQRCode: require('./apps/attendance/AttendanceQRCode')
     };
 }

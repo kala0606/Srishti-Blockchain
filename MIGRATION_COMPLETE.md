@@ -128,7 +128,7 @@ The attendance app and main blockchain app have been successfully migrated to us
 
 - `attendance-app/index.html` - Added auth scripts
 - `attendance-app/app.js` - Replaced credential logic with session tokens
-- `attendance-app/sdk/SrishtiSDK.js` - Added wallet provider signing
+- `sdk/SrishtiSDK.js` - Added wallet provider signing
 - `index.html` - Added auth scripts, wallet provider, login flow
 - `src/auth/SessionAuth.js` - New file (token generation/verification)
 - `src/auth/WalletProvider.js` - New file (signature requests)

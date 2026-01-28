@@ -13,31 +13,33 @@ The attendance app **does not** have its own SDK folder because:
 ```
 Srishti-Blockchain/
 ├── sdk/                          # SDK Framework (shared by all dApps)
-│   ├── SrishtiSDK.js            # Core SDK
-│   ├── AppDataStore.js          # Off-chain storage
+│   ├── SrishtiSDK.js             # Core SDK
+│   ├── AppDataStore.js           # Off-chain storage
 │   └── apps/
 │       └── attendance/
-│           └── AttendanceApp.js  # Attendance library class
+│           ├── AttendanceQRCode.js  # QR generation/verification
+│           └── AttendanceApp.js     # Attendance library class
 │
 └── attendance-app/               # Attendance dApp (uses the SDK)
-    ├── index.html               # UI (loads SDK from main repo)
-    ├── app.js                   # UI logic
+    ├── index.html                # UI (loads SDK from main repo)
+    ├── app.js                    # UI logic
     └── README.md
 ```
 
 ## How It Works
 
-The attendance app loads the SDK from the main blockchain repo:
+The attendance app loads the SDK from the main blockchain repo (single source of truth):
 
 ```javascript
 // In attendance-app/index.html
 const SRISHTI_BLOCKCHAIN_URL = 'https://kala0606.github.io/Srishti-Blockchain/';
 
-// SDK files are loaded from the main repo:
+// SDK files loaded from main repo:
 const sdkScripts = [
-    'sdk/SrishtiSDK.js',           // From main repo
-    'sdk/AppDataStore.js',          // From main repo
-    'sdk/apps/attendance/AttendanceApp.js'  // From main repo
+    'sdk/SrishtiSDK.js',
+    'sdk/AppDataStore.js',
+    'sdk/apps/attendance/AttendanceQRCode.js',
+    'sdk/apps/attendance/AttendanceApp.js'
 ];
 ```
 

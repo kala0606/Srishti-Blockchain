@@ -28,7 +28,8 @@ class AttendanceApp {
         SESSION_END: 'SESSION_END',
         MARK_PRESENT: 'MARK_PRESENT',
         VERIFY: 'VERIFY',
-        ISSUE_CERTIFICATE: 'ISSUE_CERTIFICATE'
+        ISSUE_CERTIFICATE: 'ISSUE_CERTIFICATE',
+        STUDENT_REGISTER: 'STUDENT_REGISTER' // Register student ID to wallet address
     };
     
     // Attendance status
@@ -50,8 +51,17 @@ class AttendanceApp {
         this.sdk = sdk;
         this.store = sdk.getAppStore(AttendanceApp.APP_ID);
         
+        // Student registry: wallet address -> student ID mapping
+        this.studentRegistry = new Map();
+        
+        // QR code generators for active sessions (professor only)
+        this.qrGenerators = new Map(); // sessionId -> AttendanceQRCode instance
+        
         // Set up event listener for real-time updates
         this._setupEventListener();
+        
+        // Load student registry
+        this._loadStudentRegistry();
     }
     
     /**
@@ -72,7 +82,48 @@ class AttendanceApp {
             if (this.onVerifyEvent && event.action === AttendanceApp.ACTIONS.VERIFY) {
                 this.onVerifyEvent(event);
             }
+            if (event.action === AttendanceApp.ACTIONS.STUDENT_REGISTER) {
+                // Update local registry
+                const { studentId, walletAddress } = event.payload || {};
+                if (studentId && walletAddress) {
+                    this.studentRegistry.set(walletAddress, studentId);
+                    await this._saveStudentRegistry();
+                }
+            }
         });
+    }
+    
+    /**
+     * Load student registry from storage
+     * @private
+     */
+    async _loadStudentRegistry() {
+        try {
+            const registry = await this.store.get('student_registry');
+            if (registry && Array.isArray(registry)) {
+                registry.forEach(({ walletAddress, studentId }) => {
+                    this.studentRegistry.set(walletAddress, studentId);
+                });
+            }
+        } catch (error) {
+            console.warn('Failed to load student registry:', error);
+        }
+    }
+    
+    /**
+     * Save student registry to storage
+     * @private
+     */
+    async _saveStudentRegistry() {
+        try {
+            const registry = Array.from(this.studentRegistry.entries()).map(([walletAddress, studentId]) => ({
+                walletAddress,
+                studentId
+            }));
+            await this.store.put('student_registry', registry);
+        } catch (error) {
+            console.warn('Failed to save student registry:', error);
+        }
     }
     
     // ═══════════════════════════════════════════════════════════════════════════
@@ -127,6 +178,7 @@ class AttendanceApp {
             geofence: options.geofence || null,
             maxParticipants: options.maxParticipants || null,
             createdBy: this.sdk.nodeId,
+            owner: this.sdk.nodeId, // For querying by owner
             createdAt: Date.now(),
             status: 'ACTIVE',
             attendeeCount: 0
@@ -134,21 +186,38 @@ class AttendanceApp {
         
         // Store full data OFF-CHAIN
         await this.store.put(sessionId, sessionData);
+        console.log(`💾 Session stored locally: ${sessionId}`, sessionData);
         
         // Hash for on-chain reference
         const dataHash = await this.sdk.hashData(sessionData);
         
         // Submit minimal proof ON-CHAIN
+        // Include essential metadata so other nodes can see session details
+        // Note: Geofence coordinates are included as they're public venue information
+        const metadata = {
+            title: options.title,
+            description: options.description || '',
+            startTime: sessionData.startTime,
+            endTime: sessionData.endTime || null,
+            location: options.location || null
+        };
+        
+        // Include geofence if present (needed for location verification)
+        if (options.geofence) {
+            metadata.geofence = {
+                lat: options.geofence.lat,
+                lng: options.geofence.lng,
+                radius: options.geofence.radius
+            };
+        }
+        
         const success = await this.sdk.submitAppEvent(
             AttendanceApp.APP_ID,
             AttendanceApp.ACTIONS.SESSION_CREATE,
             {
                 ref: sessionId,
                 dataHash: dataHash,
-                metadata: {
-                    title: options.title,
-                    startTime: sessionData.startTime
-                }
+                metadata: metadata
             }
         );
         
@@ -197,6 +266,148 @@ class AttendanceApp {
     }
     
     // ═══════════════════════════════════════════════════════════════════════════
+    // STUDENT REGISTRY
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    /**
+     * Register a student ID for the current wallet address
+     * @param {string} studentId - Student ID (e.g., "STU12345")
+     * @returns {Promise<boolean>}
+     */
+    async registerStudent(studentId) {
+        if (!studentId || typeof studentId !== 'string') {
+            throw new Error('Valid student ID is required');
+        }
+        
+        const walletAddress = this.sdk.nodeId;
+        
+        // Update local registry
+        this.studentRegistry.set(walletAddress, studentId);
+        await this._saveStudentRegistry();
+        
+        // Submit on-chain (optional - for cross-device sync)
+        await this.sdk.submitAppEvent(
+            AttendanceApp.APP_ID,
+            AttendanceApp.ACTIONS.STUDENT_REGISTER,
+            {
+                studentId: studentId,
+                walletAddress: walletAddress
+            }
+        );
+        
+        console.log(`✅ Student registered: ${studentId} -> ${walletAddress}`);
+        return true;
+    }
+    
+    /**
+     * Get student ID for a wallet address
+     * @param {string} [walletAddress] - Wallet address (defaults to current node)
+     * @returns {string|null}
+     */
+    getStudentId(walletAddress = null) {
+        const address = walletAddress || this.sdk.nodeId;
+        return this.studentRegistry.get(address) || null;
+    }
+    
+    /**
+     * Get all registered students
+     * @returns {Array<{walletAddress: string, studentId: string}>}
+     */
+    getAllStudents() {
+        return Array.from(this.studentRegistry.entries()).map(([walletAddress, studentId]) => ({
+            walletAddress,
+            studentId
+        }));
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════════════
+    // QR CODE GENERATION (Professors)
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    /**
+     * Start generating dynamic QR codes for a session
+     * @param {string} sessionId - Session ID
+     * @param {Function} onQRUpdate - Callback when QR updates
+     * @returns {Promise<AttendanceQRCode>}
+     */
+    async startQRGeneration(sessionId, onQRUpdate = null) {
+        if (!this.sdk.isInstitution() && !this.sdk.isRoot()) {
+            throw new Error('Only institutions can generate QR codes');
+        }
+        
+        const session = await this.store.get(sessionId);
+        if (!session || session.createdBy !== this.sdk.nodeId) {
+            throw new Error('Session not found or you are not the creator');
+        }
+        
+        // Try to get private key from SrishtiApp (main app context)
+        let privateKey = null;
+        const srishtiApp = window.SrishtiApp || window.srishtiAppInstance;
+        if (srishtiApp && srishtiApp.keyPair && srishtiApp.keyPair.privateKey) {
+            privateKey = srishtiApp.keyPair.privateKey;
+        } else {
+            // Try to get from localStorage and import
+            const privateKeyBase64 = localStorage.getItem('srishti_private_key');
+            if (privateKeyBase64 && window.SrishtiKeys) {
+                try {
+                    privateKey = await window.SrishtiKeys.importPrivateKey(privateKeyBase64);
+                } catch (error) {
+                    console.warn('Failed to import private key from localStorage:', error);
+                }
+            }
+        }
+        
+        if (!privateKey) {
+            throw new Error('Private key not available. Please ensure you are logged in with your institution account in the main blockchain app.');
+        }
+        
+        // Load QR code module
+        if (!window.SrishtiAttendanceQRCode) {
+            throw new Error('AttendanceQRCode module not loaded');
+        }
+        
+        const QRGenerator = window.SrishtiAttendanceQRCode;
+        const qrGenerator = new QRGenerator({
+            sessionId: sessionId,
+            professorNodeId: this.sdk.nodeId,
+            privateKey: privateKey,
+            refreshInterval: 10000 // 10 seconds
+        });
+        
+        // Start generating
+        await qrGenerator.start(onQRUpdate);
+        
+        // Store generator
+        this.qrGenerators.set(sessionId, qrGenerator);
+        
+        console.log(`✅ QR code generation started for session: ${sessionId}`);
+        return qrGenerator;
+    }
+    
+    /**
+     * Stop generating QR codes for a session
+     * @param {string} sessionId - Session ID
+     */
+    stopQRGeneration(sessionId) {
+        const generator = this.qrGenerators.get(sessionId);
+        if (generator) {
+            generator.stop();
+            this.qrGenerators.delete(sessionId);
+            console.log(`✅ QR code generation stopped for session: ${sessionId}`);
+        }
+    }
+    
+    /**
+     * Get current QR code for a session
+     * @param {string} sessionId - Session ID
+     * @returns {Object|null}
+     */
+    getCurrentQR(sessionId) {
+        const generator = this.qrGenerators.get(sessionId);
+        return generator ? generator.getCurrentQR() : null;
+    }
+    
+    // ═══════════════════════════════════════════════════════════════════════════
     // ATTENDANCE MARKING (Students)
     // ═══════════════════════════════════════════════════════════════════════════
     
@@ -205,13 +416,18 @@ class AttendanceApp {
      * 
      * @param {string} sessionId - Session ID
      * @param {Object} [options] - Attendance options
-     * @param {Object} [options.location] - Current location
+     * @param {Object} [options.location] - Current location (for geofencing)
      * @param {number} options.location.lat - Latitude
      * @param {number} options.location.lng - Longitude
+     * @param {Object|string} [options.qrCode] - QR code data from scanner (JSON string or object)
      * @returns {Promise<string>} Attendance record ID
      * 
      * @example
-     * // With geolocation
+     * // With QR code (recommended - prevents proxy attendance)
+     * const qrData = await scanQRCode(); // From QR scanner
+     * await app.markAttendance(sessionId, { qrCode: qrData });
+     * 
+     * // With geolocation (alternative)
      * navigator.geolocation.getCurrentPosition(async (pos) => {
      *     await app.markAttendance(sessionId, {
      *         location: { lat: pos.coords.latitude, lng: pos.coords.longitude }
@@ -219,9 +435,47 @@ class AttendanceApp {
      * });
      */
     async markAttendance(sessionId, options = {}) {
-        const session = await this.store.get(sessionId);
+        let session = await this.store.get(sessionId);
+        
+        // If session not found locally, try to get it from on-chain events
         if (!session) {
-            throw new Error('Session not found');
+            const events = this.sdk.queryAppEvents(
+                AttendanceApp.APP_ID,
+                AttendanceApp.ACTIONS.SESSION_CREATE,
+                { ref: sessionId }
+            );
+            
+            if (events.length === 0) {
+                throw new Error('Session not found');
+            }
+            
+            // Reconstruct from on-chain event (same logic as getActiveSessions)
+            const event = events[0];
+            const metadata = event.payload?.metadata || {};
+            session = {
+                id: sessionId,
+                type: 'session',
+                title: metadata.title || 'Untitled Session',
+                description: metadata.description || '',
+                startTime: metadata.startTime || event.timestamp,
+                endTime: metadata.endTime || null,
+                location: metadata.location || null,
+                geofence: metadata.geofence ? {
+                    lat: metadata.geofence.lat,
+                    lng: metadata.geofence.lng,
+                    radius: metadata.geofence.radius
+                } : null,
+                createdBy: event.sender,
+                owner: event.sender, // For querying by owner
+                createdAt: event.timestamp,
+                status: 'ACTIVE',
+                attendeeCount: 0,
+                _reconstructed: true
+            };
+            
+            // Store it for future use
+            await this.store.put(sessionId, session);
+            console.log(`📥 Loaded session from on-chain for attendance: ${session.title}`);
         }
         
         // Check if session is still active
@@ -240,9 +494,64 @@ class AttendanceApp {
             throw new Error('Attendance already marked for this session');
         }
         
-        // Validate geofence if required
+        // ═══════════════════════════════════════════════════════════════════
+        // QR CODE VERIFICATION (Primary method - prevents proxy attendance)
+        // ═══════════════════════════════════════════════════════════════════
+        let qrProof = null;
+        if (options.qrCode) {
+            // Parse QR code if string
+            let qrData = typeof options.qrCode === 'string' 
+                ? window.SrishtiAttendanceQRCode?.parseQR(options.qrCode)
+                : options.qrCode;
+            
+            if (!qrData) {
+                throw new Error('Invalid QR code data');
+            }
+            
+            // Verify QR code
+            if (!window.SrishtiAttendanceQRCode) {
+                throw new Error('AttendanceQRCode module not loaded');
+            }
+            
+            const verification = await window.SrishtiAttendanceQRCode.verifyQR(
+                qrData,
+                this.sdk.chain,
+                30000 // 30 second max age
+            );
+            
+            if (!verification.valid) {
+                throw new Error(`QR code verification failed: ${verification.error}`);
+            }
+            
+            // Verify QR is for this session
+            if (qrData.sessionId !== sessionId) {
+                throw new Error('QR code is for a different session');
+            }
+            
+            // Verify QR is from session creator
+            if (qrData.professorNodeId !== session.createdBy) {
+                throw new Error('QR code is not from the session creator');
+            }
+            
+            qrProof = {
+                timestamp: qrData.timestamp,
+                nonce: qrData.nonce,
+                signature: qrData.signature
+            };
+            
+            console.log('✅ QR code verified successfully');
+        }
+        
+        // ═══════════════════════════════════════════════════════════════════
+        // GEOFENCE VERIFICATION (Alternative/Additional method)
+        // ═══════════════════════════════════════════════════════════════════
         let distanceFromVenue = null;
         if (session.geofence && options.location) {
+            // Ensure we have full geofence data
+            if (!session.geofence.lat || !session.geofence.lng) {
+                throw new Error('Session geofence data is incomplete. Cannot verify location.');
+            }
+            
             distanceFromVenue = this._calculateDistance(options.location, session.geofence);
             
             if (distanceFromVenue > session.geofence.radius) {
@@ -251,18 +560,39 @@ class AttendanceApp {
                     `Must be within ${session.geofence.radius}m to mark attendance.`
                 );
             }
+        } else if (session.geofence && !options.location && !qrProof) {
+            // Require either QR code OR location if geofence is set
+            throw new Error('This session requires location verification or QR code. Please enable location access or scan the QR code.');
         }
         
-        // Get student ID if registered (use nodeId if not registered)
-        const studentId = (typeof this.getStudentId === 'function' ? this.getStudentId() : null) || this.sdk.nodeId;
+        // Require at least one proof method (QR code preferred)
+        if (!qrProof && !options.location) {
+            throw new Error('Please provide either a QR code (recommended) or location data to mark attendance.');
+        }
         
-        // Get node name from chain
+        // Get student ID if registered
+        const studentId = this.getStudentId() || this.sdk.nodeId;
+        
+        // Get node name from chain (for metadata and local record)
         let nodeName = null;
         if (this.sdk.chain) {
-            const nodes = this.sdk.chain.buildNodeMap();
-            const node = nodes[this.sdk.nodeId];
-            if (node) {
-                nodeName = node.name;
+            try {
+                const nodes = this.sdk.chain.buildNodeMap();
+                const node = nodes[this.sdk.nodeId];
+                if (node && node.name) {
+                    nodeName = node.name;
+                    console.log(`📝 [markAttendance] Found node name from chain: ${nodeName} for ${this.sdk.nodeId}`);
+                } else {
+                    // Also check institutions
+                    const institutions = this.sdk.chain.getInstitutions();
+                    const institution = institutions.verified?.[this.sdk.nodeId];
+                    if (institution && institution.name) {
+                        nodeName = institution.name;
+                        console.log(`📝 [markAttendance] Found institution name from chain: ${nodeName} for ${this.sdk.nodeId}`);
+                    }
+                }
+            } catch (error) {
+                console.warn(`⚠️ [markAttendance] Error getting node name from chain:`, error);
             }
         }
         
@@ -273,10 +603,11 @@ class AttendanceApp {
             sessionId: sessionId,
             studentId: studentId, // Use registered student ID if available
             walletAddress: this.sdk.nodeId,
-            nodeName: nodeName, // Node name from chain
+            nodeName: nodeName || null, // Node name from chain
             timestamp: Date.now(),
             location: options.location || null,
             distanceFromVenue: distanceFromVenue,
+            qrProof: qrProof, // QR code proof (prevents proxy attendance)
             status: AttendanceApp.STATUS.PENDING,
             owner: this.sdk.nodeId
         };
@@ -292,6 +623,8 @@ class AttendanceApp {
         const dataHash = await this.sdk.hashData(attendanceData);
         
         // Submit proof ON-CHAIN with essential metadata (so institution can see it)
+        console.log(`📤 [markAttendance] Submitting attendance event for session: ${sessionId}, student: ${studentId}`);
+        console.log(`📤 [markAttendance] App ID: ${AttendanceApp.APP_ID}, Action: ${AttendanceApp.ACTIONS.MARK_PRESENT}`);
         const success = await this.sdk.submitAppEvent(
             AttendanceApp.APP_ID,
             AttendanceApp.ACTIONS.MARK_PRESENT,
@@ -313,6 +646,7 @@ class AttendanceApp {
         );
         
         if (!success) {
+            console.error(`❌ [markAttendance] Failed to submit attendance event to blockchain`);
             // Rollback
             await this.store.delete(recordId);
             session.attendeeCount--;
@@ -320,7 +654,8 @@ class AttendanceApp {
             throw new Error('Failed to submit attendance to blockchain');
         }
         
-        console.log(`✅ Attendance marked: ${recordId}`);
+        console.log(`✅ [markAttendance] Attendance marked and submitted to blockchain: ${recordId}`);
+        console.log(`✅ [markAttendance] Event should be visible to institution after chain sync`);
         return recordId;
     }
     
@@ -558,7 +893,9 @@ class AttendanceApp {
      * @returns {Promise<Array>}
      */
     async getMySessions() {
-        return await this.store.query('owner', this.sdk.nodeId);
+        const sessions = await this.store.query('owner', this.sdk.nodeId);
+        console.log(`📋 getMySessions: Found ${sessions.length} sessions for ${this.sdk.nodeId}`);
+        return sessions;
     }
     
     /**
@@ -573,6 +910,7 @@ class AttendanceApp {
     /**
      * Get all active sessions (from on-chain events)
      * Combines on-chain proofs with off-chain data
+     * If off-chain data is missing, reconstructs from on-chain metadata
      * @returns {Promise<Array>}
      */
     async getActiveSessions() {
@@ -583,8 +921,50 @@ class AttendanceApp {
         
         const sessions = [];
         for (const event of events) {
-            const session = await this.store.get(event.payload.ref);
-            if (session && session.status === 'ACTIVE') {
+            let session = await this.store.get(event.payload.ref);
+            
+            // If session not in local store, reconstruct from on-chain event metadata
+            if (!session) {
+                // Reconstruct session from on-chain event
+                const metadata = event.payload?.metadata || {};
+                session = {
+                    id: event.payload.ref,
+                    type: 'session',
+                    title: metadata.title || 'Untitled Session',
+                    description: metadata.description || '',
+                    startTime: metadata.startTime || event.timestamp,
+                    endTime: metadata.endTime || null,
+                    location: metadata.location || null,
+                    // Geofence data is included in metadata (public venue info)
+                    geofence: metadata.geofence ? {
+                        lat: metadata.geofence.lat,
+                        lng: metadata.geofence.lng,
+                        radius: metadata.geofence.radius
+                    } : null,
+                    createdBy: event.sender,
+                    owner: event.sender, // For querying by owner
+                    createdAt: event.timestamp,
+                    status: 'ACTIVE', // Assume active if we don't have full data
+                    attendeeCount: 0,
+                    // Mark as reconstructed so we know it's from on-chain
+                    _reconstructed: true,
+                    _dataHash: event.payload?.dataHash // Store hash for verification
+                };
+                
+                // Store it locally for future use
+                await this.store.put(event.payload.ref, session);
+                console.log(`📥 Reconstructed session from on-chain: ${session.title} (${session.id})`);
+                console.log(`   Created by: ${event.sender}, Start: ${new Date(session.startTime).toLocaleString()}`);
+                if (session.geofence) {
+                    console.log(`   Location: ${session.location || 'Geofenced area'} (${session.geofence.radius}m radius)`);
+                }
+            }
+            
+            // Check if session is still active
+            const isActive = session.status === 'ACTIVE' && 
+                           (!session.endTime || Date.now() < session.endTime);
+            
+            if (isActive) {
                 sessions.push(session);
             }
         }
@@ -594,6 +974,7 @@ class AttendanceApp {
     
     /**
      * Get all sessions (from on-chain)
+     * Reconstructs from on-chain events if not in local store
      * @returns {Promise<Array>}
      */
     async getAllSessions() {
@@ -604,10 +985,37 @@ class AttendanceApp {
         
         const sessions = [];
         for (const event of events) {
-            const session = await this.store.get(event.payload.ref);
-            if (session) {
-                sessions.push(session);
+            let session = await this.store.get(event.payload.ref);
+            
+            // If not in local store, reconstruct from on-chain metadata
+            if (!session) {
+                const metadata = event.payload?.metadata || {};
+                session = {
+                    id: event.payload.ref,
+                    type: 'session',
+                    title: metadata.title || 'Untitled Session',
+                    description: metadata.description || '',
+                    startTime: metadata.startTime || event.timestamp,
+                    endTime: metadata.endTime || null,
+                    location: metadata.location || null,
+                    geofence: metadata.geofence ? {
+                        lat: metadata.geofence.lat,
+                        lng: metadata.geofence.lng,
+                        radius: metadata.geofence.radius
+                    } : null,
+                    createdBy: event.sender,
+                    owner: event.sender,
+                    createdAt: event.timestamp,
+                    status: 'ACTIVE',
+                    attendeeCount: 0,
+                    _reconstructed: true
+                };
+                
+                // Store it locally for future use
+                await this.store.put(event.payload.ref, session);
             }
+            
+            sessions.push(session);
         }
         
         return sessions;
