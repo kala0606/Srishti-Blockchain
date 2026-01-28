@@ -447,13 +447,17 @@ class Chain {
                 status: 'VERIFIED'
             };
 
-            // Update role to INSTITUTION
-            this.state.nodeRoles[targetNodeId] = 'INSTITUTION';
+            // Update role to INSTITUTION, but preserve ROOT/GOVERNANCE_ADMIN so they can create institutions and still verify others
+            const existingRole = this.state.nodeRoles[targetNodeId];
+            if (existingRole !== 'ROOT' && existingRole !== 'GOVERNANCE_ADMIN') {
+                this.state.nodeRoles[targetNodeId] = 'INSTITUTION';
+            }
 
             // 🔍 DEBUG: Log role assignment
-            console.log('🔍 [Chain.handleInstitutionVerify] INSTITUTION role assigned:', {
+            console.log('🔍 [Chain.handleInstitutionVerify] Institution verified:', {
                 targetNodeId,
-                newRole: this.state.nodeRoles[targetNodeId],
+                role: this.state.nodeRoles[targetNodeId],
+                preservedRootOrGov: existingRole === 'ROOT' || existingRole === 'GOVERNANCE_ADMIN',
                 allRoles: this.state.nodeRoles
             });
 
