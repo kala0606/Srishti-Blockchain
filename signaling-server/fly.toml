@@ -1,5 +1,5 @@
 app = "srishti-signaling"
-primary_region = "iad"`
+primary_region = "iad"
 
 [build]
 

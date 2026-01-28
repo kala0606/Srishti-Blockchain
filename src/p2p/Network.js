@@ -105,14 +105,10 @@ class Network {
             
             console.log(`📜 Loaded chain with epoch ${this.chainEpoch} (config: ${this.configEpoch})`);
         } else {
-            // Create genesis block if no chain exists - uses config epoch
-            await this.chain.createGenesisBlock();
-            await this.saveChain();
-            
-            // New chain uses config epoch
-            const genesis = this.chain.blocks[0];
-            this.chainEpoch = genesis?.data?.chainEpoch || this.configEpoch;
-            console.log(`🌱 Created new chain with epoch ${this.chainEpoch}`);
+            // No chain exists - do NOT create default genesis here.
+            // Genesis is created only when the first real node joins (in app createNode).
+            this.chainEpoch = this.configEpoch;
+            console.log(`📜 No local chain - epoch ${this.chainEpoch} (genesis will be created on first node join)`);
         }
         
         // Initialize WebSocket client

@@ -56,6 +56,10 @@ class WebSocketClient {
         // Keep-alive
         this.pingInterval = null;
         this.lastPong = Date.now();
+        
+        // Peer refresh (discover late-joining peers, e.g. other tab opened after us)
+        this.peerRefreshTimer = null;
+        this.peerRefreshInterval = null;
     }
     
     /**
@@ -105,6 +109,10 @@ class WebSocketClient {
                     // Register with server
                     this.register();
                     
+                    // Refresh peer list after a short delay (catches peers that connected just before/after us)
+                    this.schedulePeerRefresh();
+                    this.startPeriodicPeerRefresh();
+                    
                     resolve();
                 };
                 
@@ -130,6 +138,8 @@ class WebSocketClient {
                     this.connected = false;
                     this.registered = false;
                     this.stopKeepAlive();
+                    this.cancelPeerRefresh();
+                    this.stopPeriodicPeerRefresh();
                     
                     if (wasConnected) {
                         this.onDisconnected();
@@ -211,8 +221,9 @@ class WebSocketClient {
                 break;
             
             case 'peers':
-                // Response to get_peers request - add all, let Network filter by HELLO
+                // Response to get_peers request - add all, notify Network for NEW peers so HELLO/sync run
                 if (data.peers && Array.isArray(data.peers)) {
+                    const hadPeerIds = new Set(this.peers.keys());
                     this.peers.clear();
                     for (const peer of data.peers) {
                         this.peers.set(peer.nodeId, {
@@ -220,6 +231,12 @@ class WebSocketClient {
                             chainEpoch: peer.chainEpoch || 1,
                             lastSeen: Date.now()
                         });
+                        if (!hadPeerIds.has(peer.nodeId)) {
+                            this.onPeerJoined(peer.nodeId, {
+                                chainLength: peer.chainLength || 0,
+                                chainEpoch: peer.chainEpoch || 1
+                            });
+                        }
                     }
                     this.onPeersUpdated(this.getPeerList());
                 }
@@ -333,6 +350,52 @@ class WebSocketClient {
     requestPeers() {
         if (!this.isConnected()) return;
         this.send({ type: 'get_peers' });
+    }
+    
+    /**
+     * Schedule a one-time peer list refresh (catches other tab / late-joining peers)
+     */
+    schedulePeerRefresh() {
+        this.cancelPeerRefresh();
+        this.peerRefreshTimer = setTimeout(() => {
+            this.peerRefreshTimer = null;
+            if (this.isConnected()) {
+                console.log('🔄 Refreshing peer list (delayed)...');
+                this.requestPeers();
+            }
+        }, 2000);
+    }
+    
+    /**
+     * Start periodic peer refresh (every 25s) so we discover new tabs/peers
+     */
+    startPeriodicPeerRefresh() {
+        this.stopPeriodicPeerRefresh();
+        this.peerRefreshInterval = setInterval(() => {
+            if (this.isConnected()) {
+                this.requestPeers();
+            }
+        }, 25000);
+    }
+    
+    /**
+     * Cancel delayed peer refresh
+     */
+    cancelPeerRefresh() {
+        if (this.peerRefreshTimer) {
+            clearTimeout(this.peerRefreshTimer);
+            this.peerRefreshTimer = null;
+        }
+    }
+    
+    /**
+     * Stop periodic peer refresh
+     */
+    stopPeriodicPeerRefresh() {
+        if (this.peerRefreshInterval) {
+            clearInterval(this.peerRefreshInterval);
+            this.peerRefreshInterval = null;
+        }
     }
     
     /**
@@ -473,6 +536,8 @@ class WebSocketClient {
      */
     disconnect() {
         this.stopKeepAlive();
+        this.cancelPeerRefresh();
+        this.stopPeriodicPeerRefresh();
         
         if (this.reconnectTimer) {
             clearTimeout(this.reconnectTimer);
