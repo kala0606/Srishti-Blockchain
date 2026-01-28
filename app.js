@@ -18,6 +18,7 @@ class SrishtiApp {
         this.publicKeyBase64 = null;
         this.nodesData = {};
         this.initialized = false;
+        this.epochBehind = null; // { configEpoch, chainEpoch } when chain is on older network
     }
 
     /**
@@ -389,6 +390,10 @@ class SrishtiApp {
                 onSyncProgress: (progressData) => {
                     // Handle sync progress updates
                     this.updateSyncProgress(progressData);
+                },
+                onEpochBehind: (configEpoch, chainEpoch) => {
+                    this.epochBehind = { configEpoch, chainEpoch };
+                    window.dispatchEvent(new CustomEvent('srishti-epoch-behind', { detail: this.epochBehind }));
                 }
             });
 
@@ -1834,6 +1839,8 @@ class SrishtiApp {
             }
         }
 
+        const keepNodeIdentity = !!options.keepNodeIdentity;
+
         // Clear storage first
         if (this.storage) {
             try {
@@ -1886,15 +1893,18 @@ class SrishtiApp {
             this.adapter.onChainUpdate();
         }
 
-        // Ask if user wants to clear node data too
-        const clearNodeData = confirm(
-            'Also clear your node identity (localStorage)?\n\n' +
-            'This will remove:\n' +
-            '- Your node ID\n' +
-            '- Your keys\n' +
-            '- You will need to join again\n\n' +
-            'Click Cancel to keep your node identity.'
-        );
+        // Ask if user wants to clear node data too (skip when keepNodeIdentity e.g. "join current network")
+        let clearNodeData = false;
+        if (!keepNodeIdentity) {
+            clearNodeData = confirm(
+                'Also clear your node identity (localStorage)?\n\n' +
+                'This will remove:\n' +
+                '- Your node ID\n' +
+                '- Your keys\n' +
+                '- You will need to join again\n\n' +
+                'Click Cancel to keep your node identity.'
+            );
+        }
 
         if (clearNodeData) {
             localStorage.removeItem('srishti_node_id');
@@ -1911,6 +1921,28 @@ class SrishtiApp {
         console.log('🔄 Please refresh the page to see the new chain');
 
         return genesisBlock;
+    }
+
+    /**
+     * Reset chain to current network epoch and keep node identity.
+     * Use when your chain is on an older epoch and other tabs/incognito can't see you.
+     * @returns {Promise<Block|null>}
+     */
+    async resetChainToCurrentNetwork() {
+        try {
+            const genesis = await this.resetChain({
+                skipConfirmation: true,
+                keepNodeIdentity: true
+            });
+            if (genesis) {
+                this.epochBehind = null;
+                window.location.reload();
+            }
+            return genesis;
+        } catch (error) {
+            console.error('resetChainToCurrentNetwork failed:', error);
+            throw error;
+        }
     }
 }
 

@@ -35,6 +35,7 @@ class Network {
         this.onSyncProgress = options.onSyncProgress || null;
         this.onParentRequest = options.onParentRequest || null;
         this.onParentResponse = options.onParentResponse || null;
+        this.onEpochBehind = options.onEpochBehind || null; // configEpoch > chainEpoch (old chain)
         
         // WebSocket client (replaces WebRTC)
         this.wsClient = null;
@@ -94,6 +95,10 @@ class Network {
                 
                 // Use the ACTUAL chain epoch, not config - this ensures we don't lie in HELLO messages
                 this.chainEpoch = actualChainEpoch;
+                // Notify app so it can show "Reset to join current network" (other tabs/incognito won't see this node)
+                if (actualChainEpoch < this.configEpoch && this.onEpochBehind) {
+                    this.onEpochBehind(this.configEpoch, this.chainEpoch);
+                }
             } else {
                 this.chainEpoch = actualChainEpoch;
             }

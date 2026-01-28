@@ -2988,6 +2988,14 @@
                         <span class="blockchain-label">Network Status</span>
                         <span class="blockchain-value" id="dash-network-status">🟢 Online</span>
                     </div>
+                    <div class="blockchain-row" id="epoch-behind-banner" style="margin-top: 12px; padding: 12px; background: rgba(251, 191, 36, 0.15); border: 1px solid rgba(251, 191, 36, 0.4); border-radius: 8px; display: none;">
+                        <div style="font-size: 0.9em; color: #fcd34d; margin-bottom: 8px;">
+                            ⚠️ You're on an older network (epoch <span id="epoch-behind-old">?</span>). Other tabs and incognito windows won't see you.
+                        </div>
+                        <button id="epoch-behind-reset-btn" style="width: 100%; padding: 8px; background: rgba(251, 191, 36, 0.3); border: 1px solid rgba(251, 191, 36, 0.5); border-radius: 6px; color: #fde047; font-size: 0.85em; font-weight: 600; cursor: pointer;">
+                            Reset to join current network (keeps your node)
+                        </button>
+                    </div>
                     <div class="blockchain-row" id="reset-chain-row" style="margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.1); display: none;">
                         <button id="reset-chain-btn" style="width: 100%; padding: 10px; background: rgba(220, 38, 38, 0.2); border: 1px solid rgba(220, 38, 38, 0.4); border-radius: 8px; color: #fca5a5; font-size: 0.9em; font-weight: 600; cursor: pointer; transition: all 0.3s ease;">
                             🔄 Reset Chain (Clear All Nodes)
@@ -4613,6 +4621,16 @@
             const resetChainRow = document.getElementById('reset-chain-row');
             if (resetChainRow) {
                 resetChainRow.style.display = (myRole === 'ROOT') ? 'block' : 'none';
+            }
+            // Show "epoch behind" banner when chain is on older network (so other tabs/incognito can't see this node)
+            const epochBehindBanner = document.getElementById('epoch-behind-banner');
+            const epochBehindOldSpan = document.getElementById('epoch-behind-old');
+            if (epochBehindBanner && window.SrishtiApp?.epochBehind) {
+                const { configEpoch, chainEpoch } = window.SrishtiApp.epochBehind;
+                if (epochBehindOldSpan) epochBehindOldSpan.textContent = chainEpoch;
+                epochBehindBanner.style.display = 'block';
+            } else if (epochBehindBanner) {
+                epochBehindBanner.style.display = 'none';
             }
         }
         
@@ -7424,6 +7442,38 @@
                     btn.disabled = false;
                     btn.innerHTML = '🔄 Reset Chain (Clear All Nodes)';
                 }
+            }
+        });
+        
+        // "Reset to join current network" (epoch-behind) button
+        document.getElementById('epoch-behind-reset-btn')?.addEventListener('click', async () => {
+            try {
+                if (!window.SrishtiApp || !window.SrishtiApp.resetChainToCurrentNetwork) {
+                    alert('❌ Reset not available. Please refresh the page.');
+                    return;
+                }
+                const btn = document.getElementById('epoch-behind-reset-btn');
+                btn.disabled = true;
+                btn.textContent = 'Resetting...';
+                await window.SrishtiApp.resetChainToCurrentNetwork();
+            } catch (error) {
+                console.error('Reset to current network failed:', error);
+                alert(`❌ Failed: ${error.message}`);
+                const btn = document.getElementById('epoch-behind-reset-btn');
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = 'Reset to join current network (keeps your node)';
+                }
+            }
+        });
+        
+        // Show epoch-behind banner when network reports old chain
+        window.addEventListener('srishti-epoch-behind', (e) => {
+            const epochBehindBanner = document.getElementById('epoch-behind-banner');
+            const epochBehindOldSpan = document.getElementById('epoch-behind-old');
+            if (epochBehindBanner && e.detail) {
+                epochBehindOldSpan && (epochBehindOldSpan.textContent = e.detail.chainEpoch);
+                epochBehindBanner.style.display = 'block';
             }
         });
         
