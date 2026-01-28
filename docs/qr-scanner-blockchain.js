@@ -348,6 +348,16 @@ class QRScanner {
         await this.stopScanning();
         
         try {
+            // If this looks like an attendance QR (scanned in main app by mistake), show helpful message
+            try {
+                const data = JSON.parse(decodedText);
+                if (data && data.sessionId && data.signature && (data.type === 'ATTENDANCE_QR' || data.timestamp)) {
+                    this.showError('This is an attendance QR. Open the Attendance app and scan it there to mark attendance.');
+                    setTimeout(() => this.startScanning(), 3000);
+                    return;
+                }
+            } catch (e) { /* not attendance QR */ }
+            
             // Try to parse as URL first
             try {
                 const url = new URL(decodedText);

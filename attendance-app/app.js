@@ -620,7 +620,26 @@ class AttendanceAppUI {
                     await scanner.stopScanning();
                     scanner.showSuccess();
                     
-                    // Parse QR data - try as JSON first (attendance QR format)
+                    // Detect node-share QR (yellow "join node" from main app) - show clear message
+                    try {
+                        const url = new URL(decodedText);
+                        if (url.searchParams.get('join')) {
+                            scanner.showError('That\'s a node invite QR. Scan the Attendance QR from your professor\'s session (My Sessions → Show QR Code).');
+                            setTimeout(() => scanner.startScanning(), 3000);
+                            return false;
+                        }
+                    } catch (e) { /* not a URL */ }
+                    try {
+                        const parsed = JSON.parse(decodedText);
+                        const isNodeShare = parsed && ((parsed.t === 's' && parsed.n) || (parsed.type === 'srishti-invite' && parsed.nodeId));
+                        if (isNodeShare) {
+                            scanner.showError('That\'s a node invite QR. Scan the Attendance QR (yellow, from professor\'s session screen).');
+                            setTimeout(() => scanner.startScanning(), 3000);
+                            return false;
+                        }
+                    } catch (e) { /* not node-share JSON */ }
+                    
+                    // Parse QR data - attendance QR format (sessionId, timestamp, signature)
                     let qrCodeData = null;
                     try {
                         const parsed = JSON.parse(decodedText);
@@ -634,9 +653,9 @@ class AttendanceAppUI {
                     }
                     
                     if (!qrCodeData) {
-                        scanner.showError('Invalid attendance QR code format');
+                        scanner.showError('Invalid attendance QR. Scan the yellow Attendance QR from the professor\'s session.');
                         setTimeout(() => scanner.startScanning(), 2000);
-                        return false; // Let scanner show error and restart
+                        return false;
                     }
                     
                     if (qrCodeData.sessionId !== sessionId) {
@@ -736,8 +755,8 @@ class AttendanceAppUI {
         
         content.innerHTML = `
             <h3 style="font-family: 'Syne', sans-serif; color: var(--text-primary); margin-bottom: 12px; font-size: 1.6em; font-weight: 700;">📱 Attendance QR Code</h3>
-            <p style="color: var(--text-secondary); margin-bottom: 16px;">Students scan this code to mark attendance</p>
-            <p style="color: rgba(255, 255, 255, 0.5); font-size: 0.9em;">QR code refreshes every 10 seconds</p>
+            <p style="color: var(--text-secondary); margin-bottom: 8px;">Students scan this <strong style="color: #FFD700;">yellow</strong> QR to mark attendance</p>
+            <p style="color: rgba(255, 255, 255, 0.5); font-size: 0.9em;">Not the node-invite QR — this one is for this session only. Refreshes every 10s.</p>
         `;
         content.appendChild(qrContainer);
         
@@ -797,54 +816,36 @@ class AttendanceAppUI {
         container.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary);">Generating QR code...</div>';
         
         try {
-            // Try qrcodejs library (simple constructor API)
-            if (typeof QRCode !== 'undefined') {
-                container.innerHTML = '';
-                
-                // Create QR code using qrcodejs library
-                const qr = new QRCode(container, {
-                    text: qrData,
-                    width: 280,
-                    height: 280,
-                    colorDark: '#000000',
-                    colorLight: '#ffffff',
-                    correctLevel: QRCode.CorrectLevel.M || 1
-                });
-                
-                console.log('✅ QR code generated successfully');
-                return;
-            }
-            
-            // Try modern qrcode library (async API)
-            if (typeof QRCode !== 'undefined' && QRCode.toCanvas) {
-                const canvas = document.createElement('canvas');
-                container.innerHTML = '';
-                container.appendChild(canvas);
-                
-                await QRCode.toCanvas(canvas, qrData, {
-                    width: 280,
-                    margin: 2,
-                    color: {
-                        dark: '#000000',
-                        light: '#ffffff'
-                    }
-                });
-                console.log('✅ QR code generated with toCanvas API');
-                return;
-            }
-            
-            // Try QRCodeStyling
+            // Prefer QRCodeStyling first - same yellow/gold style as main app (node-share QR)
+            // So professors see one consistent "Srishti" look and students know which QR to scan
             if (typeof QRCodeStyling !== 'undefined') {
                 container.innerHTML = '';
                 const qr = new QRCodeStyling({
                     width: 280,
                     height: 280,
                     data: qrData,
-                    dotsOptions: { color: '#000000', type: 'rounded' },
-                    backgroundOptions: { color: '#ffffff' }
+                    dotsOptions: { color: '#FFD700', type: 'rounded' },
+                    backgroundOptions: { color: 'transparent' },
+                    cornersSquareOptions: { color: '#FFD700', type: 'extra-rounded' },
+                    cornersDotOptions: { color: '#FFFFFF', type: 'dot' }
                 });
                 qr.append(container);
-                console.log('✅ QR code generated with QRCodeStyling');
+                console.log('✅ Attendance QR generated (QRCodeStyling, yellow style)');
+                return;
+            }
+            
+            // Fallback: qrcodejs with same yellow/gold as main app
+            if (typeof QRCode !== 'undefined') {
+                container.innerHTML = '';
+                const qr = new QRCode(container, {
+                    text: qrData,
+                    width: 280,
+                    height: 280,
+                    colorDark: '#FFD700',
+                    colorLight: '#050510',
+                    correctLevel: QRCode.CorrectLevel.M || 1
+                });
+                console.log('✅ Attendance QR generated (qrcodejs, yellow style)');
                 return;
             }
             
