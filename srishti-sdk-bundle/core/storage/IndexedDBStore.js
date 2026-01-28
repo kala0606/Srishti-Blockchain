@@ -3,7 +3,12 @@
  * 
  * Persistent storage for the blockchain using IndexedDB.
  * Handles storing blocks, chain state, and node keys.
+ * 
+ * Storage version is tied to CHAIN_EPOCH. Old caches (missing or older version)
+ * are wiped; users must create a new node. Non–backward compatible.
  */
+
+const STORAGE_VERSION_KEY = 'storage_version';
 
 class IndexedDBStore {
     constructor(dbName = 'srishti_blockchain', version = 3) {
@@ -11,56 +16,115 @@ class IndexedDBStore {
         this.version = version;
         this.db = null;
     }
+
+    /**
+     * Read metadata from an open DB without calling open() (avoids recursion).
+     * @private
+     */
+    _getMetadataRaw(db, key) {
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(['metadata'], 'readonly');
+            const store = tx.objectStore('metadata');
+            const req = store.get(key);
+            req.onsuccess = () => {
+                const r = req.result;
+                resolve(r != null ? r.value : null);
+            };
+            req.onerror = () => reject(req.error);
+        });
+    }
+
+    /**
+     * Write metadata to an open DB without calling open().
+     * @private
+     */
+    _setMetadataRaw(db, key, value) {
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(['metadata'], 'readwrite');
+            const store = tx.objectStore('metadata');
+            const req = store.put({ key, value });
+            req.onsuccess = () => resolve();
+            req.onerror = () => reject(req.error);
+        });
+    }
+
+    /**
+     * Clear Srishti node identity from localStorage. Used when wiping old cache.
+     * @private
+     */
+    _clearSrishtiLocalStorage() {
+        try {
+            localStorage.removeItem('srishti_node_id');
+            localStorage.removeItem('srishti_node_name');
+            localStorage.removeItem('srishti_public_key');
+            localStorage.removeItem('srishti_private_key');
+        } catch (e) {
+            console.warn('Failed to clear Srishti localStorage:', e);
+        }
+    }
     
     /**
-     * Open/initialize the database
+     * Open/initialize the database.
+     * Old storage (no storage_version or version < CHAIN_EPOCH) is wiped;
+     * IndexedDB and node localStorage are cleared, then we start fresh.
+     * @param {boolean} [skipVersionCheck] - Internal: skip check after wipe and just write version
      * @returns {Promise<IDBDatabase>}
      */
-    async open() {
+    async open(skipVersionCheck = false) {
         if (this.db) return this.db;
         
-        return new Promise((resolve, reject) => {
+        const db = await new Promise((resolve, reject) => {
             const request = indexedDB.open(this.dbName, this.version);
-            
             request.onerror = () => reject(request.error);
-            request.onsuccess = () => {
-                this.db = request.result;
-                resolve(this.db);
-            };
-            
+            request.onsuccess = () => resolve(request.result);
             request.onupgradeneeded = (event) => {
-                const db = event.target.result;
-                
-                // Blocks store (indexed by index and hash)
-                if (!db.objectStoreNames.contains('blocks')) {
-                    const blockStore = db.createObjectStore('blocks', { keyPath: 'index' });
+                const d = event.target.result;
+                if (!d.objectStoreNames.contains('blocks')) {
+                    const blockStore = d.createObjectStore('blocks', { keyPath: 'index' });
                     blockStore.createIndex('hash', 'hash', { unique: true });
                     blockStore.createIndex('timestamp', 'timestamp', { unique: false });
                 }
-                
-                // Keys store (for node identity)
-                if (!db.objectStoreNames.contains('keys')) {
-                    db.createObjectStore('keys', { keyPath: 'nodeId' });
+                if (!d.objectStoreNames.contains('keys')) {
+                    d.createObjectStore('keys', { keyPath: 'nodeId' });
                 }
-                
-                // Chain metadata
-                if (!db.objectStoreNames.contains('metadata')) {
-                    db.createObjectStore('metadata', { keyPath: 'key' });
+                if (!d.objectStoreNames.contains('metadata')) {
+                    d.createObjectStore('metadata', { keyPath: 'key' });
                 }
-                
-                // Checkpoints store (for pruned blocks)
-                if (!db.objectStoreNames.contains('checkpoints')) {
-                    const checkpointStore = db.createObjectStore('checkpoints', { keyPath: 'index' });
+                if (!d.objectStoreNames.contains('checkpoints')) {
+                    const checkpointStore = d.createObjectStore('checkpoints', { keyPath: 'index' });
                     checkpointStore.createIndex('timestamp', 'timestamp', { unique: false });
                 }
-
-                // Headers store (for light clients - SPV mode)
-                if (!db.objectStoreNames.contains('headers')) {
-                    const headerStore = db.createObjectStore('headers', { keyPath: 'index' });
+                if (!d.objectStoreNames.contains('headers')) {
+                    const headerStore = d.createObjectStore('headers', { keyPath: 'index' });
                     headerStore.createIndex('timestamp', 'timestamp', { unique: false });
                 }
             };
         });
+
+        const required = (typeof window !== 'undefined' && window.SrishtiConfig?.CHAIN_EPOCH) ?? 1;
+
+        if (skipVersionCheck) {
+            await this._setMetadataRaw(db, STORAGE_VERSION_KEY, required);
+            this.db = db;
+            return db;
+        }
+
+        const storedVersion = await this._getMetadataRaw(db, STORAGE_VERSION_KEY);
+        if (storedVersion == null || storedVersion < required) {
+            db.close();
+            await new Promise((res, rej) => {
+                const req = indexedDB.deleteDatabase(this.dbName);
+                req.onsuccess = () => res();
+                req.onerror = () => rej(req.error);
+            });
+            this._clearSrishtiLocalStorage();
+            this.db = null;
+            console.warn(`🔄 Storage version outdated or missing (found: ${storedVersion}, required: ${required}). Cleared IndexedDB and node localStorage. Start fresh.`);
+            return this.open(true);
+        }
+
+        this.db = db;
+        return db;
     }
     
     /**

@@ -56,8 +56,6 @@ fly deploy
 
 Production URL: `wss://srishti-signaling.fly.dev`
 
-**Important:** For all nodes to see each other, the relay must run as a **single instance**. If you scale to multiple machines, each machine has its own in-memory peer list and nodes on different machines won't discover each other. Keep one machine: `fly scale count 1`.
-
 ## Health Check
 
 ```bash
@@ -82,7 +80,6 @@ Returns:
 | Environment Variable | Default | Description |
 |---------------------|---------|-------------|
 | `PORT` | `8080` | Server port |
-| `CHAIN_EPOCH` | (none) | If set (e.g. `10`), only list and broadcast peers with this epoch. Hides old cached clients (pre-epoch) from the relay so they don’t appear in the space. Must match `CHAIN_EPOCH` in `config.js`. |
 
 ## Monitoring
 

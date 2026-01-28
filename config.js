@@ -66,9 +66,11 @@ const Config = {
     
     // ═══════════════════════════════════════════════════════════════════════════
     // CHAIN EPOCH - Increment this to reset the entire network!
-    // When this changes, all old peers become incompatible and won't sync
+    // When this changes, all old peers become incompatible and won't sync.
+    // Also used as storage_version: IndexedDB/localStorage with older or missing
+    // version are wiped; users must create a new node (non–backward compatible).
     // ═══════════════════════════════════════════════════════════════════════════
-    CHAIN_EPOCH: 11,                    // Chain epoch - increment to force fresh start
+    CHAIN_EPOCH: 12,                    // Chain epoch - increment to force fresh start
     
     // Performance
     BATCH: {

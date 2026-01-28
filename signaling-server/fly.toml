@@ -5,7 +5,6 @@ primary_region = "iad"
 
 [env]
   PORT = "8080"
-  CHAIN_EPOCH = "11"
 
 [[services]]
   protocol = "tcp"

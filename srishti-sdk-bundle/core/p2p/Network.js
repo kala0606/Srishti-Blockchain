@@ -47,7 +47,6 @@ class Network {
         this.merging = false;
         this.heartbeatInterval = null;
         this.syncInterval = null;
-        this.peerDiscoveryInterval = null;
         
         // Protocol version for compatibility
         this.protocolVersion = window.SrishtiConfig?.PROTOCOL_VERSION || 2;
@@ -132,9 +131,6 @@ class Network {
         // Start periodic sync
         this.startSync();
         
-        // Periodically request peer list so we discover nodes that connected after us
-        this.startPeerDiscovery();
-        
         console.log(`🌐 Network initialized (Chain Epoch: ${this.chainEpoch})`);
         console.log(`   Transport: WebSocket Relay`);
         console.log(`   Peers with different epochs will be automatically rejected.`);
@@ -200,13 +196,6 @@ class Network {
                     for (const peerId of peerIds) {
                         this.sendHello(peerId);
                     }
-                    
-                    // Re-request peer list after 2s to catch peers that connected just before us
-                    setTimeout(() => {
-                        if (this.wsClient && this.wsClient.isConnected()) {
-                            this.wsClient.requestPeers();
-                        }
-                    }, 2000);
                     
                     // Request sync from peers with longer chains after a delay
                     // (gives time for HELLO responses to populate peerInfo with verified epoch data)
@@ -932,20 +921,6 @@ class Network {
     }
     
     /**
-     * Periodically request peer list from relay so we discover nodes that connected after us.
-     * Fixes two devices both seeing "0 peers" when they connect close in time.
-     */
-    startPeerDiscovery() {
-        if (this.peerDiscoveryInterval) clearInterval(this.peerDiscoveryInterval);
-        
-        this.peerDiscoveryInterval = setInterval(() => {
-            if (this.wsClient && this.wsClient.isConnected()) {
-                this.wsClient.requestPeers();
-            }
-        }, 10000); // Every 10 seconds
-    }
-    
-    /**
      * Send parent request
      */
     async sendParentRequest(parentId, options = {}) {
@@ -1004,7 +979,6 @@ class Network {
     close() {
         if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
         if (this.syncInterval) clearInterval(this.syncInterval);
-        if (this.peerDiscoveryInterval) clearInterval(this.peerDiscoveryInterval);
         
         if (this.wsClient) {
             this.wsClient.disconnect();

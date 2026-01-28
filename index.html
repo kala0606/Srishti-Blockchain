@@ -6020,8 +6020,8 @@
             console.log('🔄 Manual sync triggered');
             
             try {
-                // Request sync only from epoch-verified compatible peers (not raw relay list)
-                const peers = Array.from(network.peerInfo?.keys() || []);
+                // Request sync from all connected peers
+                const peers = Array.from(network.peers?.keys() || []);
                 if (peers.length === 0) {
                     statusText.textContent = 'No peers connected';
                     setTimeout(() => {
@@ -7307,9 +7307,9 @@
             // Check chain status after a brief delay (allows sync to start)
             setTimeout(() => {
                 updateChainStatus();
-                // If we have a network, trigger initial sync check (epoch-verified peers only)
+                // If we have a network, trigger initial sync check
                 if (window.SrishtiApp?.network && currentUser) {
-                    const peers = Array.from(window.SrishtiApp.network.peerInfo?.keys() || []);
+                    const peers = Array.from(window.SrishtiApp.network.peers?.keys() || []);
                     if (peers.length > 0) {
                         console.log(`📡 Initial sync check with ${peers.length} peer(s)`);
                         // Request sync from first peer to check if we're behind
