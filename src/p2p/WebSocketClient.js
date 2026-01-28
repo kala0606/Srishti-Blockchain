@@ -42,7 +42,11 @@ class WebSocketClient {
         this.ws = null;
         this.connected = false;
         this.registered = false;
-        this.peers = new Map(); // nodeId -> { chainLength, chainEpoch, lastSeen }
+        this.peers = new Map(); // connectionId -> { chainLength, chainEpoch, lastSeen }
+        
+        // Per-tab unique ID so multiple tabs (same nodeId) are separate relay connections
+        // and can see each other as peers and sync. sessionStorage is tab-specific.
+        this.relayConnectionId = this.getOrCreateTabConnectionId(options.nodeId);
         
         // Reconnection
         this.reconnectAttempts = 0;
@@ -52,6 +56,31 @@ class WebSocketClient {
         // Keep-alive
         this.pingInterval = null;
         this.lastPong = Date.now();
+    }
+    
+    /**
+     * Get or create a stable connection ID for this tab (so multiple tabs = multiple peers)
+     * @param {string} nodeId - Blockchain node ID
+     * @returns {string} - nodeId_tab_<uuid> for relay registration
+     */
+    getOrCreateTabConnectionId(nodeId) {
+        try {
+            const key = 'srishti_relay_tab_id';
+            let tabId = typeof sessionStorage !== 'undefined' && sessionStorage.getItem(key);
+            if (!tabId) {
+                tabId = typeof crypto !== 'undefined' && crypto.randomUUID
+                    ? crypto.randomUUID()
+                    : 'tab_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+                if (typeof sessionStorage !== 'undefined') {
+                    sessionStorage.setItem(key, tabId);
+                }
+            }
+            const connectionId = nodeId + '_tab_' + tabId;
+            console.log(`🔗 Relay connection ID (this tab): ${connectionId.slice(0, 30)}...`);
+            return connectionId;
+        } catch (e) {
+            return nodeId + '_tab_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+        }
     }
     
     /**
@@ -117,12 +146,12 @@ class WebSocketClient {
     }
     
     /**
-     * Register with the relay server
+     * Register with the relay server (using per-tab connection ID so multiple tabs sync)
      */
     register() {
         this.send({
             type: 'register',
-            nodeId: this.nodeId,
+            nodeId: this.relayConnectionId,
             chainLength: this.chainLength,
             chainEpoch: this.chainEpoch
         });
