@@ -182,8 +182,9 @@ class WebSocketClient {
                 break;
             
             case 'peers':
-                // Response to get_peers request - add all, let Network filter by HELLO
+                // Response to get_peers request - add all, send HELLO to newly discovered peers
                 if (data.peers && Array.isArray(data.peers)) {
+                    const oldIds = new Set(this.peers.keys());
                     this.peers.clear();
                     for (const peer of data.peers) {
                         this.peers.set(peer.nodeId, {
@@ -191,6 +192,12 @@ class WebSocketClient {
                             chainEpoch: peer.chainEpoch || 1,
                             lastSeen: Date.now()
                         });
+                        if (!oldIds.has(peer.nodeId)) {
+                            this.onPeerJoined(peer.nodeId, {
+                                chainLength: peer.chainLength || 0,
+                                chainEpoch: peer.chainEpoch || 1
+                            });
+                        }
                     }
                     this.onPeersUpdated(this.getPeerList());
                 }

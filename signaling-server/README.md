@@ -56,6 +56,8 @@ fly deploy
 
 Production URL: `wss://srishti-signaling.fly.dev`
 
+**Important:** For all nodes to see each other, the relay must run as a **single instance**. If you scale to multiple machines, each machine has its own in-memory peer list and nodes on different machines won't discover each other. Keep one machine: `fly scale count 1`.
+
 ## Health Check
 
 ```bash
