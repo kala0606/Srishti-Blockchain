@@ -487,19 +487,6 @@ class AttendanceApp {
             throw new Error('Session time has passed');
         }
         
-        // Student must be a child of the session creator (teacher/institution)
-        if (!session.createdBy) {
-            throw new Error('Session has no creator information; cannot verify membership.');
-        }
-        if (this.sdk.chain) {
-            const isChild = this.sdk.chain.isChildOf(this.sdk.nodeId, session.createdBy);
-            if (!isChild) {
-                throw new Error('You must be registered as a student of this institution to mark attendance. Request to become a child node of the institution first.');
-            }
-        } else {
-            throw new Error('Cannot verify institution membership. Please wait for chain to sync.');
-        }
-        
         // Check if already marked
         const recordId = `${sessionId}_${this.sdk.nodeId}`;
         const existing = await this.store.get(recordId);
