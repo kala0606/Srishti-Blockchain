@@ -68,7 +68,7 @@ const Config = {
     // CHAIN EPOCH - Increment this to reset the entire network!
     // When this changes, all old peers become incompatible and won't sync
     // ═══════════════════════════════════════════════════════════════════════════
-    CHAIN_EPOCH: 10,                    // Chain epoch - increment to force fresh start
+    CHAIN_EPOCH: 11,                    // Chain epoch - increment to force fresh start
     
     // Performance
     BATCH: {
@@ -83,8 +83,8 @@ const Config = {
         UBI_DISTRIBUTION_HOUR: 0,        // Hour of day to distribute (0 = midnight UTC)
         
         // Passive earning rates (per minute)
-        ONLINE_PRESENCE_RATE: 0.1,       // KARMA per minute while online
-        NETWORK_WATCHING_RATE: 0.05,     // KARMA per minute watching network
+        ONLINE_PRESENCE_RATE: 1,       // KARMA per minute while online
+        NETWORK_WATCHING_RATE: 5,     // KARMA per minute watching network
         
         // Activity rewards
         REWARDS: {

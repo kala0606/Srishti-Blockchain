@@ -16,6 +16,8 @@ const http = require('http');
 const WebSocket = require('ws');
 
 const PORT = process.env.PORT || 8080;
+// Optional: set CHAIN_EPOCH to only list/broadcast peers with matching epoch (stops old cached clients appearing)
+const SERVER_CHAIN_EPOCH = process.env.CHAIN_EPOCH ? parseInt(process.env.CHAIN_EPOCH, 11) : null;
 
 // Server stats for monitoring
 const stats = {
@@ -51,6 +53,9 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocket.Server({ server });
 
 console.log(`🚀 Srishti Relay Server v2.0 (WebSocket-only P2P)`);
+if (SERVER_CHAIN_EPOCH != null) {
+    console.log(`   CHAIN_EPOCH=${SERVER_CHAIN_EPOCH} (only listing/broadcasting same-epoch peers)`);
+}
 
 // Connected nodes
 const nodes = new Map(); // nodeId -> { ws, lastSeen, chainLength, chainEpoch }
@@ -91,18 +96,21 @@ function broadcast(message, excludeNodeId = null) {
 }
 
 /**
- * Get list of online peers (excluding a specific node)
+ * Get list of online peers (excluding a specific node).
+ * If SERVER_CHAIN_EPOCH is set, only returns peers with matching epoch (hides old cached clients).
  */
 function getOnlinePeers(excludeNodeId = null) {
     const peers = [];
+    const wantEpoch = SERVER_CHAIN_EPOCH != null ? SERVER_CHAIN_EPOCH : null;
     for (const [nodeId, node] of nodes.entries()) {
-        if (nodeId !== excludeNodeId && node.ws.readyState === WebSocket.OPEN) {
-            peers.push({
-                nodeId: nodeId,
-                chainLength: node.chainLength || 0,
-                chainEpoch: node.chainEpoch || 1
-            });
-        }
+        if (nodeId === excludeNodeId || node.ws.readyState !== WebSocket.OPEN) continue;
+        const nodeEpoch = node.chainEpoch ?? 1;
+        if (wantEpoch != null && nodeEpoch !== wantEpoch) continue;
+        peers.push({
+            nodeId: nodeId,
+            chainLength: node.chainLength || 0,
+            chainEpoch: nodeEpoch
+        });
     }
     return peers;
 }
@@ -148,13 +156,16 @@ wss.on('connection', (ws, req) => {
                         serverTime: Date.now()
                     }));
                     
-                    // Notify all other peers about new node
-                    broadcast({
-                        type: 'peer_joined',
-                        nodeId: nodeId,
-                        chainLength: data.chainLength || 0,
-                        chainEpoch: data.chainEpoch || 1
-                    }, nodeId);
+                    // Notify only epoch-compatible peers (if SERVER_CHAIN_EPOCH set), so old cached clients don't see new ones
+                    const newEpoch = data.chainEpoch ?? 1;
+                    if (SERVER_CHAIN_EPOCH == null || newEpoch === SERVER_CHAIN_EPOCH) {
+                        broadcast({
+                            type: 'peer_joined',
+                            nodeId: nodeId,
+                            chainLength: data.chainLength || 0,
+                            chainEpoch: newEpoch
+                        }, nodeId);
+                    }
                     break;
                 
                 // ═══════════════════════════════════════════════════════════════

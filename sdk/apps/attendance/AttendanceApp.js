@@ -219,7 +219,7 @@ class AttendanceApp {
      * });
      */
     async markAttendance(sessionId, options = {}) {
-        const session = await this.store.get(sessionId);
+        const session = await this.getSession(sessionId);
         if (!session) {
             throw new Error('Session not found');
         }
@@ -562,17 +562,57 @@ class AttendanceApp {
     }
     
     /**
-     * Get a specific session
+     * Build minimal session from on-chain events (for students who don't have session in local store).
+     * @private
+     */
+    async _getSessionFromChain(sessionId) {
+        const createEvents = this.sdk.queryAppEvents(
+            AttendanceApp.APP_ID,
+            AttendanceApp.ACTIONS.SESSION_CREATE,
+            { ref: sessionId }
+        );
+        if (!createEvents.length) return null;
+        const create = createEvents[0];
+        const meta = create.payload?.metadata || {};
+        const endEvents = this.sdk.queryAppEvents(
+            AttendanceApp.APP_ID,
+            AttendanceApp.ACTIONS.SESSION_END,
+            { ref: sessionId }
+        );
+        const endMeta = endEvents.length ? (endEvents[0].payload?.metadata || {}) : {};
+        return {
+            id: sessionId,
+            type: 'session',
+            title: meta.title || 'Session',
+            description: '',
+            startTime: meta.startTime || create.timestamp || Date.now(),
+            endTime: endMeta.endTime || null,
+            location: null,
+            geofence: null,
+            maxParticipants: null,
+            createdBy: create.sender,
+            createdAt: create.timestamp || Date.now(),
+            status: endEvents.length ? 'ENDED' : 'ACTIVE',
+            attendeeCount: endMeta.attendeeCount ?? 0
+        };
+    }
+    
+    /**
+     * Get a specific session (from store or chain if not in store — e.g. for students).
      * @param {string} sessionId - Session ID
      * @returns {Promise<Object|null>}
      */
     async getSession(sessionId) {
-        return await this.store.get(sessionId);
+        let session = await this.store.get(sessionId);
+        if (!session) {
+            session = await this._getSessionFromChain(sessionId);
+        }
+        return session;
     }
     
     /**
      * Get all active sessions (from on-chain events)
-     * Combines on-chain proofs with off-chain data
+     * Combines on-chain proofs with off-chain data; hydrates from chain when store is empty (students).
      * @returns {Promise<Array>}
      */
     async getActiveSessions() {
@@ -583,7 +623,7 @@ class AttendanceApp {
         
         const sessions = [];
         for (const event of events) {
-            const session = await this.store.get(event.payload.ref);
+            const session = await this.getSession(event.payload.ref);
             if (session && session.status === 'ACTIVE') {
                 sessions.push(session);
             }
@@ -594,6 +634,7 @@ class AttendanceApp {
     
     /**
      * Get all sessions (from on-chain)
+     * Hydrates from chain when store is empty (e.g. students).
      * @returns {Promise<Array>}
      */
     async getAllSessions() {
@@ -604,7 +645,7 @@ class AttendanceApp {
         
         const sessions = [];
         for (const event of events) {
-            const session = await this.store.get(event.payload.ref);
+            const session = await this.getSession(event.payload.ref);
             if (session) {
                 sessions.push(session);
             }
