@@ -83,7 +83,8 @@ class Network {
             
             const chain = window.SrishtiChain.fromJSON(blocks);
             this.chain.blocks = chain.blocks;
-            
+            await this.chain.normalizeBlockIndices();
+
             // ═══════════════════════════════════════════════════════════════════
             // CRITICAL: Derive chain epoch from actual genesis block, not config!
             // This prevents old nodes from advertising new config epoch while having old chain

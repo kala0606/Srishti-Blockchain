@@ -41,27 +41,21 @@ class SrishtiAudioEngine {
         this.volumeUpdateCounter = 0;
         this.volumeUpdateInterval = 2; // Update every 2 frames (~30fps)
         
-        // Initialize when Tone.js is available
-        this.init();
+        // Defer Tone.js setup until after user gesture (browser autoplay policy)
+        this._toneInitialized = false;
     }
     
     /**
-     * Initialize audio engine
+     * Initialize Tone.js nodes (called only after user gesture to satisfy autoplay policy)
      */
-    async init() {
-        if (typeof Tone === 'undefined') {
-            this.enabled = false;
-            return;
-        }
-        
+    _initToneNodes() {
+        if (this._toneInitialized || typeof Tone === 'undefined') return;
+        this._toneInitialized = true;
         try {
-            // Create master gain chain
             this.masterGain = new Tone.Gain(this.masterVolume);
             this.masterVolumeNode = new Tone.Volume(0); // No attenuation (was -6dB)
             this.masterGain.connect(this.masterVolumeNode);
             this.masterVolumeNode.toDestination();
-            
-            // Set up 3D listener (camera position) - optional, not all Tone.js versions have it
             try {
                 if (typeof Tone.Listener !== 'undefined') {
                     this.listener = new Tone.Listener();
@@ -70,11 +64,8 @@ class SrishtiAudioEngine {
                     this.listener.positionZ.value = 0;
                 }
             } catch (e) {
-                // Listener not available, continue without it
                 this.listener = null;
             }
-            
-            // Set up 3D panner context
             Tone.Destination.channelCount = 2; // Stereo output
         } catch (error) {
             console.error('❌ Audio engine init failed:', error);
@@ -83,13 +74,16 @@ class SrishtiAudioEngine {
     }
     
     /**
-     * Start audio context (required for browser autoplay policy)
+     * Start audio context (required for browser autoplay policy).
+     * Call this only after a user gesture (e.g. click on mute button).
      */
     async startAudioContext() {
         if (!this.enabled || this.audioContextStarted) return;
-        
         try {
-            await Tone.start();
+            this._initToneNodes();
+            if (typeof Tone !== 'undefined') {
+                await Tone.start();
+            }
             this.audioContextStarted = true;
         } catch (error) {
             // Silent fail - user interaction may be required

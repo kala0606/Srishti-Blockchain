@@ -1774,6 +1774,33 @@ class Chain {
     }
 
     /**
+     * Normalize block indices to match array position and recompute hashes.
+     * Call after loading from storage to fix any duplicate or wrong indices.
+     * @returns {Promise<void>}
+     */
+    async normalizeBlockIndices() {
+        if (this.blocks.length === 0) return;
+        let changed = false;
+        for (let i = 0; i < this.blocks.length; i++) {
+            const block = this.blocks[i];
+            if (block.index !== i) {
+                changed = true;
+                block.index = i;
+                block.previousHash = i > 0 ? this.blocks[i - 1].hash : null;
+                if (block.header) {
+                    block.header.previousHash = block.previousHash;
+                }
+                await block.computeHash();
+            }
+        }
+        if (changed && this.storage) {
+            for (let i = 0; i < this.blocks.length; i++) {
+                await this.storage.saveBlock(this.blocks[i].toJSON());
+            }
+        }
+    }
+
+    /**
      * Replace chain (used when syncing from peers)
      * Validates before replacing
      * @param {Array} newBlocks - Array of block JSON objects
@@ -1786,33 +1813,31 @@ class Chain {
 
         console.log(`🔄 replaceChain: Processing ${newBlocks.length} blocks...`);
 
-        // Convert to Block objects and check for index corruption
+        // Convert to Block objects
         const blocks = [];
-        let hasCorruption = false;
+        let indicesMismatch = false;
 
         for (let i = 0; i < newBlocks.length; i++) {
             const block = window.SrishtiBlock.fromJSON(newBlocks[i]);
             blocks.push(block);
-
-            // Check if index matches position in array
             if (block.index !== i) {
-                console.error(`❌ CHAIN CORRUPTION DETECTED:`);
-                console.error(`   Block at position ${i} has index ${block.index}`);
-                console.error(`   Block type: ${block.data?.type || 'unknown'}`);
-                hasCorruption = true;
+                indicesMismatch = true;
             }
         }
 
-        // If corrupted, clear storage and start fresh
-        if (hasCorruption) {
-            console.error(`🔧 Chain storage is corrupted. Clearing and starting fresh...`);
-            if (this.storage) {
-                await this.storage.clear();
+        // If indices don't match position (e.g. peer sent duplicate or wrong indices), normalize
+        // and recompute hashes so the chain is valid. This handles peers with legacy/corrupt indices.
+        if (indicesMismatch) {
+            console.warn(`⚠️ Block indices don't match position (e.g. position 3 has index 2). Normalizing...`);
+            for (let i = 0; i < blocks.length; i++) {
+                const block = blocks[i];
+                block.index = i;
+                block.previousHash = i > 0 ? blocks[i - 1].hash : null;
+                if (block.header) {
+                    block.header.previousHash = block.previousHash;
+                }
+                await block.computeHash();
             }
-            // Create new genesis
-            await this.createGenesisBlock();
-            console.log(`✅ Fresh chain created after corruption`);
-            return true;
         }
 
         // Create temporary chain for validation
