@@ -600,16 +600,15 @@ class AttendanceAppUI {
         errorEl.innerHTML = '';
 
         try {
-            // Get location if available
+            // Get location if available (only when not using QR)
             let location = null;
-
-            if (navigator.geolocation) {
-                location = await new Promise((resolve, reject) => {
+            if (!qrCode && navigator.geolocation) {
+                location = await new Promise((resolve) => {
                     navigator.geolocation.getCurrentPosition(
                         (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
                         (err) => {
                             console.warn('Geolocation error:', err);
-                            resolve(null); // Continue without location
+                            resolve(null);
                         }
                     );
                 });
@@ -623,7 +622,18 @@ class AttendanceAppUI {
             await this.loadActiveSessions();
             await this.loadHistory();
         } catch (error) {
-            errorEl.innerHTML = `<div class="error">❌ ${error.message}</div>`;
+            // Friendlier messages when location failed or is required
+            let msg = error.message;
+            if (msg.includes('location') || msg.includes('QR code')) {
+                if (msg.includes('enable location') || msg.includes('location access')) {
+                    msg = 'We couldn\'t get your location. Try scanning the QR code to mark attendance, or enable location in your browser and try again.';
+                } else if (msg.includes('within') && msg.includes('m away')) {
+                    msg = msg; // Keep distance message as-is
+                } else {
+                    msg = 'Location is required for this session but we couldn\'t get it. Scan the QR code to mark attendance instead, or enable location and try again.';
+                }
+            }
+            errorEl.innerHTML = `<div class="error">❌ ${msg}</div>`;
         }
     }
     
@@ -664,18 +674,10 @@ class AttendanceAppUI {
                         }
                     } catch (e) { /* not node-share JSON */ }
                     
-                    // Parse QR data - attendance QR format (sessionId, timestamp, signature)
-                    let qrCodeData = null;
-                    try {
-                        const parsed = JSON.parse(decodedText);
-                        if (parsed && parsed.sessionId && parsed.timestamp && parsed.signature) {
-                            qrCodeData = parsed;
-                        }
-                    } catch (e) {
-                        if (window.SrishtiAttendanceQRCode) {
-                            qrCodeData = window.SrishtiAttendanceQRCode.parseQR(decodedText);
-                        }
-                    }
+                    // Parse QR data - attendance QR (full or compact format from toCompactString)
+                    const qrCodeData = window.SrishtiAttendanceQRCode
+                        ? window.SrishtiAttendanceQRCode.parseQR(decodedText)
+                        : null;
                     
                     if (!qrCodeData) {
                         scanner.showError('Invalid attendance QR. Scan the yellow Attendance QR from the professor\'s session.');
@@ -815,8 +817,11 @@ class AttendanceAppUI {
         modal.appendChild(content);
         document.body.appendChild(modal);
         
-        // Generate QR code visual (async)
-        this.generateQRVisual(qrContainer, JSON.stringify(qrData)).catch(err => {
+        // Generate QR code visual (compact string = less dense, like join-node QR)
+        const compactStr = window.SrishtiAttendanceQRCode && window.SrishtiAttendanceQRCode.toCompactString
+            ? window.SrishtiAttendanceQRCode.toCompactString(qrData)
+            : JSON.stringify(qrData);
+        this.generateQRVisual(qrContainer, compactStr).catch(err => {
             console.error('Failed to generate QR code:', err);
         });
         
@@ -824,7 +829,10 @@ class AttendanceAppUI {
         const updateInterval = setInterval(() => {
             const currentQR = this.attendance.getCurrentQR(sessionId);
             if (currentQR) {
-                this.generateQRVisual(qrContainer, JSON.stringify(currentQR)).catch(err => {
+                const nextCompact = window.SrishtiAttendanceQRCode && window.SrishtiAttendanceQRCode.toCompactString
+                    ? window.SrishtiAttendanceQRCode.toCompactString(currentQR)
+                    : JSON.stringify(currentQR);
+                this.generateQRVisual(qrContainer, nextCompact).catch(err => {
                     console.error('Failed to update QR code:', err);
                 });
             }
@@ -841,36 +849,38 @@ class AttendanceAppUI {
         container.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary);">Generating QR code...</div>';
         
         try {
-            // Prefer QRCodeStyling first - same yellow/gold style as main app (node-share QR)
-            // So professors see one consistent "Srishti" look and students know which QR to scan
+            // Match main app join-node QR exactly: yellow/gold style, error correction L (less dense),
+            // and a bit zoomed in (260px vs main app 200px) so it scans easily
             if (typeof QRCodeStyling !== 'undefined') {
                 container.innerHTML = '';
                 const qr = new QRCodeStyling({
-                    width: 280,
-                    height: 280,
+                    width: 260,
+                    height: 260,
+                    type: 'canvas',
                     data: qrData,
+                    qrOptions: { errorCorrectionLevel: 'L' },
                     dotsOptions: { color: '#FFD700', type: 'rounded' },
                     backgroundOptions: { color: 'transparent' },
                     cornersSquareOptions: { color: '#FFD700', type: 'extra-rounded' },
                     cornersDotOptions: { color: '#FFFFFF', type: 'dot' }
                 });
                 qr.append(container);
-                console.log('✅ Attendance QR generated (QRCodeStyling, yellow style)');
+                console.log('✅ Attendance QR generated (QRCodeStyling, yellow style, L correction)');
                 return;
             }
             
-            // Fallback: qrcodejs with same yellow/gold as main app
+            // Fallback: qrcodejs - same as main app (CorrectLevel.L = less dense)
             if (typeof QRCode !== 'undefined') {
                 container.innerHTML = '';
                 const qr = new QRCode(container, {
                     text: qrData,
-                    width: 280,
-                    height: 280,
+                    width: 260,
+                    height: 260,
                     colorDark: '#FFD700',
                     colorLight: '#050510',
-                    correctLevel: QRCode.CorrectLevel.M || 1
+                    correctLevel: QRCode.CorrectLevel.L
                 });
-                console.log('✅ Attendance QR generated (qrcodejs, yellow style)');
+                console.log('✅ Attendance QR generated (qrcodejs, yellow style, L correction)');
                 return;
             }
             
@@ -932,7 +942,10 @@ class AttendanceAppUI {
     updateQRDisplay(sessionId, qrData) {
         const container = document.getElementById(`qr-${sessionId}`);
         if (container) {
-            this.generateQRVisual(container, JSON.stringify(qrData)).catch(err => {
+            const compactStr = window.SrishtiAttendanceQRCode && window.SrishtiAttendanceQRCode.toCompactString
+                ? window.SrishtiAttendanceQRCode.toCompactString(qrData)
+                : JSON.stringify(qrData);
+            this.generateQRVisual(container, compactStr).catch(err => {
                 console.error('Failed to update QR display:', err);
             });
         }

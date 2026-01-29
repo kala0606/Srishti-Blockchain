@@ -113,7 +113,7 @@ class AttendanceQRCode {
 
             qrData.signature = signatureBase64;
 
-            // Store current QR
+            // Store current QR (full format for verification; UI will use toCompactString for display)
             this.currentQR = qrData;
 
             // Notify callback
@@ -129,16 +129,46 @@ class AttendanceQRCode {
     }
 
     /**
-     * Parse QR code from JSON string
+     * Compact string for QR display (less dense = easier to scan, like join-node QR)
+     * Short keys: t=type, s=sessionId, p=professorNodeId, ts=timestamp, n=nonce, g=signature
+     * @param {Object} qrData - Full QR data object
+     * @returns {string} JSON string with short keys
+     */
+    static toCompactString(qrData) {
+        if (!qrData || !qrData.sessionId || !qrData.signature) return '';
+        return JSON.stringify({
+            t: 'a',
+            s: qrData.sessionId,
+            p: qrData.professorNodeId,
+            ts: qrData.timestamp,
+            n: qrData.nonce || '',
+            g: qrData.signature
+        });
+    }
+
+    /**
+     * Parse QR code from JSON string (full or compact format)
      * @param {string} jsonString - JSON string of QR code data
-     * @returns {Object|null} Parsed QR code data or null if invalid
+     * @returns {Object|null} Parsed QR code data (full format) or null if invalid
      */
     static parseQR(jsonString) {
         try {
             const data = JSON.parse(jsonString);
 
-            // Validate structure
-            if (data.sessionId && data.professorNodeId && data.timestamp && data.signature && data.type === 'ATTENDANCE_QR') {
+            // Compact format (short keys from toCompactString)
+            if (data.t === 'a' && data.s && data.p && data.ts != null && data.g) {
+                return {
+                    sessionId: data.s,
+                    professorNodeId: data.p,
+                    timestamp: data.ts,
+                    nonce: data.n || '',
+                    signature: data.g,
+                    type: 'ATTENDANCE_QR'
+                };
+            }
+
+            // Full format
+            if (data.sessionId && data.professorNodeId && data.timestamp != null && data.signature && data.type === 'ATTENDANCE_QR') {
                 return data;
             }
 

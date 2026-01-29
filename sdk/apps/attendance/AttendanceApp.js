@@ -561,13 +561,11 @@ class AttendanceApp {
                 );
             }
         } else if (session.geofence && !options.location && !qrProof) {
-            // Require either QR code OR location if geofence is set
-            throw new Error('This session requires location verification or QR code. Please enable location access or scan the QR code.');
+            throw new Error('Use the QR code to mark attendance, or enable location in your browser and try again.');
         }
         
-        // Require at least one proof method (QR code preferred)
         if (!qrProof && !options.location) {
-            throw new Error('Please provide either a QR code (recommended) or location data to mark attendance.');
+            throw new Error('Scan the QR code (recommended) or enable location to mark attendance.');
         }
         
         // Get student ID if registered
