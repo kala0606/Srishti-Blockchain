@@ -853,10 +853,12 @@ class Network {
     
     /**
      * Ensure our local node is in the chain
+     * Skip in guest mode – guests must not create or broadcast any nodes.
      */
     async ensureLocalNodeInChain() {
         if (!this.nodeId) return;
-        
+        if (typeof window !== 'undefined' && window.SrishtiApp?.isGuest === true) return;
+
         const nodeMap = this.chain.buildNodeMap();
         if (nodeMap[this.nodeId] || this.chain.state?.nodeRoles?.[this.nodeId]) {
             return;
