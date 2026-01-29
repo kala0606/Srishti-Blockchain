@@ -767,8 +767,8 @@ class AttendanceAppUI {
         const qrContainer = document.createElement('div');
         qrContainer.id = `qr-${sessionId}`;
         qrContainer.style.cssText = `
-            width: 300px;
-            height: 300px;
+            width: 420px;
+            height: 420px;
             margin: 20px auto;
             background: rgba(0, 0, 0, 0.3);
             border: 1px solid rgba(255, 255, 255, 0.1);
@@ -848,14 +848,14 @@ class AttendanceAppUI {
         container.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary);">Generating QR code...</div>';
         
         try {
-            // Match main app join-node QR exactly: yellow/gold style, error correction L (less dense),
-            // and a bit zoomed in (260px vs main app 200px) so it scans easily
+            // Match join-node QR clarity: same yellow style + L correction, but rendered LARGE (400px)
+            // so each module is big and sharp — attendance payload is longer than ?join= so we zoom the display
             if (typeof QRCodeStyling !== 'undefined') {
                 container.innerHTML = '';
                 const qr = new QRCodeStyling({
-                    width: 260,
-                    height: 260,
-                    type: 'canvas',
+                    width: 400,
+                    height: 400,
+                    type: 'svg',
                     data: qrData,
                     qrOptions: { errorCorrectionLevel: 'L' },
                     dotsOptions: { color: '#FFD700', type: 'rounded' },
@@ -864,22 +864,22 @@ class AttendanceAppUI {
                     cornersDotOptions: { color: '#FFFFFF', type: 'dot' }
                 });
                 qr.append(container);
-                console.log('✅ Attendance QR generated (QRCodeStyling, yellow style, L correction)');
+                console.log('✅ Attendance QR generated (400px SVG, yellow, L)');
                 return;
             }
             
-            // Fallback: qrcodejs - same as main app (CorrectLevel.L = less dense)
+            // Fallback: qrcodejs — large size so modules are easy to scan
             if (typeof QRCode !== 'undefined') {
                 container.innerHTML = '';
                 const qr = new QRCode(container, {
                     text: qrData,
-                    width: 260,
-                    height: 260,
+                    width: 400,
+                    height: 400,
                     colorDark: '#FFD700',
                     colorLight: '#050510',
                     correctLevel: QRCode.CorrectLevel.L
                 });
-                console.log('✅ Attendance QR generated (qrcodejs, yellow style, L correction)');
+                console.log('✅ Attendance QR generated (qrcodejs 400px, L)');
                 return;
             }
             
