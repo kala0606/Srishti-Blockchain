@@ -754,26 +754,28 @@ class AttendanceAppUI {
             backdrop-filter: blur(40px);
             -webkit-backdrop-filter: blur(40px);
             border: 1px solid rgba(255, 255, 255, 0.15);
-            padding: 40px;
+            padding: 24px;
             border-radius: 32px;
-            max-width: 400px;
+            max-width: min(440px, 96vw);
             width: 90%;
             text-align: center;
-            box-shadow: 
-                0 24px 80px rgba(0, 0, 0, 0.5),
-                inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
         `;
         
         const qrContainer = document.createElement('div');
         qrContainer.id = `qr-${sessionId}`;
+        const vmin = Math.min(window.innerWidth, window.innerHeight);
+        const box = Math.min(420, Math.round(vmin * 0.82));
         qrContainer.style.cssText = `
-            width: 420px;
-            height: 420px;
+            width: ${box}px;
+            height: ${box}px;
+            max-width: calc(100vw - 32px);
+            max-height: calc(100vw - 32px);
             margin: 20px auto;
             background: rgba(0, 0, 0, 0.3);
             border: 1px solid rgba(255, 255, 255, 0.1);
             border-radius: 20px;
-            padding: 24px;
+            padding: 16px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -816,11 +818,11 @@ class AttendanceAppUI {
         modal.appendChild(content);
         document.body.appendChild(modal);
         
-        // Generate QR code visual (compact string = less dense, like join-node QR)
         const compactStr = window.SrishtiAttendanceQRCode && window.SrishtiAttendanceQRCode.toCompactString
             ? window.SrishtiAttendanceQRCode.toCompactString(qrData)
             : JSON.stringify(qrData);
-        this.generateQRVisual(qrContainer, compactStr).catch(err => {
+        const qrSize = Math.min(400, Math.round(Math.min(window.innerWidth, window.innerHeight) * 0.7) - 32);
+        this.generateQRVisual(qrContainer, compactStr, qrSize).catch(err => {
             console.error('Failed to generate QR code:', err);
         });
         
@@ -831,7 +833,8 @@ class AttendanceAppUI {
                 const nextCompact = window.SrishtiAttendanceQRCode && window.SrishtiAttendanceQRCode.toCompactString
                     ? window.SrishtiAttendanceQRCode.toCompactString(currentQR)
                     : JSON.stringify(currentQR);
-                this.generateQRVisual(qrContainer, nextCompact).catch(err => {
+                const qrSize = Math.min(400, Math.round(Math.min(window.innerWidth, window.innerHeight) * 0.7) - 32);
+                this.generateQRVisual(qrContainer, nextCompact, qrSize).catch(err => {
                     console.error('Failed to update QR code:', err);
                 });
             }
@@ -844,17 +847,17 @@ class AttendanceAppUI {
         };
     }
     
-    async generateQRVisual(container, qrData) {
+    async generateQRVisual(container, qrData, sizePx) {
+        const size = Math.max(200, Math.min(400, sizePx || 320));
         container.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary);">Generating QR code...</div>';
         
         try {
-            // Match join-node QR clarity: same yellow style + L correction, but rendered LARGE (400px)
-            // so each module is big and sharp — attendance payload is longer than ?join= so we zoom the display
+            // Responsive: size fits viewport on mobile; shorter payload (no nonce) = fewer modules = easier to scan
             if (typeof QRCodeStyling !== 'undefined') {
                 container.innerHTML = '';
                 const qr = new QRCodeStyling({
-                    width: 400,
-                    height: 400,
+                    width: size,
+                    height: size,
                     type: 'svg',
                     data: qrData,
                     qrOptions: { errorCorrectionLevel: 'L' },
@@ -864,22 +867,21 @@ class AttendanceAppUI {
                     cornersDotOptions: { color: '#FFFFFF', type: 'dot' }
                 });
                 qr.append(container);
-                console.log('✅ Attendance QR generated (400px SVG, yellow, L)');
+                console.log('✅ Attendance QR generated (' + size + 'px SVG, yellow, L)');
                 return;
             }
             
-            // Fallback: qrcodejs — large size so modules are easy to scan
             if (typeof QRCode !== 'undefined') {
                 container.innerHTML = '';
                 const qr = new QRCode(container, {
                     text: qrData,
-                    width: 400,
-                    height: 400,
+                    width: size,
+                    height: size,
                     colorDark: '#FFD700',
                     colorLight: '#050510',
                     correctLevel: QRCode.CorrectLevel.L
                 });
-                console.log('✅ Attendance QR generated (qrcodejs 400px, L)');
+                console.log('✅ Attendance QR generated (qrcodejs ' + size + 'px, L)');
                 return;
             }
             
@@ -944,7 +946,8 @@ class AttendanceAppUI {
             const compactStr = window.SrishtiAttendanceQRCode && window.SrishtiAttendanceQRCode.toCompactString
                 ? window.SrishtiAttendanceQRCode.toCompactString(qrData)
                 : JSON.stringify(qrData);
-            this.generateQRVisual(container, compactStr).catch(err => {
+            const qrSize = Math.min(400, Math.round(Math.min(window.innerWidth, window.innerHeight) * 0.7) - 32);
+            this.generateQRVisual(container, compactStr, qrSize).catch(err => {
                 console.error('Failed to update QR display:', err);
             });
         }

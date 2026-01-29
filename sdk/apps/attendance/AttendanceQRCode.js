@@ -71,19 +71,29 @@ class AttendanceQRCode {
     }
 
     /**
+     * Deterministic nonce from sessionId + timestamp (so we don't need to put it in the QR = shorter payload, easier to scan)
+     * @param {string} sessionId
+     * @param {number} timestamp
+     * @returns {Promise<string>}
+     */
+    static async deriveNonce(sessionId, timestamp) {
+        const input = `${sessionId}_${timestamp}`;
+        const buf = new TextEncoder().encode(input);
+        const hash = await crypto.subtle.digest('SHA-256', buf);
+        const arr = new Uint8Array(hash).slice(0, 16);
+        return btoa(String.fromCharCode(...arr));
+    }
+
+    /**
      * Generate a new QR code
      * @private
      */
     async _generateQR() {
         try {
-            // Round timestamp to 10-second intervals for consistency
             const now = Date.now();
             const roundedTimestamp = Math.floor(now / 10000) * 10000;
 
-            // Generate random nonce
-            const nonceBytes = new Uint8Array(16);
-            crypto.getRandomValues(nonceBytes);
-            const nonce = btoa(String.fromCharCode(...nonceBytes));
+            const nonce = await AttendanceQRCode.deriveNonce(this.sessionId, roundedTimestamp);
 
             // Create QR data
             const qrData = {
@@ -129,10 +139,8 @@ class AttendanceQRCode {
     }
 
     /**
-     * Compact string for QR display (less dense = easier to scan, like join-node QR)
-     * Short keys: t=type, s=sessionId, p=professorNodeId, ts=timestamp, n=nonce, g=signature
-     * @param {Object} qrData - Full QR data object
-     * @returns {string} JSON string with short keys
+     * Compact string for QR (no nonce = shorter = easier to scan; nonce is derived from s+ts when verifying)
+     * Keys: t=type, s=sessionId, p=professorNodeId, ts=timestamp, g=signature
      */
     static toCompactString(qrData) {
         if (!qrData || !qrData.sessionId || !qrData.signature) return '';
@@ -141,7 +149,6 @@ class AttendanceQRCode {
             s: qrData.sessionId,
             p: qrData.professorNodeId,
             ts: qrData.timestamp,
-            n: qrData.nonce || '',
             g: qrData.signature
         });
     }
@@ -155,13 +162,13 @@ class AttendanceQRCode {
         try {
             const data = JSON.parse(jsonString);
 
-            // Compact format (short keys from toCompactString)
+            // Compact format (no n = nonce derived when verifying)
             if (data.t === 'a' && data.s && data.p && data.ts != null && data.g) {
                 return {
                     sessionId: data.s,
                     professorNodeId: data.p,
                     timestamp: data.ts,
-                    nonce: data.n || '',
+                    nonce: data.n || '', // verifier will derive if empty
                     signature: data.g,
                     type: 'ATTENDANCE_QR'
                 };
@@ -218,13 +225,18 @@ class AttendanceQRCode {
 
             const publicKey = await window.SrishtiKeys.importPublicKey(professorNode.publicKey);
 
-            // Recreate message (same as when signing)
+            // Nonce: use from QR or derive (compact format omits it)
+            let nonce = qrData.nonce;
+            if (!nonce) {
+                nonce = await AttendanceQRCode.deriveNonce(qrData.sessionId, qrData.timestamp);
+            }
+
             const message = JSON.stringify({
                 sessionId: qrData.sessionId,
                 professorNodeId: qrData.professorNodeId,
                 timestamp: qrData.timestamp,
-                nonce: qrData.nonce,
-                type: qrData.type
+                nonce: nonce,
+                type: qrData.type || 'ATTENDANCE_QR'
             });
 
             // Verify signature (signature is already base64 string)
