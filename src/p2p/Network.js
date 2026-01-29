@@ -70,6 +70,19 @@ class Network {
     }
     
     /**
+     * Number of peers that are on the same chain epoch and marked online (after HELLO).
+     * Use this for UI "X peers" so a new epoch shows 0 when the only connection is from an old-epoch peer.
+     * @returns {number}
+     */
+    getCompatiblePeerCount() {
+        let n = 0;
+        for (const info of this.peerInfo.values()) {
+            if (info.chainEpoch === this.chainEpoch && info.isOnline) n++;
+        }
+        return n;
+    }
+    
+    /**
      * Initialize the network
      * @returns {Promise<void>}
      */
@@ -198,7 +211,7 @@ class Network {
                 
                 // Connected to relay server
                 onConnected: (peerIds) => {
-                    console.log(`✅ Connected to relay. ${peerIds.length} peers on server.`);
+                    console.log(`✅ Connected to relay. ${peerIds.length} peer(s) on server (same-epoch count after HELLO).`);
                     console.log(`📊 Our chain epoch: ${this.chainEpoch}`);
                     
                     for (const peerId of peerIds) {

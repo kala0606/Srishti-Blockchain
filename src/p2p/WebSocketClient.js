@@ -177,7 +177,7 @@ class WebSocketClient {
                 break;
             
             case 'registered':
-                console.log(`✅ Registered with relay server. ${data.peers?.length || 0} peers online.`);
+                console.log(`✅ Registered with relay server. ${data.peers?.length || 0} peer(s) on relay (epoch filtering happens after HELLO).`);
                 this.registered = true;
                 
                 // Add ALL peers - let Network layer filter by epoch after HELLO exchange

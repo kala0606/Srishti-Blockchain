@@ -5005,8 +5005,9 @@
             // Network status - check actual connection state
             const network = window.SrishtiApp?.network;
             const signalingConnected = network?.signaling?.isConnected?.() || false;
-            // Use peerInfo for verified compatible peers, not raw WebSocket count
-            const peerCount = network?.peerInfo?.size || 0;
+            // Use compatible (same-epoch) peer count so new epoch shows 0 when only old-epoch peers are on relay
+            const peerCount = (network && typeof network.getCompatiblePeerCount === 'function')
+                ? network.getCompatiblePeerCount() : (network?.peerInfo?.size || 0);
             
             let networkStatusText;
             if (signalingConnected && peerCount > 0) {
@@ -5254,7 +5255,7 @@
                     };
                     
                     const statusMsg = connectedPeers > 0 
-                        ? `Syncing... ${nodeCount} nodes, ${connectedPeers} peer${connectedPeers > 1 ? 's' : ''}`
+                        ? `Syncing... ${nodeCount} nodes, ${connectedPeers} compatible peer${connectedPeers > 1 ? 's' : ''}`
                         : `Loading... ${nodeCount} nodes`;
                     
                     console.log(`🔄 Sync ${syncAttempts + 1}/${maxSyncAttempts}: ${statusMsg}`);
@@ -5809,15 +5810,14 @@
                 const checkSync = () => {
                     const elapsed = Date.now() - startTime;
                     const chainLength = window.SrishtiApp?.chain?.getLength() || 0;
-                    // Use peerInfo.size for VERIFIED compatible peers (after HELLO exchange)
-                    // NOT wsClient.peers.size which includes all peers before epoch filtering
-                    const connectedPeers = window.SrishtiApp?.network?.peerInfo?.size || 0;
-                    const isSignalingConnected = window.SrishtiApp?.network?.signaling?.isConnected?.() || false;
-                    // These track peers during HELLO exchange
-                    const compatiblePeers = window.SrishtiApp?.network?.compatiblePeerCount || 0;
-                    const rejectedPeers = window.SrishtiApp?.network?.rejectedPeerCount || 0;
-                    // Raw count from server (before filtering) - for debugging
-                    const rawPeerCount = window.SrishtiApp?.network?.wsClient?.peers?.size || 0;
+                    // Use compatible (same-epoch) peer count so new epoch shows 0 when only old-epoch peers on relay
+                    const network = window.SrishtiApp?.network;
+                    const connectedPeers = (network && typeof network.getCompatiblePeerCount === 'function')
+                        ? network.getCompatiblePeerCount() : (network?.peerInfo?.size || 0);
+                    const isSignalingConnected = network?.signaling?.isConnected?.() || false;
+                    const rejectedPeers = network?.rejectedPeerCount || 0;
+                    // Raw count from relay (before epoch filtering) - for "Verifying peers..." vs "Starting fresh network..."
+                    const rawPeerCount = network?.wsClient?.peers?.size || 0;
                     
                     // Count actual nodes in chain (excluding genesis/virtual)
                     const nodeMap = window.SrishtiApp?.chain?.buildNodeMap?.() || {};
