@@ -852,13 +852,13 @@ class AttendanceAppUI {
         container.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary);">Generating QR code...</div>';
         
         try {
-            // Responsive: size fits viewport on mobile; shorter payload (no nonce) = fewer modules = easier to scan
+            // Same library and design as main app join QR (src/discovery/QRCode.js): canvas, same colors/shape
             if (typeof QRCodeStyling !== 'undefined') {
                 container.innerHTML = '';
                 const qr = new QRCodeStyling({
                     width: size,
                     height: size,
-                    type: 'svg',
+                    type: 'canvas',
                     data: qrData,
                     qrOptions: { errorCorrectionLevel: 'L' },
                     dotsOptions: { color: '#FFD700', type: 'rounded' },
@@ -867,7 +867,7 @@ class AttendanceAppUI {
                     cornersDotOptions: { color: '#FFFFFF', type: 'dot' }
                 });
                 qr.append(container);
-                console.log('✅ Attendance QR generated (' + size + 'px SVG, yellow, L)');
+                console.log('✅ Attendance QR generated (' + size + 'px canvas, same style as join QR)');
                 return;
             }
             
@@ -878,10 +878,10 @@ class AttendanceAppUI {
                     width: size,
                     height: size,
                     colorDark: '#FFD700',
-                    colorLight: '#050510',
+                    colorLight: '#000022',
                     correctLevel: QRCode.CorrectLevel.L
                 });
-                console.log('✅ Attendance QR generated (qrcodejs ' + size + 'px, L)');
+                console.log('✅ Attendance QR generated (qrcodejs ' + size + 'px, same as main app)');
                 return;
             }
             

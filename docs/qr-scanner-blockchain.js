@@ -282,9 +282,14 @@ class QRScanner {
         try {
             this.scanner = new Html5Qrcode(this.scannerContainerId);
             
+            // Larger scan box (70% of viewport) so dense QRs (e.g. attendance) scan reliably
             const config = {
-                fps: 10,
-                qrbox: { width: 200, height: 200 },
+                fps: 8,
+                qrbox: (viewfinderWidth, viewfinderHeight) => {
+                    const min = Math.min(viewfinderWidth, viewfinderHeight);
+                    const size = Math.min(280, Math.round(min * 0.7));
+                    return { width: size, height: size };
+                },
                 aspectRatio: 1.0
             };
             
@@ -292,13 +297,11 @@ class QRScanner {
                 { facingMode: 'environment' },
                 config,
                 (decodedText) => this.onQRCodeScanned(decodedText),
-                (errorMessage) => {
-                    // Ignore scan errors
-                }
+                () => {}
             );
             
             this.isScanning = true;
-            console.log('📷 QR Scanner started');
+            console.log('📷 QR Scanner started (large scan box for dense QRs)');
             
         } catch (error) {
             console.error('Error starting scanner:', error);
