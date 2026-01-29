@@ -469,13 +469,12 @@ class AttendanceAppUI {
             // First try to get sessions from local store
             let sessions = await this.attendance.getMySessions();
             
-            // If no sessions found, also check on-chain events (in case they were created but not stored locally)
-            if (sessions.length === 0) {
-                console.log('No sessions in local store, checking on-chain events...');
+            // If no sessions found, check on-chain events (sessions created by you but not in local store)
+            if (sessions.length === 0 && this.sdk.nodeId) {
+                console.log('No sessions in local store, checking on-chain for your sessions...');
                 const allSessions = await this.attendance.getAllSessions();
-                // Filter to only sessions created by current user
-                sessions = allSessions.filter(s => s.createdBy === this.sdk.nodeId || s.owner === this.sdk.nodeId);
-                console.log(`Found ${sessions.length} sessions from on-chain events`);
+                sessions = allSessions.filter(s => s && s.id && (s.createdBy === this.sdk.nodeId || s.owner === this.sdk.nodeId));
+                console.log(`Found ${sessions.length} session(s) created by you from on-chain`);
             }
 
             if (sessions.length === 0) {

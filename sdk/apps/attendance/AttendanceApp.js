@@ -887,25 +887,33 @@ class AttendanceApp {
     // ═══════════════════════════════════════════════════════════════════════════
     
     /**
-     * Get sessions created by current user
+     * Get sessions created by current user only (not sessions by others in the store).
      * @returns {Promise<Array>}
      */
     async getMySessions() {
+        if (!this.sdk.nodeId) {
+            console.warn('📋 getMySessions: No nodeId, returning empty');
+            return [];
+        }
         const sessions = await this.store.query('owner', this.sdk.nodeId);
-        const valid = sessions.filter(s => s && s.id);
+        // Only sessions I created: must have valid id and createdBy/owner must be me
+        const valid = sessions.filter(s => {
+            if (!s || !s.id) return false;
+            const createdByMe = s.createdBy === this.sdk.nodeId || s.owner === this.sdk.nodeId;
+            if (!createdByMe) return false;
+            return true;
+        });
         if (valid.length !== sessions.length) {
-            console.warn(`📋 getMySessions: Filtered out ${sessions.length - valid.length} session(s) with missing id`);
-            // Remove corrupt record(s) from store so they don't persist
+            const removed = sessions.length - valid.length;
+            console.warn(`📋 getMySessions: Excluded ${removed} session(s) (missing id or not created by you)`);
             try {
                 await this.store.delete(undefined);
-            } catch (e) {
-                // Ignore if delete by undefined fails
-            }
+            } catch (e) {}
         }
         valid.forEach(s => {
             if (s.title === undefined || s.title === null) s.title = 'Untitled Session';
         });
-        console.log(`📋 getMySessions: Found ${valid.length} sessions for ${this.sdk.nodeId}`);
+        console.log(`📋 getMySessions: Found ${valid.length} session(s) created by you (${this.sdk.nodeId})`);
         return valid;
     }
     
