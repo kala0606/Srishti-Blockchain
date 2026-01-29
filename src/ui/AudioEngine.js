@@ -179,9 +179,8 @@ class SrishtiAudioEngine {
      */
     async createNodeSound(nodeId, position = { x: 0, y: 0, z: 0 }, isOnline = false) {
         if (!this.enabled || !nodeId || !this.masterGain) return;
-        
-        // Start audio context if needed (required for browser autoplay policy)
-        await this.startAudioContext();
+        // Only create/play sounds after user has started the context (browser autoplay policy)
+        if (!this.audioContextStarted) return;
         
         // Get note for this node
         const note = this.getNoteForNode(nodeId);

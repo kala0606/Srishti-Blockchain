@@ -914,10 +914,19 @@ class AttendanceApp {
      * @returns {Promise<Array>}
      */
     async getActiveSessions() {
+        // Debug: help diagnose "student doesn't see sessions" (chain sync / query)
+        const chainLength = this.sdk.chain ? this.sdk.chain.getLength() : 0;
+        const allAppEvents = this.sdk.chain
+            ? this.sdk.chain.getEvents('APP_EVENT').filter(e => e.appId === AttendanceApp.APP_ID)
+            : [];
         const events = this.sdk.queryAppEvents(
             AttendanceApp.APP_ID,
             AttendanceApp.ACTIONS.SESSION_CREATE
         );
+        console.log(`📋 [getActiveSessions] Chain length: ${chainLength}, ${AttendanceApp.APP_ID} APP_EVENTs: ${allAppEvents.length}, SESSION_CREATE: ${events.length}`);
+        if (events.length === 0 && allAppEvents.length === 0 && chainLength > 0) {
+            console.warn('⚠️ [getActiveSessions] No attendance events on chain. If you created sessions as institution, wait for chain sync (10–20s) then refresh.');
+        }
         
         const sessions = [];
         for (const event of events) {

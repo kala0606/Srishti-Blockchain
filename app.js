@@ -39,9 +39,9 @@ class SrishtiApp {
             // Load chain from storage
             const blocks = await this.storage.getAllBlocks();
             if (blocks.length > 0) {
-                console.log(`🔍 [App.init] Loading ${blocks.length} blocks from storage...`);
+                console.log(`🔍 [App.init] Loading ${blocks.length} blocks from local storage (previous sessions in this epoch)...`);
                 await this.chain.replaceChain(blocks);
-                console.log(`✅ Chain loaded: ${blocks.length} blocks`);
+                console.log(`✅ Chain loaded: ${blocks.length} blocks (from IndexedDB, not from network)`);
                 console.log('🔍 [App.init] State after loading:', {
                     nodeRoles: this.chain.state.nodeRoles,
                     institutions: Object.keys(this.chain.state.institutions).length,

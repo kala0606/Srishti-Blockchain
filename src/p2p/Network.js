@@ -63,6 +63,10 @@ class Network {
         
         // Track peers that have sent incompatible chains (to avoid repeated sync attempts)
         this.incompatiblePeers = new Set();
+        // Throttle noisy logs
+        this._lastNoCompatiblePeersLog = 0;
+        this._noCompatiblePeersThrottleMs = 30000; // 30s
+        this._lastPeerListCount = -1;
     }
     
     /**
@@ -185,7 +189,10 @@ class Network {
                     // Don't pre-filter by epoch - server data might be stale
                     // Epoch verification happens via HELLO exchange
                     // This callback is just for tracking who's online at the transport level
-                    console.log(`📋 Peer list updated: ${peers.length} peers on relay`);
+                    if (peers.length !== this._lastPeerListCount) {
+                        this._lastPeerListCount = peers.length;
+                        console.log(`📋 Peer list updated: ${peers.length} peers on relay`);
+                    }
                 },
                 
                 // Connected to relay server
@@ -669,11 +676,15 @@ class Network {
             console.log(`🔄 Syncing with ${bestPeer} (${bestLength} blocks, epoch ${this.chainEpoch})`);
             await this.requestSync(bestPeer);
         } else {
-            // Log why we couldn't find a peer
+            // Log why we couldn't find a peer (throttled to avoid console spam)
             const totalPeers = this.peerInfo.size;
             const incompatibleCount = this.incompatiblePeers.size;
             if (totalPeers > 0) {
-                console.log(`📭 No compatible peers with longer chain (total: ${totalPeers}, incompatible: ${incompatibleCount})`);
+                const now = Date.now();
+                if (now - this._lastNoCompatiblePeersLog >= this._noCompatiblePeersThrottleMs) {
+                    this._lastNoCompatiblePeersLog = now;
+                    console.log(`📭 No compatible peers with longer chain (total: ${totalPeers}, incompatible: ${incompatibleCount})`);
+                }
             }
         }
     }

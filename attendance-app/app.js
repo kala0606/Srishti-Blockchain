@@ -538,7 +538,32 @@ class AttendanceAppUI {
             const sessions = await this.attendance.getActiveSessions();
 
             if (sessions.length === 0) {
-                listEl.innerHTML = '<div class="empty-state">No active sessions available</div>';
+                const chainLen = this.srishtiApp?.chain?.getLength?.() ?? 0;
+                listEl.innerHTML = `
+                    <div class="empty-state">
+                        <p><strong>No active sessions available</strong></p>
+                        <p style="margin-top: 12px; color: var(--text-secondary); font-size: 0.9em; line-height: 1.5;">
+                            Sessions are discovered from the blockchain. If you created sessions as an <strong>institution</strong>, the student node must sync first.
+                        </p>
+                        <ul style="margin: 12px 0 0 1.2em; color: var(--text-secondary); font-size: 0.9em; line-height: 1.6;">
+                            <li>Wait <strong>10–20 seconds</strong> after creating a session, then click <strong>Refresh Sessions</strong> below.</li>
+                            <li>Ensure both institution and student are on the <strong>same network</strong> (same blockchain URL / relay).</li>
+                            <li>Check the browser console for <code>📋 [getActiveSessions]</code> to see chain length and event counts.</li>
+                        </ul>
+                        <button onclick="attendanceApp.loadActiveSessions()" style="margin-top: 20px; padding: 12px 24px; border-radius: 12px; cursor: pointer; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: var(--text-primary); font-weight: 500;">🔄 Refresh Sessions</button>
+                    </div>
+                `;
+                // Auto-refresh once after 8s in case chain was still syncing
+                if (!this._activeSessionsAutoRefreshScheduled) {
+                    this._activeSessionsAutoRefreshScheduled = true;
+                    setTimeout(() => {
+                        this._activeSessionsAutoRefreshScheduled = false;
+                        const listEl = document.getElementById('activeSessionsList');
+                        if (listEl && listEl.querySelector('.empty-state')) {
+                            this.loadActiveSessions();
+                        }
+                    }, 8000);
+                }
                 return;
             }
 
