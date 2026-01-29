@@ -70,7 +70,7 @@ const Config = {
     // Also used as storage_version: IndexedDB/localStorage with older or missing
     // version are wiped; users must create a new node (non–backward compatible).
     // ═══════════════════════════════════════════════════════════════════════════
-    CHAIN_EPOCH: 15,                    // Chain epoch - increment to force fresh start
+    CHAIN_EPOCH: 16,                    // Chain epoch - increment to force fresh start
     
     // Performance
     BATCH: {
