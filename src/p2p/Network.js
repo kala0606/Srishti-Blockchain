@@ -158,17 +158,13 @@ class Network {
                     const serverEpoch = info.chainEpoch || 1;
                     console.log(`🟢 Peer joined: ${nodeId} (server epoch: ${serverEpoch})`);
                     
-                    // Show peer as online immediately (optimistic); HELLO will correct if incompatible
                     this.peerInfo.set(nodeId, {
                         chainLength: info.chainLength || 0,
                         chainEpoch: serverEpoch,
                         isOnline: true,
                         lastSeen: Date.now()
                     });
-                    if (this.onPresenceUpdate) {
-                        this.onPresenceUpdate(nodeId, { isOnline: true, lastSeen: Date.now() });
-                    }
-                    
+                    // Don't add presence yet – only after HELLO confirms same epoch (avoids ghost nodes)
                     this.sendHello(nodeId);
                 },
                 
@@ -179,7 +175,7 @@ class Network {
                     if (info) {
                         this.peerInfo.set(nodeId, { ...info, isOnline: false, lastSeen: Date.now() });
                     }
-                    if (this.onPresenceUpdate) {
+                    if (!this.incompatiblePeers.has(nodeId) && this.onPresenceUpdate) {
                         this.onPresenceUpdate(nodeId, { isOnline: false, lastSeen: Date.now() });
                     }
                 },
@@ -197,7 +193,6 @@ class Network {
                     console.log(`✅ Connected to relay. ${peerIds.length} peers on server.`);
                     console.log(`📊 Our chain epoch: ${this.chainEpoch}`);
                     
-                    // Show all peers as online immediately (optimistic); HELLO will correct if incompatible
                     for (const peerId of peerIds) {
                         const peer = this.wsClient.peers.get(peerId);
                         if (peer) {
@@ -207,13 +202,11 @@ class Network {
                                 isOnline: true,
                                 lastSeen: Date.now()
                             });
-                            if (this.onPresenceUpdate) {
-                                this.onPresenceUpdate(peerId, { isOnline: true, lastSeen: Date.now() });
-                            }
+                            // Don't add presence yet – only after HELLO confirms same epoch (avoids ghost nodes)
                         }
                     }
                     
-                    // Send HELLO to ALL peers - handleHello will correct epoch / isOnline
+                    // Send HELLO to ALL peers - handleHello adds presence only for compatible peers
                     console.log(`📤 Sending HELLO to ${peerIds.length} peers...`);
                     for (const peerId of peerIds) {
                         this.sendHello(peerId);
@@ -234,11 +227,10 @@ class Network {
                 // Disconnected from relay server
                 onDisconnected: () => {
                     console.log('⚠️ Disconnected from relay server');
-                    // Mark all peers as potentially offline
                     for (const [nodeId, info] of this.peerInfo.entries()) {
                         if (info.isOnline) {
                             this.peerInfo.set(nodeId, { ...info, isOnline: false });
-                            if (this.onPresenceUpdate) {
+                            if (!this.incompatiblePeers.has(nodeId) && this.onPresenceUpdate) {
                                 this.onPresenceUpdate(nodeId, { isOnline: false, lastSeen: info.lastSeen });
                             }
                         }
@@ -314,15 +306,14 @@ class Network {
         if (theirEpoch !== this.chainEpoch) {
             console.warn(`🚫 Rejecting peer ${peerId}: Chain epoch mismatch (ours: ${this.chainEpoch}, theirs: ${theirEpoch})`);
             this.rejectedPeerCount++;
+            this.incompatiblePeers.add(peerId);
             this.peerInfo.set(peerId, {
                 ...(this.peerInfo.get(peerId) || {}),
                 chainEpoch: theirEpoch,
                 isOnline: false,
                 lastSeen: Date.now()
             });
-            if (this.onPresenceUpdate) {
-                this.onPresenceUpdate(peerId, { isOnline: false, lastSeen: Date.now() });
-            }
+            // Don't add/update presence for incompatible peers – avoids ghost nodes in UI
             return;
         }
         
@@ -427,16 +418,13 @@ class Network {
                 
                 if (theirChainEpoch !== this.chainEpoch) {
                     console.warn(`🚫 Rejecting chain from ${peerId}: epoch mismatch (theirs: ${theirChainEpoch} vs ours: ${this.chainEpoch})`);
-                    
-                    // Mark peer as incompatible to avoid repeated sync attempts
                     this.incompatiblePeers.add(peerId);
-                    
-                    // Update peer info with correct epoch (they lied in HELLO)
                     const info = this.peerInfo.get(peerId);
                     if (info) {
                         info.chainEpoch = theirChainEpoch;
                         console.warn(`   Corrected peer ${peerId} epoch: ${theirChainEpoch}`);
                     }
+                    if (this.onPresenceUpdate) this.onPresenceUpdate(peerId, { __remove: true });
                     return;
                 }
             }
@@ -578,28 +566,22 @@ class Network {
      * Handle HEARTBEAT
      */
     handleHeartbeat(message, peerId) {
-        // Only update presence for peers we already know (compatible peers)
         const existingInfo = this.peerInfo.get(peerId);
-        if (!existingInfo) {
-            // Unknown peer - might be incompatible, ignore heartbeat
-            return;
-        }
-        
+        if (!existingInfo) return;
+        if (this.incompatiblePeers.has(peerId)) return;
+
         this.peerInfo.set(peerId, {
             ...existingInfo,
             lastSeen: message.timestamp,
             isOnline: message.isOnline
         });
-        
+
         if (this.onPresenceUpdate) {
             this.onPresenceUpdate(peerId, {
                 isOnline: message.isOnline,
                 lastSeen: message.timestamp
             });
         }
-        
-        // Note: Don't propagate gossip about unknown nodes - they might be incompatible
-        // Only track nodes we've verified through HELLO exchange
     }
     
     /**

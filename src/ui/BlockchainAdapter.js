@@ -267,15 +267,15 @@ class BlockchainAdapter {
      */
     updatePresence(nodeId, presenceData) {
         const base = BlockchainAdapter._baseNodeId(nodeId);
-        this.presenceCache[base] = {
-            ...this.presenceCache[base],
-            ...presenceData
-        };
-        
-        // Rebuild node cache from chain + presence so online status stays in sync
+        if (presenceData && presenceData.__remove) {
+            delete this.presenceCache[base];
+        } else {
+            this.presenceCache[base] = {
+                ...this.presenceCache[base],
+                ...presenceData
+            };
+        }
         this.updateNodeCache();
-        
-        // Notify listeners so UI (dashboard, node list, glows) updates
         this.notifyListeners();
     }
     
