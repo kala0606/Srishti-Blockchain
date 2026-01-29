@@ -19,6 +19,19 @@ class BlockchainAdapter {
         this.nodeCache = {}; // Cache of node data
         this.presenceCache = {}; // Cache of presence data
     }
+
+    /**
+     * Normalize relay connection ID to base nodeId.
+     * Relay uses nodeId_tab_<uuid> per tab; we key presence by base nodeId only
+     * so we don't show duplicate "node_xxx" entries for each tab.
+     * @param {string} nodeId - Raw nodeId (possibly connection ID)
+     * @returns {string} Base nodeId
+     */
+    static _baseNodeId(nodeId) {
+        if (!nodeId || typeof nodeId !== 'string') return nodeId;
+        const idx = nodeId.indexOf('_tab_');
+        return idx >= 0 ? nodeId.substring(0, idx) : nodeId;
+    }
     
     /**
      * Initialize the adapter
@@ -66,8 +79,10 @@ class BlockchainAdapter {
             };
         }
         
-        // Include relay peers we have presence for but aren't in chain yet (so online status syncs)
+        // Include relay peers we have presence for but aren't in chain yet (so online status syncs).
+        // Skip connection IDs (nodeId_tab_*) – we normalize those in updatePresence; defensive check.
         for (const nodeId in this.presenceCache) {
+            if (nodeId.indexOf('_tab_') >= 0) continue;
             if (!this.nodeCache[nodeId]) {
                 const p = this.presenceCache[nodeId];
                 this.nodeCache[nodeId] = {
@@ -245,12 +260,15 @@ class BlockchainAdapter {
     
     /**
      * Update presence data (called by presence tracker)
-     * @param {string} nodeId
+     * Normalizes relay connection IDs (nodeId_tab_<uuid>) to base nodeId so we
+     * don't create duplicate "phantom" nodes per tab.
+     * @param {string} nodeId - Raw nodeId (may be connection ID from relay)
      * @param {Object} presenceData
      */
     updatePresence(nodeId, presenceData) {
-        this.presenceCache[nodeId] = {
-            ...this.presenceCache[nodeId],
+        const base = BlockchainAdapter._baseNodeId(nodeId);
+        this.presenceCache[base] = {
+            ...this.presenceCache[base],
             ...presenceData
         };
         
