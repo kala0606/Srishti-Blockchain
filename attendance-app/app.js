@@ -508,7 +508,7 @@ class AttendanceAppUI {
 
                 listEl.innerHTML += `
                     <div class="card">
-                        <h3>${session.title} <span class="badge ${isActive ? 'active' : 'ended'}">${session.status}</span></h3>
+                        <h3>${session.title || 'Untitled Session'} <span class="badge ${isActive ? 'active' : 'ended'}">${session.status}</span></h3>
                         <p>${session.description || 'No description'}</p>
                         <p><strong>Location:</strong> ${session.location || 'Not specified'}</p>
                         <p><strong>Attendees:</strong> ${stats.total} (${stats.verified} verified, ${stats.pending} pending)</p>
@@ -575,7 +575,7 @@ class AttendanceAppUI {
 
                 listEl.innerHTML += `
                     <div class="card">
-                        <h3>${session.title}</h3>
+                        <h3>${session.title || 'Untitled Session'}</h3>
                         <p>${session.description || 'No description'}</p>
                         <p><strong>Location:</strong> ${session.location || 'Not specified'}</p>
                         <p><strong>Time:</strong> ${new Date(session.startTime).toLocaleString()}</p>
@@ -1132,7 +1132,7 @@ class AttendanceAppUI {
         const header = document.createElement('div');
         header.style.cssText = 'margin-bottom: 24px;';
         header.innerHTML = `
-            <h2 style="font-family: 'Syne', sans-serif; font-size: 2em; font-weight: 700; margin-bottom: 8px; color: var(--text-primary);">${session.title}</h2>
+            <h2 style="font-family: 'Syne', sans-serif; font-size: 2em; font-weight: 700; margin-bottom: 8px; color: var(--text-primary);">${session.title || 'Untitled Session'}</h2>
             <p style="color: var(--text-secondary); margin-bottom: 16px;">${session.description || 'No description'}</p>
             <div style="display: flex; gap: 16px; flex-wrap: wrap; align-items: center;">
                 <span style="color: var(--text-secondary);">Total Attendees: <strong style="color: var(--text-primary);">${attendees.length}</strong></span>
@@ -1315,7 +1315,7 @@ class AttendanceAppUI {
         
         // Store session data for export
         modal.dataset.sessionId = session.id;
-        modal.dataset.sessionTitle = session.title;
+        modal.dataset.sessionTitle = session.title || 'Untitled Session';
     }
 
     async exportToCSV(sessionId, buttonElement = null) {
@@ -1385,7 +1385,7 @@ class AttendanceAppUI {
             link.href = url;
             
             // Sanitize filename
-            const sanitizedTitle = session.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+            const sanitizedTitle = (session.title || 'Untitled Session').replace(/[^a-z0-9]/gi, '_').toLowerCase();
             const timestamp = new Date().toISOString().split('T')[0];
             link.download = `attendance_${sanitizedTitle}_${timestamp}.csv`;
             

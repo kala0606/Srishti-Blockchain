@@ -892,8 +892,21 @@ class AttendanceApp {
      */
     async getMySessions() {
         const sessions = await this.store.query('owner', this.sdk.nodeId);
-        console.log(`📋 getMySessions: Found ${sessions.length} sessions for ${this.sdk.nodeId}`);
-        return sessions;
+        const valid = sessions.filter(s => s && s.id);
+        if (valid.length !== sessions.length) {
+            console.warn(`📋 getMySessions: Filtered out ${sessions.length - valid.length} session(s) with missing id`);
+            // Remove corrupt record(s) from store so they don't persist
+            try {
+                await this.store.delete(undefined);
+            } catch (e) {
+                // Ignore if delete by undefined fails
+            }
+        }
+        valid.forEach(s => {
+            if (s.title === undefined || s.title === null) s.title = 'Untitled Session';
+        });
+        console.log(`📋 getMySessions: Found ${valid.length} sessions for ${this.sdk.nodeId}`);
+        return valid;
     }
     
     /**
@@ -928,38 +941,38 @@ class AttendanceApp {
         
         const sessions = [];
         for (const event of events) {
-            let session = await this.store.get(event.payload.ref);
+            const ref = event.payload?.ref;
+            if (!ref) {
+                console.warn('⚠️ [getActiveSessions] Skipping SESSION_CREATE event with missing ref');
+                continue;
+            }
+            let session = await this.store.get(ref);
             
             // If session not in local store, reconstruct from on-chain event metadata
             if (!session) {
-                // Reconstruct session from on-chain event
                 const metadata = event.payload?.metadata || {};
                 session = {
-                    id: event.payload.ref,
+                    id: ref,
                     type: 'session',
                     title: metadata.title || 'Untitled Session',
                     description: metadata.description || '',
                     startTime: metadata.startTime || event.timestamp,
                     endTime: metadata.endTime || null,
                     location: metadata.location || null,
-                    // Geofence data is included in metadata (public venue info)
                     geofence: metadata.geofence ? {
                         lat: metadata.geofence.lat,
                         lng: metadata.geofence.lng,
                         radius: metadata.geofence.radius
                     } : null,
                     createdBy: event.sender,
-                    owner: event.sender, // For querying by owner
+                    owner: event.sender,
                     createdAt: event.timestamp,
-                    status: 'ACTIVE', // Assume active if we don't have full data
+                    status: 'ACTIVE',
                     attendeeCount: 0,
-                    // Mark as reconstructed so we know it's from on-chain
                     _reconstructed: true,
-                    _dataHash: event.payload?.dataHash // Store hash for verification
+                    _dataHash: event.payload?.dataHash
                 };
-                
-                // Store it locally for future use
-                await this.store.put(event.payload.ref, session);
+                await this.store.put(ref, session);
                 console.log(`📥 Reconstructed session from on-chain: ${session.title} (${session.id})`);
                 console.log(`   Created by: ${event.sender}, Start: ${new Date(session.startTime).toLocaleString()}`);
                 if (session.geofence) {
@@ -992,13 +1005,17 @@ class AttendanceApp {
         
         const sessions = [];
         for (const event of events) {
-            let session = await this.store.get(event.payload.ref);
+            const ref = event.payload?.ref;
+            if (!ref) {
+                console.warn('⚠️ [getAllSessions] Skipping SESSION_CREATE event with missing ref');
+                continue;
+            }
+            let session = await this.store.get(ref);
             
-            // If not in local store, reconstruct from on-chain metadata
             if (!session) {
                 const metadata = event.payload?.metadata || {};
                 session = {
-                    id: event.payload.ref,
+                    id: ref,
                     type: 'session',
                     title: metadata.title || 'Untitled Session',
                     description: metadata.description || '',
@@ -1017,9 +1034,7 @@ class AttendanceApp {
                     attendeeCount: 0,
                     _reconstructed: true
                 };
-                
-                // Store it locally for future use
-                await this.store.put(event.payload.ref, session);
+                await this.store.put(ref, session);
             }
             
             sessions.push(session);
