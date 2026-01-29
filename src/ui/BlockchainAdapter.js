@@ -60,17 +60,17 @@ class BlockchainAdapter {
         // CLEAR old cache first (important for chain replacements!)
         this.nodeCache = {};
         
-        // Merge with presence data
+        // Merge with presence data (only for nodes that exist in the chain)
         for (const nodeId in nodes) {
             const node = nodes[nodeId];
-            
+
             // Get presence data if available
             const presence = this.presenceCache[nodeId] || {};
-            
+
             // Current user is ALWAYS online (they're using the app!)
             const isCurrentUser = nodeId === currentUserNodeId;
             const isOnline = isCurrentUser || presence.isOnline || false;
-            
+
             // Merge node data with presence
             this.nodeCache[nodeId] = {
                 ...node,
@@ -78,23 +78,9 @@ class BlockchainAdapter {
                 lastSeen: isCurrentUser ? Date.now() : (presence.lastSeen || node.createdAt)
             };
         }
-        
-        // Include relay peers we have presence for but aren't in chain yet (so online status syncs).
-        // Skip connection IDs (nodeId_tab_*) – we normalize those in updatePresence; defensive check.
-        for (const nodeId in this.presenceCache) {
-            if (nodeId.indexOf('_tab_') >= 0) continue;
-            if (!this.nodeCache[nodeId]) {
-                const p = this.presenceCache[nodeId];
-                this.nodeCache[nodeId] = {
-                    id: nodeId,
-                    name: nodeId.length > 12 ? nodeId.substring(0, 8) + '...' : nodeId,
-                    isOnline: p.isOnline || false,
-                    lastSeen: p.lastSeen || Date.now(),
-                    parentIds: [],
-                    parentId: null
-                };
-            }
-        }
+
+        // Do NOT add presence-only peers as nodes (they would show as "ghost" spheres when
+        // chain is empty or before they've joined). Only nodes that exist on-chain are shown.
     }
     
     /**
