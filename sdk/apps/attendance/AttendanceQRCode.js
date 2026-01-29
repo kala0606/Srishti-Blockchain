@@ -155,28 +155,50 @@ class AttendanceQRCode {
 
     /**
      * Parse QR code from JSON string (full or compact format)
+     * Tolerates leading/trailing whitespace and numeric ts as string (some readers output that).
      * @param {string} jsonString - JSON string of QR code data
      * @returns {Object|null} Parsed QR code data (full format) or null if invalid
      */
     static parseQR(jsonString) {
+        if (typeof jsonString !== 'string') return null;
         try {
-            const data = JSON.parse(jsonString);
+            const raw = jsonString.trim();
+            // Some scanners add trailing/leading junk; try to extract JSON (first { to last })
+            const start = raw.indexOf('{');
+            const end = raw.lastIndexOf('}');
+            const toParse = start >= 0 && end > start ? raw.slice(start, end + 1) : raw;
+            const data = JSON.parse(toParse);
 
-            // Compact format (no n = nonce derived when verifying)
-            if (data.t === 'a' && data.s && data.p && data.ts != null && data.g) {
+            const num = (v) => (typeof v === 'number' ? v : (v != null && v !== '' ? Number(v) : NaN));
+            const validNum = (v) => typeof v === 'number' && !Number.isNaN(v) && isFinite(v);
+
+            // Compact format: t='a' and s, p, ts, g (no nonce = derived when verifying)
+            const hasCompact = data.s && data.p && data.g && data.ts != null && data.ts !== '';
+            if (hasCompact && (data.t === 'a' || (!data.sessionId && !data.professorNodeId))) {
+                const ts = num(data.ts);
+                if (!validNum(ts)) return null;
                 return {
-                    sessionId: data.s,
-                    professorNodeId: data.p,
-                    timestamp: data.ts,
-                    nonce: data.n || '', // verifier will derive if empty
-                    signature: data.g,
+                    sessionId: String(data.s),
+                    professorNodeId: String(data.p),
+                    timestamp: ts,
+                    nonce: data.n != null ? String(data.n) : '',
+                    signature: String(data.g),
                     type: 'ATTENDANCE_QR'
                 };
             }
 
             // Full format
-            if (data.sessionId && data.professorNodeId && data.timestamp != null && data.signature && data.type === 'ATTENDANCE_QR') {
-                return data;
+            if (data.sessionId && data.professorNodeId && data.signature) {
+                const ts = data.timestamp != null ? num(data.timestamp) : NaN;
+                if (!validNum(ts)) return null;
+                return {
+                    sessionId: String(data.sessionId),
+                    professorNodeId: String(data.professorNodeId),
+                    timestamp: ts,
+                    nonce: data.nonce != null ? String(data.nonce) : '',
+                    signature: String(data.signature),
+                    type: data.type || 'ATTENDANCE_QR'
+                };
             }
 
             return null;

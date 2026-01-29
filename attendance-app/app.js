@@ -646,8 +646,14 @@ class AttendanceAppUI {
             const scanner = window.SrishtiScanner;
             const ui = this;
             
+            // Helper: re-set raw callback and restart scan (scanner clears callback after one use)
+            function reattachAndRestartScan(delayMs = 2000) {
+                scanner.setRawScanCallback(handleAttendanceQR);
+                setTimeout(() => scanner.startScanning(), delayMs);
+            }
+            
             // Use raw scan callback so we reliably receive every scan (attendance QR format)
-            scanner.setRawScanCallback(async function handleAttendanceQR(decodedText) {
+            async function handleAttendanceQR(decodedText) {
                 try {
                     console.log('📷 QR Code scanned for attendance:', decodedText);
                     
@@ -659,7 +665,7 @@ class AttendanceAppUI {
                         const url = new URL(decodedText);
                         if (url.searchParams.get('join')) {
                             scanner.showError('That\'s a node invite QR. Scan the Attendance QR from your professor\'s session (My Sessions → Show QR Code).');
-                            setTimeout(() => scanner.startScanning(), 3000);
+                            reattachAndRestartScan(3000);
                             return false;
                         }
                     } catch (e) { /* not a URL */ }
@@ -668,7 +674,7 @@ class AttendanceAppUI {
                         const isNodeShare = parsed && ((parsed.t === 's' && parsed.n) || (parsed.type === 'srishti-invite' && parsed.nodeId));
                         if (isNodeShare) {
                             scanner.showError('That\'s a node invite QR. Scan the Attendance QR (yellow, from professor\'s session screen).');
-                            setTimeout(() => scanner.startScanning(), 3000);
+                            reattachAndRestartScan(3000);
                             return false;
                         }
                     } catch (e) { /* not node-share JSON */ }
@@ -680,13 +686,13 @@ class AttendanceAppUI {
                     
                     if (!qrCodeData) {
                         scanner.showError('Invalid attendance QR. Scan the yellow Attendance QR from the professor\'s session.');
-                        setTimeout(() => scanner.startScanning(), 2000);
+                        reattachAndRestartScan(2000);
                         return false;
                     }
                     
                     if (qrCodeData.sessionId !== sessionId) {
                         scanner.showError('QR code is for a different session');
-                        setTimeout(() => scanner.startScanning(), 2000);
+                        reattachAndRestartScan(2000);
                         return false;
                     }
                     
@@ -697,11 +703,12 @@ class AttendanceAppUI {
                 } catch (error) {
                     console.error('Error processing attendance QR code:', error);
                     scanner.showError(error.message || 'Failed to mark attendance');
-                    setTimeout(() => scanner.startScanning(), 2000);
+                    reattachAndRestartScan(2000);
                     return false;
                 }
-            });
+            }
             
+            scanner.setRawScanCallback(handleAttendanceQR);
             await scanner.open();
         } catch (error) {
             console.error('QR scanner error:', error);
@@ -860,7 +867,7 @@ class AttendanceAppUI {
                     height: size,
                     type: 'canvas',
                     data: qrData,
-                    qrOptions: { errorCorrectionLevel: 'L' },
+                    qrOptions: { errorCorrectionLevel: 'M' },
                     dotsOptions: { color: '#FFD700', type: 'rounded' },
                     backgroundOptions: { color: 'transparent' },
                     cornersSquareOptions: { color: '#FFD700', type: 'extra-rounded' },
@@ -879,7 +886,7 @@ class AttendanceAppUI {
                     height: size,
                     colorDark: '#FFD700',
                     colorLight: '#000022',
-                    correctLevel: QRCode.CorrectLevel.L
+                    correctLevel: QRCode.CorrectLevel.M
                 });
                 console.log('✅ Attendance QR generated (qrcodejs ' + size + 'px, same as main app)');
                 return;
