@@ -542,12 +542,12 @@ class AttendanceAppUI {
                     <div class="empty-state">
                         <p><strong>No active sessions available</strong></p>
                         <p style="margin-top: 12px; color: var(--text-secondary); font-size: 0.9em; line-height: 1.5;">
-                            Sessions are discovered from the blockchain. If you created sessions as an <strong>institution</strong>, the student node must sync first.
+                            You only see sessions from <strong>your teacher</strong> (the node you joined under). If you don't see a session, join your teacher's node first, then refresh.
                         </p>
                         <ul style="margin: 12px 0 0 1.2em; color: var(--text-secondary); font-size: 0.9em; line-height: 1.6;">
-                            <li>Wait <strong>10–20 seconds</strong> after creating a session, then click <strong>Refresh Sessions</strong> below.</li>
-                            <li>Ensure both institution and student are on the <strong>same network</strong> (same blockchain URL / relay).</li>
-                            <li>Check the browser console for <code>📋 [getActiveSessions]</code> to see chain length and event counts.</li>
+                            <li>Join your teacher's node in the main app (scan their invite QR), then return here.</li>
+                            <li>Wait <strong>10–20 seconds</strong> after they create a session, then click <strong>Refresh Sessions</strong> below.</li>
+                            <li>Ensure you're on the <strong>same network</strong> (same blockchain URL / relay) as your teacher.</li>
                         </ul>
                         <button onclick="attendanceApp.loadActiveSessions()" style="margin-top: 20px; padding: 12px 24px; border-radius: 12px; cursor: pointer; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: var(--text-primary); font-weight: 500;">🔄 Refresh Sessions</button>
                     </div>

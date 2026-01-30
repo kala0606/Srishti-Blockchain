@@ -487,6 +487,15 @@ class AttendanceApp {
             throw new Error('Session time has passed');
         }
         
+        // Only a teacher's child nodes can mark attendance for that session
+        const teacherNodeId = session.createdBy || session.owner;
+        if (this.sdk.chain && teacherNodeId) {
+            const isChildOfTeacher = this.sdk.chain.isChildOf(this.sdk.nodeId, teacherNodeId);
+            if (!isChildOfTeacher) {
+                throw new Error('Only students under this teacher can mark attendance for this session. Join the teacher\'s node first.');
+            }
+        }
+
         // Check if already marked
         const recordId = `${sessionId}_${this.sdk.nodeId}`;
         const existing = await this.store.get(recordId);
@@ -992,9 +1001,21 @@ class AttendanceApp {
             const isActive = session.status === 'ACTIVE' && 
                            (!session.endTime || Date.now() < session.endTime);
             
-            if (isActive) {
-                sessions.push(session);
+            if (!isActive) continue;
+
+            // Only a teacher's child nodes can see and mark attendance for that session
+            const teacherNodeId = session.createdBy || session.owner;
+            if (this.sdk.chain && teacherNodeId) {
+                const isCreator = this.sdk.nodeId === teacherNodeId;
+                const isChildOfTeacher = this.sdk.chain.isChildOf(this.sdk.nodeId, teacherNodeId);
+                if (!isCreator && !isChildOfTeacher) {
+                    continue; // hide session from users who are not the teacher or a child node
+                }
+                // Creator (teacher) sees their session in My Sessions, not here; here we list sessions to *mark*
+                if (isCreator) continue;
             }
+
+            sessions.push(session);
         }
         
         return sessions;
