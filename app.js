@@ -364,9 +364,9 @@ class SrishtiApp {
                                 this.adapter.onChainUpdate();
                             }
 
-                            // Also trigger dashboard update if available
-                            if (typeof updatePendingParentRequests === 'function') {
-                                updatePendingParentRequests();
+                            // Also trigger dashboard parent-requests list update if available
+                            if (typeof updateParentRequests === 'function') {
+                                updateParentRequests();
                             }
                         } catch (error) {
                             console.error('Failed to store parent request:', error);
@@ -1221,8 +1221,12 @@ class SrishtiApp {
         // Check if this parent is already in the list
         if (currentParentIds.includes(this.nodeId)) {
             console.log(`ℹ️ ${childNodeId} already has ${this.nodeId} as a parent`);
+            await this.chain.removePendingParentRequest(this.nodeId, childNodeId);
             return { success: true, message: 'Already a parent' };
         }
+
+        // Remove from pending immediately so UI does not show it as stuck while block is proposed
+        await this.chain.removePendingParentRequest(this.nodeId, childNodeId);
 
         // Send response via P2P first
         if (this.network) {
@@ -1245,9 +1249,21 @@ class SrishtiApp {
             signature: 'sig_' + Math.random().toString(36).substring(2, 10)
         };
 
-        const result = await this._createAndBroadcastBlock(tx);
-        console.log(`✅ Parent connection approved: ${childNodeId} -> ${this.nodeId}`);
-        return result;
+        try {
+            const result = await this._createAndBroadcastBlock(tx);
+            console.log(`✅ Parent connection approved: ${childNodeId} -> ${this.nodeId}`);
+            return result;
+        } catch (err) {
+            // Re-add to pending so the request appears again and can be retried
+            await this.chain.addPendingParentRequest(this.nodeId, {
+                nodeId: childNodeId,
+                parentId: this.nodeId,
+                reason,
+                requestedAt: Date.now(),
+                status: 'PENDING'
+            });
+            throw err;
+        }
     }
 
     /**
@@ -1257,9 +1273,14 @@ class SrishtiApp {
      * @returns {Promise<boolean>} - Success status
      */
     async rejectParentConnection(childNodeId, reason = null) {
+        // Remove from pending immediately so UI does not show it as stuck
+        if (this.chain) {
+            await this.chain.removePendingParentRequest(this.nodeId, childNodeId);
+        }
+
         if (!this.network) {
             console.warn('Network not initialized, cannot send rejection');
-            return false;
+            return true; // We still cleared the request
         }
 
         // Send rejection via P2P (no blockchain event needed for rejection)

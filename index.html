@@ -4335,7 +4335,15 @@
             const isPendingInstitution = institutions.pending && institutions.pending[currentUser.id];
             
             const pendingRequests = window.SrishtiApp.getPendingParentRequests();
-            const requestArray = Object.values(pendingRequests);
+            const nodeMap = window.SrishtiApp?.chain?.buildNodeMap() || {};
+            // Exclude requests where this user is already the child's parent (approved but list was stale)
+            const requestArray = Object.values(pendingRequests).filter(req => {
+                const child = nodeMap[req.nodeId];
+                if (!child) return true;
+                const parentIds = Array.isArray(child.parentIds) ? child.parentIds : (child.parentId ? [child.parentId] : []);
+                if (parentIds.includes(currentUser.id)) return false; // already approved, don't show
+                return true;
+            });
             
             console.log(`📥 updateParentRequests: isInstitution=${isInstitution}, isPendingInstitution=${!!isPendingInstitution}, role=${myRole}, pendingRequests=${requestArray.length}`);
             

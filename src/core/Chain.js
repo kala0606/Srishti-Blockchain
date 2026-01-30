@@ -788,6 +788,34 @@ class Chain {
     }
 
     /**
+     * Remove a pending parent request (e.g. when parent rejects or after approval is applied)
+     * @param {string} parentId - Parent node ID
+     * @param {string} childNodeId - Child node ID
+     * @returns {Promise<boolean>} - True if a request was removed
+     */
+    async removePendingParentRequest(parentId, childNodeId) {
+        if (!this.state.pendingParentRequests[parentId] || !this.state.pendingParentRequests[parentId][childNodeId]) {
+            return false;
+        }
+        delete this.state.pendingParentRequests[parentId][childNodeId];
+        if (Object.keys(this.state.pendingParentRequests[parentId]).length === 0) {
+            delete this.state.pendingParentRequests[parentId];
+        }
+        if (this.storage) {
+            if (this.state.pendingParentRequests[parentId]) {
+                await this.storage.saveMetadata(
+                    `pending_parent_requests_${parentId}`,
+                    this.state.pendingParentRequests[parentId]
+                );
+            } else {
+                await this.storage.deleteMetadata(`pending_parent_requests_${parentId}`);
+            }
+        }
+        console.log(`✅ Removed pending parent request: ${childNodeId} -> ${parentId}`);
+        return true;
+    }
+
+    /**
      * Handle SOULBOUND_MINT transaction
      * Enforces non-transferability by storing soulbound token data
      * @param {Object} tx - Transaction object
