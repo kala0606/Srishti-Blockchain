@@ -1097,7 +1097,8 @@ class AttendanceApp {
             });
         }
         
-        const attendees = [];
+        // One row per student: key by recordId (sessionId_nodeId), keep latest by event timestamp
+        const attendeesByStudent = new Map(); // recordId -> record
         for (const event of events) {
             // Validate event structure
             if (!event.payload || !event.payload.target) {
@@ -1106,6 +1107,12 @@ class AttendanceApp {
             }
             
             const recordId = `${sessionId}_${event.payload.target}`;
+            const eventTime = event.timestamp || event.payload?.metadata?.timestamp || 0;
+            const existing = attendeesByStudent.get(recordId);
+            if (existing && (existing.timestamp || 0) >= eventTime) {
+                continue; // already have a same-or-later record for this student
+            }
+            
             let record = await this.store.get(recordId);
             
             // If record not found locally, reconstruct from on-chain event
@@ -1197,10 +1204,11 @@ class AttendanceApp {
             }
             
             console.log(`✅ [getSessionAttendees] Adding attendee: ${record.studentId || record.walletAddress}, status: ${record.status}`);
-            attendees.push(record);
+            attendeesByStudent.set(recordId, record);
         }
         
-        console.log(`📊 [getSessionAttendees] Total attendees found: ${attendees.length}`);
+        const attendees = Array.from(attendeesByStudent.values());
+        console.log(`📊 [getSessionAttendees] Total attendees found: ${attendees.length} (unique students)`);
         return attendees;
     }
     
